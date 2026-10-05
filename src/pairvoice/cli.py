@@ -18,6 +18,8 @@ from .config import DEFAULT_CONFIG_PATH, load_config
 
 # terminate を無視する子を待つ上限。メニューバーは重い後始末を持たないので短くてよい。
 MENUBAR_STOP_TIMEOUT = 5
+# warmup は読み込み終わるまで待つ。初回はモデルのダウンロード（約 15GB）を含む
+WARMUP_TIMEOUT_SECONDS = 3600
 _DURATION = re.compile(r"^(\d+)(m|h)?$")
 MIN_MINUTES = 1
 MAX_MINUTES = 480
@@ -113,7 +115,7 @@ def main(argv: list[str] | None = None) -> int:
         default=None,
         help="ログを書くファイル（回しながら書く）。省くと端末に出す",
     )
-    sub.add_parser("warmup", help="モデルの事前ロードを開始する")
+    sub.add_parser("warmup", help="モデルを読み込み、終わるまで待つ（初回はダウンロードも）")
     sub.add_parser("unmute", help="ミュートを解除する")
     sub.add_parser("status", help="状態を表示する")
     sub.add_parser("restart", help="常駐サーバーを再起動する（設定の反映に必要）")
@@ -222,7 +224,11 @@ def main(argv: list[str] | None = None) -> int:
         elif args.command == "unmute":
             result = client.call(base, "/unmute")
         elif args.command == "warmup":
-            result = client.call(base, "/warmup")
+            print(
+                "モデルを読み込んでいます（初回はダウンロードも含めて時間がかかる）…",
+                file=sys.stderr,
+            )
+            result = client.call(base, "/warmup", timeout=WARMUP_TIMEOUT_SECONDS)
         elif args.command == "status":
             result = client.call(base, "/health", method="GET")
         elif args.command == "say":

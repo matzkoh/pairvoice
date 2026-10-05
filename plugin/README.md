@@ -48,6 +48,8 @@ tail -30 ~/Library/Logs/speak-summary.log
 | `prompt.txt missing or empty` | データの置き場所に `prompt.txt` が無い |
 | `muted: <reason>` | ミュート中（`microphone` なら会議中の自動ミュート、`manual` なら手動） |
 | `server down` | pairvoice の常駐サーバーが応答しない |
+| `model downloading` / `model loading` | モデルのダウンロード中か読み込み中で、待ちきれなかった。初回は `pairvoice warmup` で先に済ませておく |
+| `timeout` | サーバーは生きているが、要約か音声合成が時間内に終わらなかった |
 | `no speakable text` | 閉じタグやコードフェンスだけの断片で、読み上げる中身が無い |
 | `model load failed` | モデルのロードに失敗、または設定不備 |
 | `profile missing` | `ref_audio` に指定した参照音声が無い |

@@ -5,6 +5,7 @@ node_modules やテストまで入る）。モジュールを足して列挙を�
 wheel から黙って抜け落ちるので、ここで気づく。
 """
 
+import json
 import tomllib
 from pathlib import Path
 
@@ -31,3 +32,10 @@ def test_every_studio_module_is_bundled():
         if not module.name.endswith(".test.ts") and not is_bundled(module, sources)
     ]
     assert missing == []
+
+
+def test_plugin_and_package_share_one_version():
+    # 公開する版は1つにそろえる。プラグインの版が上がらないと Claude Code は更新に気づかない
+    pyproject = tomllib.loads((ROOT / "pyproject.toml").read_text(encoding="utf-8"))
+    plugin = json.loads((ROOT / "plugin/.claude-plugin/plugin.json").read_text(encoding="utf-8"))
+    assert plugin["version"] == pyproject["project"]["version"]

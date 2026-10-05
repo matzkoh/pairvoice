@@ -45,10 +45,16 @@ Claude Code に入れるプラグインが返事を受け取り、手元で常�
 ```bash
 uv tool install pairvoice
 pairvoice install
+pairvoice warmup
 ```
+
+`pairvoice` が見つからないと言われたら、`uv tool update-shell` を実行して端末を開き直す（uv を Homebrew で入れたときなど、`~/.local/bin` に PATH が通っていない）。
 
 `pairvoice install` は、常駐サーバーをログイン時に起きるよう登録し、要約の指示と読み辞書の雛形を置く。
 メニューバーにアイコンが出る。
+
+`pairvoice warmup` は、モデルをダウンロード（初回だけ、約 15GB）して読み込み、終わるまで待つ。
+終わる前に来た Claude Code の返事は読み上げない。
 
 **3. Claude Code にプラグインを入れて、Claude Code を起動し直す**
 
@@ -57,8 +63,7 @@ pairvoice install
 /plugin install pairvoice@pairvoice
 ```
 
-最初の読み上げは、モデルのダウンロード（約 15GB）と読み込みで時間がかかる。
-進み具合は `pairvoice status` で見られる。
+モデルの準備の進み具合は `pairvoice status` で見られる。
 
 ## 動作要件
 
@@ -121,7 +126,7 @@ studio はメニューの「studio を開く」か `pairvoice studio` で起動�
 | `pairvoice mute 30m` / `unmute` | 30分ミュートする（1〜480分）／解除する |
 | `pairvoice say "テスト"` | 読み上げてみる（ミュート中でも鳴る） |
 | `pairvoice stop` | 鳴っている読み上げと、順番待ちの読み上げを止める |
-| `pairvoice warmup` | モデルを先に読み込んでおく |
+| `pairvoice warmup` | モデルを読み込み、終わるまで待つ（初回はダウンロードも） |
 | `pairvoice restart` | 常駐サーバーを再起動する（設定を変えたら要る） |
 | `pairvoice studio` | studio を開く（`--restart` で studio だけを立て直す） |
 | `pairvoice eval` | 要約の指示やモデルを規則で採点する（`--reviews` でレビューも使う、`--model` で別のモデルを試す） |

@@ -1,6 +1,8 @@
 import asyncio
+import threading
 from pathlib import Path
 
+from pairvoice import player as player_module
 from pairvoice.config import MuteConfig, PlaybackConfig
 from pairvoice.mute import MuteController
 from pairvoice.player import WATCH_INTERVAL_SECONDS, Player
@@ -27,7 +29,7 @@ class FakeSound:
 class Rig:
     """Player と、時計・音・ミュートの偽物一式。on_tick(n) は見張りの n 回目の後に呼ばれる。"""
 
-    def __init__(self, *, ticks=3, mute_config=None, playback=None, on_tick=None):
+    def __init__(self, *, ticks=3, mute_config=None, playback=None, on_tick=None, before_open=None):
         self.now = 0.0
         self.probe = FakeProbe()
         self.mute = MuteController(
@@ -41,6 +43,8 @@ class Rig:
         self.on_tick = on_tick
 
         def opener(path, volume):
+            if before_open is not None:
+                before_open()
             sound = FakeSound(path, volume, ticks)
             self.sounds.append(sound)
             return sound
@@ -65,20 +69,23 @@ class Rig:
     def enqueue(self, name, **kwargs):
         self.player.enqueue(Path(name), **kwargs)
 
+    def idle(self, expected_sounds):
+        state = self.player.describe()
+        return len(self.sounds) >= expected_sounds and not state["playing"] and not state["waiting"]
+
     async def drain(self, expected_sounds):
         task = asyncio.create_task(self.player.run())
         try:
-            for _ in range(500):
-                await asyncio.sleep(0.002)
-                state = self.player.describe()
-                if (
-                    len(self.sounds) >= expected_sounds
-                    and not state["playing"]
-                    and not state["waiting"]
-                ):
-                    return
+            await wait_until(lambda: self.idle(expected_sounds))
         finally:
             task.cancel()
+
+
+async def wait_until(condition, attempts=500):
+    for _ in range(attempts):
+        if condition():
+            return
+        await asyncio.sleep(0.002)
 
 
 async def test_plays_queued_audio_in_order():
@@ -205,3 +212,29 @@ async def test_drops_audio_that_waited_too_long():
     await rig.drain(0)
 
     assert rig.sounds == []
+
+
+async def test_gives_up_on_a_hung_audio_device_and_stops_the_late_sound(monkeypatch):
+    # CoreAudio が詰まると AVAudioPlayer.play() が戻らない。見切って次へ進み、
+    # 後から鳴り始めた音は見張れないので止める
+    monkeypatch.setattr(player_module, "OPEN_TIMEOUT_SECONDS", 0.05)
+    device = threading.Event()
+    rig = Rig(before_open=lambda: device.wait(5))
+    rig.enqueue("hung.wav")
+
+    task = asyncio.create_task(rig.player.run())
+    try:
+        await asyncio.sleep(0.1)  # 見切るまで待つ
+        assert rig.sounds == []  # まだ戻ってきていない
+        assert rig.player.describe() == {"playing": False, "waiting": 0}
+
+        device.set()
+        await wait_until(lambda: rig.sounds and rig.sounds[0].stopped)
+        assert rig.sounds[0].stopped
+
+        rig.enqueue("next.wav")
+        await wait_until(lambda: rig.idle(2))
+        assert [sound.path.name for sound in rig.sounds] == ["hung.wav", "next.wav"]
+    finally:
+        device.set()
+        task.cancel()

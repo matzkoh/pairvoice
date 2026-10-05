@@ -159,6 +159,9 @@ def install(
     print("Claude Code で読み上げるには、プラグインを入れてください:")
     print("  /plugin marketplace add matzkoh/pairvoice")
     print("  /plugin install pairvoice@pairvoice")
+    print(
+        "モデル（約 15GB）は `pairvoice warmup` で先にダウンロードしておく。終わるまでの返事は読み上げない"
+    )
     return 0
 
 

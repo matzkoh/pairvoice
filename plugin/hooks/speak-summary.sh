@@ -144,6 +144,24 @@ has_speakable_content() {
   ' 2>/dev/null
 }
 
+# 要求に応答が無かった（curl の status が 000）理由を /health から絞る。
+# 初回のモデルのダウンロード中は要求が待たされてタイムアウトするが、サーバーは生きているので
+# 「server down」と書くと原因を取り違える。/health はキューを通らないので、その間も答える
+unanswered_reason() {
+  local states
+  states=$(curl -s --max-time 3 "$PAIRVOICE_BASE/health" 2>/dev/null \
+    | jq -r '"\(.llm.state) \(.tts.state)"' 2>/dev/null)
+  if [ -z "$states" ]; then
+    echo "server down"
+    return
+  fi
+  case " $states " in
+    *" downloading "*) echo "model downloading" ;;
+    *" loading "*) echo "model loading" ;;
+    *) echo "timeout" ;;
+  esac
+}
+
 # ローカルLLMで読み上げ用の短い日本語要約を取得する。
 # 戻り値は SUMMARY_TEXT / SUMMARY_STATUS のグローバル変数で渡す（stdoutではない）。
 # `summary=$(get_summary ...)` のようにコマンド置換で呼ぶとサブシェルに閉じ込められ、
@@ -178,7 +196,7 @@ get_summary() {
         esac
         return 1
         ;;
-      000) SUMMARY_STATUS="server down"; return 1 ;;
+      000) SUMMARY_STATUS="$(unanswered_reason)"; return 1 ;;
     esac
 
     if [ "$(printf '%s' "$body" | jq -r '.muted // false' 2>/dev/null)" = "true" ]; then
@@ -209,7 +227,7 @@ request_speech() {
   body="${response%$'\n'*}"
 
   if [ "$status" = "000" ]; then
-    log INFO "SKIP (server down)"
+    log INFO "SKIP ($(unanswered_reason))"
     return 1
   fi
   if [ "$status" != "200" ]; then

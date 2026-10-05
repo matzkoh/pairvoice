@@ -45,6 +45,7 @@ def calls(monkeypatch):
                 "url": request.full_url,
                 "method": request.get_method(),
                 "body": json.loads(request.data.decode()) if request.data else None,
+                "timeout": timeout,
             }
         )
         return FakeResponse({"ok": True})
@@ -92,6 +93,8 @@ def test_warmup_posts(calls, config_path):
     assert cli.main(["--config", config_path, "warmup"]) == 0
 
     assert calls[0]["url"] == "http://127.0.0.1:17495/warmup"
+    # 初回はダウンロードを含むので、既定の 30 秒で打ち切らない
+    assert calls[0]["timeout"] == cli.WARMUP_TIMEOUT_SECONDS
 
 
 def test_status_gets_health(calls, config_path):
@@ -108,6 +111,7 @@ def test_say_bypasses_mute(calls, config_path, monkeypatch):
                 "url": request.full_url,
                 "method": request.get_method(),
                 "body": json.loads(request.data.decode()) if request.data else None,
+                "timeout": timeout,
             }
         )
         return FakeResponse(
