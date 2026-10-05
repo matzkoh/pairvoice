@@ -17,8 +17,8 @@
 wheel でしか起きない壊れ方（同梱物の漏れ、依存の抜け）に、ふだん使いの中で気づけるようにするためである。
 
 ```bash
+(cd studio && pnpm install && pnpm build)   # uv sync より先に。studio/web/dist が無いと uv sync が失敗する
 uv sync
-(cd studio && pnpm install)
 rm -rf dist && (cd studio && pnpm build) && uv build --wheel
 uv tool install --reinstall dist/pairvoice-*.whl
 pairvoice install                 # 初回だけ。LaunchAgent を tool 側の Python に向ける
