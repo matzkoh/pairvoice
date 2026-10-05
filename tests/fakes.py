@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import asyncio
+import time
 
 from pairvoice.audio_state import AudioActivity
 
@@ -17,6 +18,7 @@ class FakeBackend:
         fail_load=False,
         preflight_problem=None,
         load_delay=0.0,
+        download_delay=0.0,
     ):
         self.name = name
         self.model = model
@@ -24,6 +26,7 @@ class FakeBackend:
         self.fail_load = fail_load
         self.preflight_problem = preflight_problem
         self.load_delay = load_delay
+        self.download_delay = download_delay
         self.load_calls = 0
         self.unload_calls = 0
         self.download_calls = 0
@@ -37,13 +40,13 @@ class FakeBackend:
 
     def download(self):
         self.download_calls += 1
+        if self.download_delay:
+            time.sleep(self.download_delay)
         self.downloaded = True
 
     def load(self):
         self.load_calls += 1
         if self.load_delay:
-            import time
-
             time.sleep(self.load_delay)
         if self.fail_load:
             raise RuntimeError("load failed")

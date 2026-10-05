@@ -238,3 +238,27 @@ async def test_gives_up_on_a_hung_audio_device_and_stops_the_late_sound(monkeypa
     finally:
         device.set()
         task.cancel()
+
+
+def test_a_hung_sound_counts_as_finished_and_is_left_alone(monkeypatch):
+    # 鳴っている最中に CoreAudio が詰まっても、見張りのループをイベントループで固めない
+    monkeypatch.setattr(player_module, "SOUND_CALL_TIMEOUT_SECONDS", 0.05)
+    device = threading.Event()
+
+    class HungPlayer:
+        stops = 0
+
+        def isPlaying(self):  # AVAudioPlayer の名前
+            device.wait(5)
+            return True
+
+        def stop(self):
+            HungPlayer.stops += 1
+
+    sound = player_module._AVSound(HungPlayer())
+    try:
+        assert sound.playing() is False
+        sound.stop()  # 固まったスレッドが中にいる間は触らない
+        assert HungPlayer.stops == 0
+    finally:
+        device.set()

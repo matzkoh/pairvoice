@@ -10,11 +10,15 @@ from dataclasses import dataclass
 from datetime import datetime
 
 from .config import MuteConfig
+from .stall import Stalled, call_with_deadline
 
 MIN_MINUTES = 1
 MAX_MINUTES = 480
 # 再生が止むのを待つ間に取り直す間隔。1回の取得は約13ms
 WAIT_POLL_SECONDS = 0.5
+# 1回の取得の上限。state() はイベントループからも呼ぶ（/health、キューを抜けた直後の判定）ので、
+# CoreAudio が詰まって戻らないとサーバーごと止まる
+SAMPLE_TIMEOUT_SECONDS = 1.0
 
 _log = logging.getLogger(__name__)
 
@@ -57,6 +61,8 @@ class MuteController:
         self._monotonic = monotonic
         self._sleep = sleep
         self._manual_until: float | None = None
+        # 戻らなくなった取得のスレッド。戻るまでは次を呼ばず、取れないものとして扱う
+        self._stalled_sample = None
 
     def mute(self, minutes) -> MuteState:
         if not isinstance(minutes, int) or isinstance(minutes, bool):
@@ -103,8 +109,16 @@ class MuteController:
         return None
 
     def _sample(self):
+        if self._stalled_sample is not None:
+            if self._stalled_sample.is_alive():
+                return None
+            self._stalled_sample = None
         try:
-            return self._probe.sample()
+            return call_with_deadline(self._probe.sample, timeout=SAMPLE_TIMEOUT_SECONDS)
+        except Stalled as stalled:
+            self._stalled_sample = stalled.thread
+            _log.warning("音声の入出力を取得できません: %s", stalled)
+            return None
         except Exception as error:
             # 取れないときは鳴らす側に倒す。自動ミュートは補助で、黙り続けるほうが困る
             _log.warning("音声の入出力を取得できません: %s", error)

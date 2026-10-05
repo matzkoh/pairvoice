@@ -81,6 +81,11 @@ class Superseded(Exception):
     """後発の要求に追い越されて捨てられた。"""
 
 
+def _consume_exception(task: asyncio.Task) -> None:
+    if not task.cancelled():
+        task.exception()
+
+
 class ManagedModel:
     def __init__(
         self,
@@ -103,7 +108,12 @@ class ManagedModel:
         self._loaded_at: float | None = None
         self._last_used: float | None = None
 
-    async def ensure_loaded(self) -> None:
+    async def ensure_loaded(self, wait_download: bool = True) -> None:
+        """wait_download=False なら、ダウンロードを始める（続ける）だけで待たずに断る。
+
+        フックはタイムアウトの短い要求で呼ぶので、初回の数 GB のダウンロードを待つと
+        打ち切られて理由が分からなくなる。ダウンロードは背景で続き、次の要求が合流する。
+        """
         problem = self._backend.preflight()
         if problem:
             # DOWNLOADING / LOADING / LOADED はロード経路が持つ状態で、重みは載っている
@@ -125,6 +135,18 @@ class ManagedModel:
             self._loading_started = asyncio.Event()
             self._loading = asyncio.create_task(self._load())
         task = self._loading
+
+        # _loading_started が立つまでは、ダウンロード中かこれから始まる（タスクがまだ走っていない）
+        if (
+            not wait_download
+            and not self._loading_started.is_set()
+            and (self._state is ModelState.DOWNLOADING or not self._backend.is_downloaded())
+        ):
+            # 待たないので、背景のタスクの失敗はここでは受け取れない。state と detail に残る
+            task.add_done_callback(_consume_exception)
+            raise ModelUnavailable(
+                "model_downloading", f"{self._backend.name}: モデルをダウンロードしています"
+            )
 
         # asyncio.wait は待つのをやめても task を取り消さない。タイムアウトで呼び出し側に
         # 返した後もロードは背景で続き、後から来た呼び出しがそれに合流する
@@ -337,6 +359,7 @@ class Engine:
         max_tokens: int | None = None,
         bypass_mute: bool = False,
         droppable: bool = True,
+        wait_download: bool = True,
     ) -> str:
         """droppable なら、待っている間に後発の要約が来たら捨てる（もう読み上げる意味が無い）。
 
@@ -344,7 +367,7 @@ class Engine:
         """
 
         async def work():
-            await self._llm.ensure_loaded()
+            await self._llm.ensure_loaded(wait_download=wait_download)
             text = await on_mlx_thread(self._llm_backend.generate, system, prompt, max_tokens)
             self._llm.touch()
             return text
@@ -360,13 +383,14 @@ class Engine:
         design: bool = False,
         profile_id: str | None = None,
         play: bool = False,
+        wait_download: bool = True,
     ):
         """play なら、合成した音声を Player の列に積んでから返す（鳴り終わるのは待たない）。"""
         # 合成を待っている間に「止める」が押されたら、出来上がっても鳴らさない
         epoch = self.player.epoch
 
         async def work():
-            await self._tts.ensure_loaded()
+            await self._tts.ensure_loaded(wait_download=wait_download)
             result = await on_mlx_thread(
                 self._tts_backend.speak, text, caption, sampler, design, profile_id
             )

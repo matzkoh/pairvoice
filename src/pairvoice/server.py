@@ -51,6 +51,8 @@ class SummaryRequest(BaseModel):
     # pairvoice eval が使う。読み上げないので、ミュートを見ず、後発に追い越されても捨てない
     bypass_mute: bool = False
     droppable: bool = True
+    # フックが false で送る。初回のダウンロード中は待たずに 503 model_downloading を返す
+    wait_download: bool = True
 
 
 class SamplerOverrides(BaseModel):
@@ -98,6 +100,8 @@ class SpeakRequest(BaseModel):
     profile_id: str | None = None
     # 読み上げのフックと `pairvoice say` で使う。合成したら常駐サーバーが鳴らす
     play: bool = False
+    # SummaryRequest と同じ。フックが false で送る
+    wait_download: bool = True
 
 
 class MuteRequest(BaseModel):
@@ -142,6 +146,7 @@ def create_app(engine: Engine) -> FastAPI:
                 max_tokens=request.max_tokens,
                 bypass_mute=request.bypass_mute,
                 droppable=request.droppable,
+                wait_download=request.wait_download,
             )
         except MutedError as error:
             return {"muted": True, "reason": error.reason}
@@ -168,6 +173,7 @@ def create_app(engine: Engine) -> FastAPI:
                 design=request.design,
                 profile_id=request.profile_id,
                 play=request.play,
+                wait_download=request.wait_download,
             )
         except MutedError as error:
             return {"muted": True, "reason": error.reason}

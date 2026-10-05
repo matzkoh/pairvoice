@@ -145,8 +145,9 @@ has_speakable_content() {
 }
 
 # 要求に応答が無かった（curl の status が 000）理由を /health から絞る。
-# 初回のモデルのダウンロード中は要求が待たされてタイムアウトするが、サーバーは生きているので
-# 「server down」と書くと原因を取り違える。/health はキューを通らないので、その間も答える
+# ダウンロード中は wait_download: false で 503 が返るが、読み込みや生成が長引いて
+# タイムアウトしてもサーバーは生きているので、「server down」と書くと原因を取り違える。
+# /health はキューを通らないので、その間も答える
 unanswered_reason() {
   local states
   states=$(curl -s --max-time 3 "$PAIRVOICE_BASE/health" 2>/dev/null \
@@ -156,6 +157,7 @@ unanswered_reason() {
     return
   fi
   case " $states " in
+    # 古い常駐サーバーは wait_download を知らず、ダウンロードを待ってタイムアウトする
     *" downloading "*) echo "model downloading" ;;
     *" loading "*) echo "model loading" ;;
     *) echo "timeout" ;;
@@ -177,7 +179,7 @@ get_summary() {
   fi
   # 本文は標準入力で渡す。引数に載せると長い出力で ARG_MAX を超えて jq も curl も動かない
   payload=$(printf '%s' "$text" | jq -Rs --rawfile system "$DATA_DIR/prompt.txt" \
-    '{prompt: ., system: $system}')
+    '{prompt: ., system: $system, wait_download: false}')
 
   for attempt in $(seq 1 "$SUMMARY_MAX_RETRIES"); do
     response=$(printf '%s' "$payload" | curl -s --max-time "$LLM_TIMEOUT_SECONDS" -w '\n%{http_code}' \
@@ -190,6 +192,7 @@ get_summary() {
         # サーバーのエラーコードをログの文言に直す
         case "$(printf '%s' "$body" | jq -r '.error // "unknown"' 2>/dev/null)" in
           model_load_failed) SUMMARY_STATUS="model load failed" ;;
+          model_downloading) SUMMARY_STATUS="model downloading" ;;
           generation_failed) SUMMARY_STATUS="generation failed" ;;
           profile_missing) SUMMARY_STATUS="profile missing" ;;
           *) SUMMARY_STATUS="unavailable" ;;
@@ -220,7 +223,7 @@ get_summary() {
 # 鳴り終わるのは待たない（再生の順番待ちとミュートの見張りは pairvoice がする）
 request_speech() {
   local text="$1" payload response status body
-  payload=$(jq -n --arg text "$text" '{text: $text, play: true}')
+  payload=$(jq -n --arg text "$text" '{text: $text, play: true, wait_download: false}')
   response=$(curl -s --max-time "$SPEAK_TIMEOUT_SECONDS" -w '\n%{http_code}' \
     -X POST "$SPEAK_URL" -H 'Content-Type: application/json' -d "$payload" 2>&1)
   status="${response##*$'\n'}"
@@ -233,6 +236,7 @@ request_speech() {
   if [ "$status" != "200" ]; then
     case "$(printf '%s' "$body" | jq -r '.error // "unknown"' 2>/dev/null)" in
       model_load_failed) log INFO "SKIP (model load failed)" ;;
+      model_downloading) log INFO "SKIP (model downloading)" ;;
       generation_failed) log INFO "SKIP (generation failed)" ;;
       profile_missing) log INFO "SKIP (profile missing)" ;;
       *) log WARN "SKIP (speak failed: http $status): $body" ;;

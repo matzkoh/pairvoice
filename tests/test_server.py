@@ -78,6 +78,15 @@ def test_llm_reports_load_failure_as_503():
     assert response.json()["error"] == "model_load_failed"
 
 
+def test_hook_requests_do_not_wait_for_the_first_download():
+    _, client = build(llm=FakeLLM(downloaded=False, download_delay=0.2))
+
+    response = client.post("/llm", json={"system": "s", "prompt": "p", "wait_download": False})
+
+    assert response.status_code == 503
+    assert response.json()["error"] == "model_downloading"
+
+
 def test_llm_reports_supersede_as_409(monkeypatch):
     engine, client = build()
 

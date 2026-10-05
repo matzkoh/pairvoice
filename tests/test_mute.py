@@ -1,5 +1,8 @@
+import threading
+
 import pytest
 
+from pairvoice import mute as mute_module
 from pairvoice.config import MuteConfig
 from pairvoice.mute import WAIT_POLL_SECONDS, InvalidMinutes, MuteController
 from tests.fakes import FakeProbe
@@ -276,3 +279,30 @@ def test_wall_clock_jumps_do_not_stretch_the_sustained_output_timer():
     steady.advance(6)
 
     assert watch.check() == ("audio_output", True)
+
+
+def test_a_hung_sample_counts_as_unknown_and_is_not_called_again(monkeypatch):
+    # CoreAudio が詰まると取得が戻らない。state() は /health からも呼ぶので見切り、
+    # 戻るまでは次を呼ばない（固まったスレッドを積み上げない）
+    monkeypatch.setattr(mute_module, "SAMPLE_TIMEOUT_SECONDS", 0.05)
+
+    class HungProbe(FakeProbe):
+        def __init__(self):
+            super().__init__(microphone=True)
+            self.device = threading.Event()
+
+        def sample(self):
+            self.device.wait(5)
+            return super().sample()
+
+    probe = HungProbe()
+    controller, _ = make_controller(probe=probe)
+    try:
+        assert controller.state().active is False
+        assert controller.state().active is False
+        assert probe.samples == 0
+    finally:
+        probe.device.set()
+
+    controller._stalled_sample.join(1)
+    assert controller.state().reason == "microphone"

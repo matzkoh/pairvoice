@@ -74,6 +74,39 @@ async def test_download_precedes_load_and_reports_downloading():
 
 
 @pytest.mark.asyncio
+async def test_without_waiting_for_download_refuses_and_keeps_downloading():
+    # フックは初回のダウンロードを待たない。断った後もダウンロードは背景で続き、
+    # 済めば次の要求で載る
+    backend = FakeBackend(downloaded=False, download_delay=0.05)
+    model, _ = make_model(backend)
+
+    with pytest.raises(ModelUnavailable) as refused:
+        await model.ensure_loaded(wait_download=False)
+    assert refused.value.code == "model_downloading"
+
+    for _ in range(100):
+        await asyncio.sleep(0.01)
+        if model.snapshot()["state"] == "loaded":
+            break
+    assert model.snapshot()["state"] == "loaded"
+    assert backend.download_calls == 1
+
+    await model.ensure_loaded(wait_download=False)
+    assert backend.load_calls == 1
+
+
+@pytest.mark.asyncio
+async def test_without_waiting_for_download_still_waits_for_load():
+    # 待たないのはダウンロードだけ。手元にあるモデルの読み込みはこれまでどおり待つ
+    backend = FakeBackend(load_delay=0.05)
+    model, _ = make_model(backend)
+
+    await model.ensure_loaded(wait_download=False)
+
+    assert model.snapshot()["state"] == "loaded"
+
+
+@pytest.mark.asyncio
 async def test_load_failure_reports_and_retries():
     backend = FakeBackend(fail_load=True)
     model, _ = make_model(backend)

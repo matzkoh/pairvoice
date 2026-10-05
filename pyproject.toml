@@ -1,6 +1,6 @@
 [project]
 name = "pairvoice"
-version = "0.3.0"
+version = "0.3.1"
 description = "Claude Code の読み上げ用に、要約と音声合成を担うローカル常駐サーバー"
 readme = "README.md"
 authors = [{ name = "matzkoh" }]

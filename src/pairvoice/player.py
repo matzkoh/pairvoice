@@ -15,9 +15,7 @@ CoreAudio には常駐サーバー自身の PID で出るので、ほかのア�
 from __future__ import annotations
 
 import asyncio
-import contextlib
 import logging
-import threading
 import time
 from collections import deque
 from collections.abc import Awaitable, Callable
@@ -27,6 +25,7 @@ from typing import Protocol
 
 from .config import PlaybackConfig
 from .mute import MuteController
+from .stall import Stalled, call_with_deadline, start_in_daemon_thread
 
 _log = logging.getLogger(__name__)
 
@@ -36,6 +35,8 @@ STOP_FADE_SECONDS = 0.15
 DUCK_FADE_SECONDS = 0.2
 # 鳴らし始めるまでの上限。AVAudioPlayer.play() は CoreAudio が応答しないと戻らない
 OPEN_TIMEOUT_SECONDS = 5.0
+# 鳴っている音への操作（鳴っているか、音量、停止）の上限。ふだんは即座に戻る
+SOUND_CALL_TIMEOUT_SECONDS = 0.5
 
 
 class Sound(Protocol):
@@ -47,17 +48,34 @@ class Sound(Protocol):
 
 
 class _AVSound:
+    """AVAudioPlayer への操作。CoreAudio が詰まって戻らなければ見切り、鳴り終わったものとみなす。
+
+    Player はイベントループから呼ぶので、固まるとサーバーごと止まる。
+    """
+
     def __init__(self, player) -> None:
         self._player = player
+        self._stalled = False
+
+    def _call(self, fn, *args):
+        if self._stalled:
+            return None
+        try:
+            return call_with_deadline(fn, *args, timeout=SOUND_CALL_TIMEOUT_SECONDS)
+        except Stalled as stalled:
+            # 固まったスレッドはまだ中にいるので、この音にはもう触らない
+            self._stalled = True
+            _log.warning("再生中の音を操作できません: %s", stalled)
+            return None
 
     def playing(self) -> bool:
-        return bool(self._player.isPlaying())
+        return bool(self._call(self._player.isPlaying))
 
     def set_volume(self, volume: float, fade_seconds: float) -> None:
-        self._player.setVolume_fadeDuration_(volume, fade_seconds)
+        self._call(self._player.setVolume_fadeDuration_, volume, fade_seconds)
 
     def stop(self) -> None:
-        self._player.stop()
+        self._call(self._player.stop)
 
 
 def open_sound(path: Path, volume: float) -> Sound:
@@ -73,36 +91,6 @@ def open_sound(path: Path, volume: float) -> Sound:
     if not player.play():
         raise OSError(f"再生を始められません: {path}")
     return _AVSound(player)
-
-
-def _in_daemon_thread(fn: Callable[..., Sound], *args) -> asyncio.Future:
-    """固まりうる呼び出しを使い捨ての daemon スレッドで走らせる。
-
-    asyncio.to_thread の共有プールで固まると、ミュートの判定やダウンロードと取り合いになり、
-    終了時の join でサーバーの停止まで止まる。
-    """
-    loop = asyncio.get_running_loop()
-    future: asyncio.Future = loop.create_future()
-
-    def settle(result, error) -> None:
-        if future.cancelled():
-            if result is not None:
-                result.stop()
-        elif error is not None:
-            future.set_exception(error)
-        else:
-            future.set_result(result)
-
-    def run() -> None:
-        try:
-            result, error = fn(*args), None
-        except Exception as failed:
-            result, error = None, failed
-        with contextlib.suppress(RuntimeError):  # 戻る前にイベントループが閉じていた
-            loop.call_soon_threadsafe(settle, result, error)
-
-    threading.Thread(target=run, name="audio-open", daemon=True).start()
-    return future
 
 
 def _stop_late_sound(opening: asyncio.Future) -> None:
@@ -190,7 +178,7 @@ class Player:
     async def _open(self, path: Path, volume: float) -> Sound:
         # イベントループで呼ぶと、CoreAudio が詰まったときに /health も含めてサーバーごと固まる。
         # 別スレッドで呼んで見切る。固まったスレッドは取り消せないので、戻ってきたら止める
-        opening = _in_daemon_thread(self._opener, path, volume)
+        opening = start_in_daemon_thread(self._opener, path, volume)
         try:
             await asyncio.wait({opening}, timeout=OPEN_TIMEOUT_SECONDS)
         finally:
