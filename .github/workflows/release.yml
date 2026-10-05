@@ -1,0 +1,41 @@
+# v* のタグを push すると、studio をビルドしてから wheel と sdist を作り、PyPI に公開する。
+# PyPI 側には Trusted Publishing（matzkoh/pairvoice・release.yml・environment pypi）を登録してあり、
+# トークンは置かない
+name: release
+
+on:
+  push:
+    tags: ["v*"]
+
+jobs:
+  publish:
+    runs-on: ubuntu-latest
+    environment: pypi
+    permissions:
+      contents: read
+      id-token: write
+    steps:
+      - uses: actions/checkout@v7
+      - uses: astral-sh/setup-uv@v10
+      - uses: pnpm/action-setup@v6
+        with:
+          package_json_file: studio/package.json
+      - uses: actions/setup-node@v7
+        with:
+          node-version: "24"
+          cache: pnpm
+          cache-dependency-path: studio/pnpm-lock.yaml
+      # タグと pyproject の版がずれたまま公開すると、PyPI の版は取り消せない
+      - name: タグと版がそろっているか確かめる
+        run: |
+          version=$(uv version --short)
+          if [ "v$version" != "$GITHUB_REF_NAME" ]; then
+            echo "タグ $GITHUB_REF_NAME と pyproject の版 $version が違う" >&2
+            exit 1
+          fi
+      - run: pnpm install --frozen-lockfile
+        working-directory: studio
+      - run: pnpm build
+        working-directory: studio
+      - run: uv build
+      - run: uv publish

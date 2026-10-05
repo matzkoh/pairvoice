@@ -67,6 +67,8 @@ pairvoice install
   どちらも10分使わなければ自動で解放する。
   メモリが少ないときは、下の「設定」で要約のモデルを小さくできる
 - モデルは同梱しない。初回に Hugging Face から手元へダウンロードする。各モデルのライセンスはそれぞれの配布元に従う
+  - 要約: [Gemma 4](https://huggingface.co/google/gemma-4-E4B-it)（[Gemma Terms of Use](https://ai.google.dev/gemma/terms)）
+  - 音声合成: [Irodori-TTS](https://huggingface.co/Aratako/Irodori-TTS-v4.1-Small)（MIT）
 
 ## 読み上げた内容の扱い
 
@@ -167,7 +169,7 @@ model = "mlx-community/gemma-4-e4b-it-4bit"
   - サーバーに届かなければ、メニューの「再起動」かログインし直しで戻す
 - **サーバーは元気なのに鳴らない**: `~/Library/Logs/speak-summary.log` を見る。
   何も書かれていなければプラグインが読まれていないので、Claude Code を起動し直す。
-  書かれていれば理由が `SKIP (...)` に出る（一覧は [plugin/README.md](plugin/README.md)）
+  書かれていれば理由が `SKIP (...)` に出る（一覧は [plugin/README.md](https://github.com/matzkoh/pairvoice/blob/main/plugin/README.md)）
 - **設定を変えたのに効かない**: `pairvoice restart`
 - **辞書を直したのに効かない**: studio の「保存」を押すまでは書き換わらない
 
@@ -185,8 +187,8 @@ uv tool uninstall pairvoice
 
 ## 開発に参加する
 
-手元での動かし方、テスト、評価ハーネスは [DEVELOPMENT.md](DEVELOPMENT.md) にある。
+手元での動かし方、テスト、評価ハーネスは [DEVELOPMENT.md](https://github.com/matzkoh/pairvoice/blob/main/DEVELOPMENT.md) にある。
 
 ## ライセンス
 
-[MIT](LICENSE)
+[MIT](https://github.com/matzkoh/pairvoice/blob/main/LICENSE)

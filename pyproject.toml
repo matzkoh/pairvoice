@@ -2,9 +2,22 @@
 name = "pairvoice"
 version = "0.1.0"
 description = "Claude Code の読み上げ用に、要約と音声合成を担うローカル常駐サーバー"
+readme = "README.md"
+authors = [{ name = "matzkoh" }]
 license = "MIT"
 license-files = ["LICENSE"]
 requires-python = ">=3.12"
+keywords = ["claude-code", "tts", "mlx", "japanese"]
+classifiers = [
+    "Development Status :: 4 - Beta",
+    "Environment :: MacOS X",
+    "Intended Audience :: Developers",
+    "Natural Language :: Japanese",
+    "Operating System :: MacOS",
+    "Programming Language :: Python :: 3",
+    "Programming Language :: Python :: 3.12",
+    "Topic :: Multimedia :: Sound/Audio :: Speech",
+]
 # `uv tool install` は uv.lock を見ず、ここの範囲で最新を入れる。mlx-audio は generate() の
 # 引数名（ずれると黙って捨てられる）とバグの迂回に頼っているので、確かめた版に固定する。
 # 上げるときは実モデルで読み上げを聞いてから
@@ -16,6 +29,10 @@ dependencies = [
     "pyobjc-framework-Cocoa>=12,<13",
     "pyobjc-framework-avfoundation>=12,<13",
 ]
+
+[project.urls]
+Repository = "https://github.com/matzkoh/pairvoice"
+Issues = "https://github.com/matzkoh/pairvoice/issues"
 
 [project.scripts]
 pairvoice = "pairvoice.cli:main"
