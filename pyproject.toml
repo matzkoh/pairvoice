@@ -1,0 +1,78 @@
+[project]
+name = "pairvoice"
+version = "0.1.0"
+description = "Claude Code の読み上げ用に、要約と音声合成を担うローカル常駐サーバー"
+license = "MIT"
+license-files = ["LICENSE"]
+requires-python = ">=3.12"
+# `uv tool install` は uv.lock を見ず、ここの範囲で最新を入れる。mlx-audio は generate() の
+# 引数名（ずれると黙って捨てられる）とバグの迂回に頼っているので、確かめた版に固定する。
+# 上げるときは実モデルで読み上げを聞いてから
+dependencies = [
+    "fastapi>=0.141,<1",
+    "uvicorn>=0.54,<1",
+    "mlx-lm>=0.32.0,<0.33",
+    "mlx-audio==0.5.7",
+    "pyobjc-framework-Cocoa>=12,<13",
+    "pyobjc-framework-avfoundation>=12,<13",
+]
+
+[project.scripts]
+pairvoice = "pairvoice.cli:main"
+
+[dependency-groups]
+dev = [
+    "pytest",
+    "pytest-asyncio",
+    "httpx2",
+    "ruff>=0.16.10",
+    # ty はベータで、版が上がると判定が変わる。上げるときは指摘を見直す
+    "ty==0.0.84",
+]
+
+[build-system]
+requires = ["hatchling"]
+build-backend = "hatchling.build"
+
+[tool.hatch.build.targets.wheel]
+packages = ["src/pairvoice"]
+
+# 利用者はビルドしない。studio はビルド済みの web/dist ごと、雛形も一緒にパッケージの中へ入れる。
+# web/dist は git で追跡しないので、公開前に `cd studio && pnpm build` が要る。無ければ
+# ビルド自体が失敗する
+[tool.hatch.build.targets.wheel.force-include]
+"studio/server.ts" = "pairvoice/studio/server.ts"
+"studio/server" = "pairvoice/studio/server"
+"studio/package.json" = "pairvoice/studio/package.json"
+"studio/shared" = "pairvoice/studio/shared"
+"studio/web/dist" = "pairvoice/studio/web/dist"
+"examples" = "pairvoice/examples"
+
+# sdist からも同じ wheel が作れるよう、追跡していないビルド成果物を入れる
+[tool.hatch.build.targets.sdist]
+artifacts = ["studio/web/dist"]
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+pythonpath = ["."]
+asyncio_mode = "auto"
+
+[tool.ruff]
+line-length = 100
+target-version = "py312"
+
+[tool.ruff.lint]
+select = ["E", "W", "F", "I", "B", "UP", "SIM", "RUF", "ASYNC", "C4", "DTZ", "FURB", "LOG", "PERF", "PT", "PTH", "RET"]
+ignore = [
+    # 長い行は formatter に任せる。折れない日本語のコメントと文字列だけが残る
+    "E501",
+    # 日本語の全角の括弧・句読点を「紛らわしい文字」とみなす規則
+    "RUF001", "RUF002", "RUF003",
+]
+
+[tool.ty.environment]
+python-version = "3.12"
+
+[tool.ty.analysis]
+# pyobjc は AppKit などの名前を実行時に生やすので、静的には見えない
+replace-imports-with-any = ["AppKit", "Foundation", "AVFoundation"]

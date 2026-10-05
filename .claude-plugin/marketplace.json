@@ -1,0 +1,14 @@
+{
+  "name": "pairvoice",
+  "description": "pairvoice（ローカル要約・音声合成サーバー）と組み合わせて使う Claude Code プラグイン",
+  "owner": {
+    "name": "matzkoh"
+  },
+  "plugins": [
+    {
+      "name": "pairvoice",
+      "source": "./plugin",
+      "description": "Claude Code の応答をローカルの pairvoice で要約・音声化して読み上げる"
+    }
+  ]
+}

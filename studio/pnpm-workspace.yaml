@@ -1,0 +1,3 @@
+# pnpm 11 では auth と registry 以外の設定が .npmrc から読まれない。
+# workspace ではないが、設定の置き場としてこのファイルが必要になる。
+allowBuilds: []

@@ -1,0 +1,26 @@
+id	input
+tc01	テストが全て通ったので getSessionMessages をリファクタリングしました。
+tc02	CI が失敗。原因は src/Button.tsx の未使用 import。修正します。
+tc03	バグの原因は useEffect の依存配列の指定漏れでした。パッチ適用済みです。
+tc04	test@example.com 宛にレポートを送信しました。
+tc05	speak-summary.sh の改修が完了しました。
+tc06	calculateTotalPrice 関数内で毎回呼ばれていた db_query_all_items() をキャッシュに置き換えたところ、レスポンス時間が60%短縮されました。
+tc07	The refactoring introduced a race condition because the cleanup function wasn't properly awaiting the async fetch. I've added an AbortController to cancel in-flight requests.
+tc08	/Users/tanaka/projects/webapp/src/components/UserProfile.tsx の47行目で、fetchUserData 関数が失敗していました。エラーログは admin@example.com に送信するよう設定済みです。修正コミットをプッシュしました。
+tc09	1. まず既存のテストスイートを実行する 2. 依存ライブラリを更新する 3. 再度テストする 4. コミットする
+tc10	ログイン機能のテストは全部通った。決済周りはまだ半分残っている。通知機能はまだ手をつけていない。
+tc11	最初のやり方だとメモリ使用量が想定以上に増えてしまった。代わりにストリーミング処理に切り替える方向で検討している。
+tc12	Aの認識で合っています。残りの作業を早く完了させてください。
+tc13	マイグレーション実行前に、本番環境のバックアップを取得済みか確認してください。未取得なら先に取ることを推奨します。
+tc14	4つのレビューエージェントを並列に起動し、reuse・simplification・efficiency・altitude の観点で指摘を集めました。alertやcardなど13個のコンポーネントが同じパターンなので、ComponentProps<'div'> に統一する提案です。
+tc15	PR #234 をマージしました。CI はすべてグリーンです。プレビュー環境の確認もお願いします。
+tc16	worktree を作成し、feature/summary-tuning ブランチで作業を開始しました。次に実装計画を書きます。
+tc17	今すぐ全部のテストを実行して、失敗したらすぐ知らせて、直したらまたすぐ教えて。
+tc18	うーん、なんかうまくいかないですね。エラーメッセージを見てみたら、tokenの有効期限切れが原因みたいです。再認証のフローを追加しようと思います。
+tc19	settings.json のパーミッションルールを整理しました。allow リストに bq コマンドと gh コマンドを追加し、deny リストから重複エントリを削除しました。
+tc20	Asana のタスク https://app.asana.com/0/123/456 にコメントを投稿し、担当者を田中さんに変更しました。ストーリーも確認済みです。
+tc21	コミットメッセージのフォーマットを直した。 git commit --amend を使わず新しいコミットにした。
+tc22	了解した。今からgetUserById関数とgetUserByEmail関数を統合するリファクタリングを行う。型定義も更新する。
+tc23	この内容で進めてよいですか？
+tc24	どちらの案にしますか？
+tc25	この方針で問題なければ実装に入ります。よろしいですか？

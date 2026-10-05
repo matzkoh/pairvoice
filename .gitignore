@@ -1,0 +1,10 @@
+.venv/
+__pycache__/
+*.pyc
+.pytest_cache/
+.claude/worktrees/
+studio/node_modules/
+studio/web/node_modules/
+studio/web/dist/
+studio/web/.vitest/
+.superpowers/

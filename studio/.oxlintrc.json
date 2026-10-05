@@ -1,0 +1,64 @@
+{
+  "$schema": "./node_modules/oxlint/configuration_schema.json",
+  // react-perf は載せない。ルールが perf カテゴリにあり、下の categories には
+  // 入れていないので1つも起動しない（載せても無意味）。perf を有効化する道は採らない
+  // ——React Compiler が入っているので「インライン object を prop に渡すな」系は
+  // 自動メモ化が解決する対象で、警告はノイズになる。
+  "plugins": [
+    "import",
+    "jsx-a11y",
+    "node",
+    "promise",
+    "oxc",
+    "react",
+    "typescript",
+    "unicorn",
+    "vitest"
+  ],
+  "categories": { "correctness": "error", "suspicious": "warn" },
+  "rules": {
+    // tsconfig の jsx は react-jsx（自動ランタイム）なので、JSX を書くのに
+    // React を import する必要がない。このルールは旧ランタイム前提の遺物。
+    "react/react-in-jsx-scope": "off",
+    // Vite では CSS を副作用 import で読み込む（`import './index.css'`）。
+    // バンドラに束ねさせる正規のやり方なので、スタイルシートだけ許す。
+    "import/no-unassigned-import": ["warn", { "allow": ["**/*.css"] }],
+    "typescript/no-deprecated": "warn",
+    "typescript/switch-exhaustiveness-check": "error",
+    // モックは型引数を書かない。テストは呼ばれ方を expect で確かめる。
+    "vitest/require-mock-type-parameters": "off",
+    // 鳴らすのは画面に出ている文の読み上げなので、字幕に当たるものは既にある。
+    "jsx-a11y/media-has-caption": "off",
+    // 入力欄を開いたらそこへ移るのは、キーボードで操作する前提。
+    "jsx-a11y/no-autofocus": "off",
+    // role="img" の絵文字や combobox の listbox など、ARIA の正規の書き方を咎める。
+    "jsx-a11y/prefer-tag-over-role": "off"
+  },
+  "overrides": [
+    {
+      // web は Vite が解決するので拡張子を付けない（shadcn add の出力に合わせる）。
+      // Node が直接動かす server と shared は、tsc（nodenext）が拡張子を求める。
+      "files": ["web/**"],
+      "rules": {
+        "import/extensions": ["error", "never", { "ignorePackages": true, "css": "always" }]
+      }
+    },
+    {
+      // node:test の test() は Promise を返すので、テストファイルではこのルールを
+      // 有効にできない（テスト宣言のすべてに void か await を付けることになる）。
+      // ソース側では有効なままにしておきたいので、テストだけを外す。
+      //
+      // no-unsafe-type-assertion も同様にテストだけ外す。投げられた例外の型を
+      // `expect(err).toBeInstanceOf(Foo)` で確かめた直後に `as Foo` で絞るのが
+      // catch した unknown を扱うときの標準的な書き方で、型が違えば直前の
+      // toBeInstanceOf で既にテストが落ちている。instanceof ガードを挟んでも
+      // 安全性は増えないので、警告として残す意味がない。
+      "files": ["*.test.ts"],
+      "rules": {
+        "typescript/no-floating-promises": "off",
+        "typescript/no-unsafe-type-assertion": "off"
+      }
+    }
+  ],
+  "ignorePatterns": ["node_modules", "web/dist", ".test-state"]
+}

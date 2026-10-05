@@ -1,0 +1,130 @@
+@import 'tailwindcss';
+@import 'tw-animate-css';
+@import 'shadcn/tailwind.css';
+
+/* shadcn の命名に揃える。accent は「ブランド色」ではなく「ホバー時の薄い背景」の意味で、
+   ブランド色（ローズ）は primary が持つ。 */
+:root {
+  --background: #ffffff;
+  --foreground: #18181b;
+  --card: #ffffff;
+  --card-foreground: #18181b;
+  --popover: #ffffff;
+  --popover-foreground: #18181b;
+  --primary: #c2507e;
+  --primary-foreground: #ffffff;
+  --secondary: #f4f4f5;
+  --secondary-foreground: #18181b;
+  --muted: #f4f4f5;
+  --muted-foreground: #71717a;
+  --accent: #f4f4f5;
+  --accent-foreground: #18181b;
+  --destructive: #dc2626;
+  --success: #16a34a;
+  --warning: #b45309;
+  --border: #e4e4e7;
+  --input: #e4e4e7;
+  --ring: #c2507e;
+  --code: #18181b;
+  --code-foreground: #e4e4e7;
+  --sidebar: #fafafa;
+  --sidebar-foreground: #18181b;
+  --sidebar-border: #e4e4e7;
+  --sidebar-accent: #efeff1;
+  --sidebar-accent-foreground: #18181b;
+  --radius: 0.5rem;
+}
+
+@media (prefers-color-scheme: dark) {
+  :root {
+    --background: #18181b;
+    --foreground: #f4f4f5;
+    --card: #1f1f23;
+    --card-foreground: #f4f4f5;
+    --popover: #1f1f23;
+    --popover-foreground: #f4f4f5;
+    --primary: #e0709b;
+    --primary-foreground: #18181b;
+    --secondary: #27272a;
+    --secondary-foreground: #f4f4f5;
+    --muted: #27272a;
+    --muted-foreground: #a1a1aa;
+    --accent: #27272a;
+    --accent-foreground: #f4f4f5;
+    --destructive: #f87171;
+    --success: #4ade80;
+    --warning: #fbbf24;
+    --border: #2e2e33;
+    --input: #3f3f46;
+    --ring: #e0709b;
+    --code: #0f0f11;
+    --code-foreground: #d4d4d8;
+    --sidebar: #141416;
+    --sidebar-foreground: #f4f4f5;
+    --sidebar-border: #27272a;
+    --sidebar-accent: #232327;
+    --sidebar-accent-foreground: #f4f4f5;
+  }
+}
+
+/* inline にしないと @theme が値を固定し、上の dark の上書きが効かなくなる */
+@theme inline {
+  --color-background: var(--background);
+  --color-foreground: var(--foreground);
+  --color-card: var(--card);
+  --color-card-foreground: var(--card-foreground);
+  --color-popover: var(--popover);
+  --color-popover-foreground: var(--popover-foreground);
+  --color-primary: var(--primary);
+  --color-primary-foreground: var(--primary-foreground);
+  --color-secondary: var(--secondary);
+  --color-secondary-foreground: var(--secondary-foreground);
+  --color-muted: var(--muted);
+  --color-muted-foreground: var(--muted-foreground);
+  --color-accent: var(--accent);
+  --color-accent-foreground: var(--accent-foreground);
+  --color-destructive: var(--destructive);
+  --color-success: var(--success);
+  --color-warning: var(--warning);
+  --color-border: var(--border);
+  --color-input: var(--input);
+  --color-ring: var(--ring);
+  --color-code: var(--code);
+  --color-code-foreground: var(--code-foreground);
+  --color-sidebar: var(--sidebar);
+  --color-sidebar-foreground: var(--sidebar-foreground);
+  --color-sidebar-border: var(--sidebar-border);
+  --color-sidebar-accent: var(--sidebar-accent);
+  --color-sidebar-accent-foreground: var(--sidebar-accent-foreground);
+
+  --radius-sm: calc(var(--radius) - 4px);
+  --radius-md: calc(var(--radius) - 2px);
+  --radius-lg: var(--radius);
+  --radius-xl: calc(var(--radius) + 4px);
+
+  --font-sans: 'Hiragino Sans', 'Yu Gothic UI', system-ui, sans-serif;
+  --font-mono: 'SF Mono', Menlo, monospace;
+}
+
+@layer base {
+  * {
+    @apply border-border outline-ring/50;
+  }
+  body {
+    @apply bg-background font-sans text-foreground antialiased;
+    font-size: 14px;
+    line-height: 1.6;
+    margin: 0;
+    font-variant-numeric: tabular-nums;
+  }
+  button:not(:disabled),
+  [role='button']:not([aria-disabled='true']) {
+    cursor: pointer;
+  }
+  @media (prefers-reduced-motion: reduce) {
+    * {
+      transition: none !important;
+      animation: none !important;
+    }
+  }
+}
