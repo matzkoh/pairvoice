@@ -281,9 +281,9 @@ def test_wall_clock_jumps_do_not_stretch_the_sustained_output_timer():
     assert watch.check() == ("audio_output", True)
 
 
-def test_a_hung_sample_counts_as_unknown_and_is_not_called_again(monkeypatch):
+def test_a_hung_sample_uses_the_last_result_and_is_not_called_again(monkeypatch):
     # CoreAudio が詰まると取得が戻らない。state() は /health からも呼ぶので見切り、
-    # 戻るまでは次を呼ばない（固まったスレッドを積み上げない）
+    # 最後に取れた結果を使う。戻るまでは次を呼ばない（固まったスレッドを積み上げない）
     monkeypatch.setattr(mute_module, "SAMPLE_TIMEOUT_SECONDS", 0.05)
 
     class HungProbe(FakeProbe):
@@ -292,17 +292,20 @@ def test_a_hung_sample_counts_as_unknown_and_is_not_called_again(monkeypatch):
             self.device = threading.Event()
 
         def sample(self):
-            self.device.wait(5)
+            if self.samples:
+                self.device.wait(5)
             return super().sample()
 
     probe = HungProbe()
     controller, _ = make_controller(probe=probe)
     try:
-        assert controller.state().active is False
-        assert controller.state().active is False
-        assert probe.samples == 0
+        assert controller.state().reason == "microphone"  # 1回目は取れる
+        probe.microphone = False
+        assert controller.state().reason == "microphone"  # 詰まったので最後の結果
+        assert controller.state().reason == "microphone"  # 詰まっている間は呼ばない
+        assert probe.samples == 1
     finally:
         probe.device.set()
 
     controller._stalled_sample.join(1)
-    assert controller.state().reason == "microphone"
+    assert controller.state().active is False

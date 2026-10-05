@@ -35,8 +35,9 @@ STOP_FADE_SECONDS = 0.15
 DUCK_FADE_SECONDS = 0.2
 # 鳴らし始めるまでの上限。AVAudioPlayer.play() は CoreAudio が応答しないと戻らない
 OPEN_TIMEOUT_SECONDS = 5.0
-# 鳴っている音への操作（鳴っているか、音量、停止）の上限。ふだんは即座に戻る
-SOUND_CALL_TIMEOUT_SECONDS = 0.5
+# 鳴っている音への操作（鳴っているか、音量、停止）の上限。ふだんは即座に戻るが、
+# モデルの読み込み中は GIL の取り合いで遅れる（mute.SAMPLE_TIMEOUT_SECONDS と同じ理由）
+SOUND_CALL_TIMEOUT_SECONDS = 2.0
 
 
 class Sound(Protocol):

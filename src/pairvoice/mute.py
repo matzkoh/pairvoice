@@ -17,8 +17,9 @@ MAX_MINUTES = 480
 # 再生が止むのを待つ間に取り直す間隔。1回の取得は約13ms
 WAIT_POLL_SECONDS = 0.5
 # 1回の取得の上限。state() はイベントループからも呼ぶ（/health、キューを抜けた直後の判定）ので、
-# CoreAudio が詰まって戻らないとサーバーごと止まる
-SAMPLE_TIMEOUT_SECONDS = 1.0
+# CoreAudio が詰まって戻らないとサーバーごと止まる。ふだんは約 10ms だが、モデルの読み込み中は
+# GIL を取り合って 1 秒を超えることがある
+SAMPLE_TIMEOUT_SECONDS = 2.0
 
 _log = logging.getLogger(__name__)
 
@@ -61,8 +62,9 @@ class MuteController:
         self._monotonic = monotonic
         self._sleep = sleep
         self._manual_until: float | None = None
-        # 戻らなくなった取得のスレッド。戻るまでは次を呼ばず、取れないものとして扱う
+        # 戻らなくなった取得のスレッド。戻るまでは次を呼ばず、最後に取れた結果を使う
         self._stalled_sample = None
+        self._last_activity = None
 
     def mute(self, minutes) -> MuteState:
         if not isinstance(minutes, int) or isinstance(minutes, bool):
@@ -109,16 +111,21 @@ class MuteController:
         return None
 
     def _sample(self):
+        # 見切ったときに「取れない（鳴らす）」に倒すと、混み合っただけで会議中に鳴りうる。
+        # 最後に取れた結果のほうが今に近い
         if self._stalled_sample is not None:
             if self._stalled_sample.is_alive():
-                return None
+                return self._last_activity
             self._stalled_sample = None
         try:
-            return call_with_deadline(self._probe.sample, timeout=SAMPLE_TIMEOUT_SECONDS)
+            self._last_activity = call_with_deadline(
+                self._probe.sample, timeout=SAMPLE_TIMEOUT_SECONDS
+            )
+            return self._last_activity
         except Stalled as stalled:
             self._stalled_sample = stalled.thread
             _log.warning("音声の入出力を取得できません: %s", stalled)
-            return None
+            return self._last_activity
         except Exception as error:
             # 取れないときは鳴らす側に倒す。自動ミュートは補助で、黙り続けるほうが困る
             _log.warning("音声の入出力を取得できません: %s", error)
