@@ -257,13 +257,17 @@ async def test_warmup_loads_models_sequentially_through_the_queue():
 
 
 async def test_waiting_summary_is_superseded_but_speech_is_not():
-    engine = make_engine()
-    await engine.speak("先行")  # TTS を載せておく
+    # 要約2件がキューで待つ間、先行の読み上げに TTS のロードで Runner を塞がせておく。
+    # 塞いでいないと、遅いマシンでは1件目の要約が待たずに走り、捨てられる要約が無くなる
+    tts = FakeTTS(load_delay=0.15)
+    engine = make_engine(tts=tts)
 
-    slow = engine.speak("ゆっくり")
-    first = engine.summarize(system="s", prompt="1")
-    second = engine.summarize(system="s", prompt="2")
-    third = engine.speak("捨てられない")
+    slow = asyncio.create_task(engine.speak("ゆっくり"))
+    await asyncio.sleep(0.03)
+    first = asyncio.create_task(engine.summarize(system="s", prompt="1"))
+    await asyncio.sleep(0.03)
+    second = asyncio.create_task(engine.summarize(system="s", prompt="2"))
+    third = asyncio.create_task(engine.speak("捨てられない"))
 
     results = await gather_results([slow, first, second, third])
 
