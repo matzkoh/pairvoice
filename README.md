@@ -12,15 +12,6 @@ Claude Code に長い作業を任せて別の画面を見ていると、とう�
 pairvoice は、返事をこのように2文ほどの日本語に縮めてから読む。
 画面から目を離していても、いま何が終わって次に何をするのかが耳で分かる。
 
-> **English summary** — pairvoice reads Claude Code's replies aloud in Japanese on your Mac.
-> A local server summarizes each reply with an MLX LLM and speaks it with Irodori-TTS; a Claude
-> Code plugin hooks the replies in, and a browser UI (studio) lets you tune the prompt, reading
-> dictionary and voice. Summarization and speech run on-device (Apple Silicon, 32GB+ recommended);
-> only the first model download and the optional `claude`-driven prompt optimizer reach the network.
-> Install with `uv tool install pairvoice && pairvoice install`, then
-> `/plugin marketplace add matzkoh/pairvoice` and `/plugin install pairvoice@pairvoice` in Claude Code.
-> The prompts and evaluation rules are written for Japanese; other languages are not supported.
-
 ## できること
 
 - **識別子を読まない。** ファイル名や関数名はそのまま読まず、何をしたのかに言い換える
