@@ -1,0 +1,11 @@
+# workflow の action は SHA に固定しているので、その更新だけを Dependabot に任せる。
+# Python の依存には実モデルで確かめた版に固定したものがあるので、依存は手で上げる
+version: 2
+updates:
+  - package-ecosystem: github-actions
+    directory: /
+    schedule:
+      interval: monthly
+    groups:
+      actions:
+        patterns: ["*"]
