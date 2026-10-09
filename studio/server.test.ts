@@ -1243,7 +1243,7 @@ test('プロファイルの切り替え・名前の変更・削除', async () =>
   }
 })
 
-test('POST /api/speak は design と profile_id を pairvoice へ中継する', async () => {
+test('POST /api/speak は design と profile_id（voice として）を pairvoice へ中継する', async () => {
   const fake = await startFakePairvoice()
   const prevUrl = process.env.PAIRVOICE_URL
   process.env.PAIRVOICE_URL = fake.url
@@ -1266,7 +1266,7 @@ test('POST /api/speak は design と profile_id を pairvoice へ中継する', 
       jsonInit('POST', { text: '試聴', profile_id: 'p-other' }),
     )
     assert.equal(ok.status, 200)
-    assert.equal(fake.requests[1]!.body.profile_id, 'p-other')
+    assert.equal(fake.requests[1]!.body.voice, 'p-other')
     const bad = await fetch(
       `http://127.0.0.1:${port}/api/speak`,
       jsonInit('POST', { text: '試聴', profile_id: '../x' }),

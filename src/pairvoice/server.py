@@ -10,7 +10,7 @@ from urllib.parse import urlsplit
 from fastapi import Body, FastAPI, Request
 from fastapi.openapi.models import Example
 from fastapi.responses import JSONResponse
-from pydantic import AliasChoices, BaseModel, ConfigDict, Field, StrictInt, model_validator
+from pydantic import BaseModel, ConfigDict, Field, StrictInt, model_validator
 
 from .audio_state import AudioProbe
 from .config import Config
@@ -195,10 +195,8 @@ class SynthesisRequest(BaseModel):
     text: str = Field(description="読む文。合成の直前に読み辞書（dict.tsv）で読みに開く")
     voice: str | None = Field(
         default=None,
-        # profile_id は旧名で、studio の試聴が ID で使う
-        validation_alias=AliasChoices("voice", "profile_id"),
         description="声（プロファイル）の名前か ID。同じ名前が複数あれば、いちばん新しく作ったもの。"
-        "省くと使用中のプロファイル。`profile_id` でも受ける",
+        "省くと使用中のプロファイル",
     )
     style: str | None = Field(
         default=None,

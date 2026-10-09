@@ -125,11 +125,11 @@ def test_speak_reports_profile_missing_as_503():
     assert response.json()["error"] == "profile_missing"
 
 
-def test_speak_forwards_profile_id_to_backend():
+def test_speak_forwards_voice_to_backend():
     tts = FakeTTS()
     _, client = build(tts=tts)
 
-    client.post("/speak", json={"text": "テスト", "profile_id": "p-other"})
+    client.post("/speak", json={"text": "テスト", "voice": "p-other"})
 
     assert tts.calls[0]["profile_id"] == "p-other"
 
@@ -141,7 +141,7 @@ def test_speak_reports_unknown_profile_as_404():
 
     _, client = build(tts=MissingProfileTTS())
 
-    response = client.post("/speak", json={"text": "テスト", "profile_id": "p-gone"})
+    response = client.post("/speak", json={"text": "テスト", "voice": "p-gone"})
 
     assert response.status_code == 404
     assert response.json() == {"error": "profile_not_found"}

@@ -84,7 +84,7 @@ export function registerPairvoiceRoutes(addRoute: AddRoute) {
       caption?: string
       sampler?: Record<string, unknown>
       design?: true
-      profile_id?: string
+      voice?: string
       mix?: { audio: string; weight: number }[]
     } = {
       text: body.text,
@@ -98,7 +98,7 @@ export function registerPairvoiceRoutes(addRoute: AddRoute) {
       if (typeof body.profile_id !== 'string' || !PROFILE_ID_PATTERN.test(body.profile_id)) {
         return badRequest(res, 'invalid profile_id')
       }
-      payload.profile_id = body.profile_id
+      payload.voice = body.profile_id
     }
     // 2択で絞り込むときの、もとの声を重みで混ぜた声。パスの検証は pairvoice が行う
     // （データの置き場所の外を指していれば 404）
