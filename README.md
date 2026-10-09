@@ -112,6 +112,7 @@ pairvoice say --voice 落ち着いた声 --style ささやき "テスト"
 
 `/speak` の `caption` と `sampler` はスタイルより優先する。
 選べる名前は `GET /profiles` と `GET /styles` で引ける。
+API のすべてのエンドポイントと項目は、常駐サーバーが動いている間 http://127.0.0.1:17495/docs で引ける。
 Claude Code の読み上げでは、環境変数 `PAIRVOICE_VOICE` と `PAIRVOICE_STYLE` で選ぶ（プロジェクトの `.claude/settings.json` の `env` に書けば、プロジェクトごとに変えられる）。
 
 ## 読み方を育てる

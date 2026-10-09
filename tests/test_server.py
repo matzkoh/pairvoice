@@ -1,3 +1,4 @@
+from importlib.metadata import version
 from pathlib import Path
 
 import pytest
@@ -551,3 +552,21 @@ def test_profiles_and_styles_list_choices():
     assert client.get("/styles").json() == {
         "items": [{"name": "ささやき", "caption": "ささやく。", "sampler": {}}]
     }
+
+
+def test_openapi_documents_version_and_every_field():
+    _, client = build()
+
+    spec = client.get("/openapi.json").json()
+
+    assert spec["info"]["version"] == version("pairvoice")
+    # 説明の無い項目を作らない（/docs が API の説明の正本）。FastAPI 自身の検証エラーの形は除く
+    undocumented = [
+        f"{schema}.{name}"
+        for schema, body in spec["components"]["schemas"].items()
+        if schema not in {"HTTPValidationError", "ValidationError"}
+        for name, field in body.get("properties", {}).items()
+        if not field.get("description")
+    ]
+    assert undocumented == []
+    assert {"404", "500", "503"} <= spec["paths"]["/speak"]["post"]["responses"].keys()
