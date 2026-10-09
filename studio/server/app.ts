@@ -7,6 +7,7 @@ import { registerDictRoutes } from './routes/dict.ts'
 import { registerPairvoiceRoutes } from './routes/pairvoice.ts'
 import { registerProfileRoutes } from './routes/profiles.ts'
 import { registerPromptRoutes } from './routes/prompt.ts'
+import { registerStyleRoutes } from './routes/styles.ts'
 import { serveStatic } from './static.ts'
 
 // 127.0.0.1 にだけ待ち受けていても、ブラウザで開いた外部のページから2つの経路で届く。
@@ -34,6 +35,7 @@ export function createStudioServer() {
   registerPromptRoutes(router.addRoute)
   registerDictRoutes(router.addRoute)
   registerProfileRoutes(router.addRoute)
+  registerStyleRoutes(router.addRoute)
   registerPairvoiceRoutes(router.addRoute)
 
   async function handle(req: http.IncomingMessage, res: http.ServerResponse) {

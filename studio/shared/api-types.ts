@@ -73,6 +73,11 @@ export type PromptResponse = { text: string }
 // 辞書の1行。TSV の1行が from/to/memo の3列（server.ts の parseDictTsv）。
 export type DictRowData = { from: string; to: string; memo: string }
 export type DictResponse = { rows: DictRowData[] }
+// 話し方のスタイル。styles.json の1件で、常駐サーバー（styles.py）が /speak の style で読む。
+// caption が null なら声のプロファイルの caption のまま読む。sampler は config.toml から
+// 動かす項目だけを持つ
+export type StyleData = { name: string; caption: string | null; sampler: SamplerOverrides }
+export type StylesResponse = { styles: StyleData[] }
 // /api/dict/test のプレビュー結果。dict タブが試し打ちに使う（旧 app.js:1139 の data.result）。
 export type DictTestResponse = { result: string }
 

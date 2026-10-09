@@ -97,6 +97,23 @@ studio の「プロファイル」画面で、
 何も作らなくても、最初の読み上げのときに既定の声が1つ作られる。
 切り替えは次の読み上げから効き、再起動は要らない。
 
+### 声とスタイルを読み上げごとに選ぶ
+
+使用中の声とは別に、読み上げ1回ごとに声とスタイル（話し方）を選べる。
+
+- **声**（`voice`）: プロファイルの名前か ID。同じ名前が複数あれば、いちばん新しく作ったものが選ばれる
+- **スタイル**（`style`）: studio の「スタイル」画面で作る、caption とサンプラーの組の名前。プロファイルの caption の代わりに使う。変えられるのは速さ・テンション・抑揚の傾きまでで、声質（ささやき声など）は参照音声で決まるので、声質を変えたいときは `voice` で別のプロファイルを選ぶ
+
+```bash
+curl -s http://127.0.0.1:17495/speak -H 'Content-Type: application/json' \
+  -d '{"text": "テスト", "voice": "落ち着いた声", "style": "ささやき", "play": true}'
+pairvoice say --voice 落ち着いた声 --style ささやき "テスト"
+```
+
+`/speak` の `caption` と `sampler` はスタイルより優先する。
+選べる名前は `GET /profiles` と `GET /styles` で引ける。
+Claude Code の読み上げでは、環境変数 `PAIRVOICE_VOICE` と `PAIRVOICE_STYLE` で選ぶ（プロジェクトの `.claude/settings.json` の `env` に書けば、プロジェクトごとに変えられる）。
+
 ## 読み方を育てる
 
 要約は、いつも思いどおりに縮まるとは限らない。
@@ -125,7 +142,7 @@ studio はメニューの「studio を開く」か `pairvoice studio` で起動�
 | --- | --- |
 | `pairvoice status` | 状態（モデル、ミュート、声）を表示する |
 | `pairvoice mute 30m` / `unmute` | 30分ミュートする（1〜480分）／解除する |
-| `pairvoice say "テスト"` | 読み上げてみる（ミュート中でも鳴る） |
+| `pairvoice say "テスト"` | 読み上げてみる（ミュート中でも鳴る。`--voice` `--style` `--caption` で声とスタイルを選ぶ） |
 | `pairvoice stop` | 鳴っている読み上げと、順番待ちの読み上げを止める |
 | `pairvoice warmup` | モデルを読み込み、終わるまで待つ（初回はダウンロードも） |
 | `pairvoice restart` | 常駐サーバーを再起動する（設定を変えたら要る） |

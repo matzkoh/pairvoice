@@ -62,7 +62,15 @@ class FakeTTS(FakeBackend):
         self.calls.append({"speaker_vector": path})
         return [0.5, -0.5]
 
-    def speak(self, text, caption=None, sampler=None, design=False, profile_id=None, mix=None):
+    def list_profiles(self):
+        return {"active": "p-1", "items": [{"id": "p-1", "name": "既定の声", "caption": "声。"}]}
+
+    def list_styles(self):
+        return [{"name": "ささやき", "caption": "ささやく。", "sampler": {}}]
+
+    def speak(
+        self, text, caption=None, sampler=None, design=False, profile_id=None, mix=None, style=None
+    ):
         from pathlib import Path
 
         from pairvoice.tts import SpeechResult
@@ -76,6 +84,7 @@ class FakeTTS(FakeBackend):
                 "profile_id": profile_id,
                 # 2択で絞り込むときだけ載せる（ほかの試験の期待値を mix: None で埋めない）
                 **({"mix": mix} if mix is not None else {}),
+                **({"style": style} if style is not None else {}),
             }
         )
         return SpeechResult(
@@ -513,7 +522,15 @@ class ThreadRecordingTTS(FakeTTS):
         self.threads["tts.load"] = threading.get_ident()
         super().load()
 
-    def speak(self, text, caption=None, sampler=None, design=False, profile_id=None, mix=None):
+    def list_profiles(self):
+        return {"active": "p-1", "items": [{"id": "p-1", "name": "既定の声", "caption": "声。"}]}
+
+    def list_styles(self):
+        return [{"name": "ささやき", "caption": "ささやく。", "sampler": {}}]
+
+    def speak(
+        self, text, caption=None, sampler=None, design=False, profile_id=None, mix=None, style=None
+    ):
         self.threads["tts.speak"] = threading.get_ident()
         return super().speak(text, caption, sampler, design, profile_id, mix)
 

@@ -628,3 +628,111 @@ def test_speak_with_negative_mix_weight_extrapolates(no_ref_config, tmp_path, mo
     # 1.5 * 1 - 0.5 * 3 = 0。a から b と逆の向きへ伸ばした表現
     (_, with_ref, _) = model.seen[0]
     np.testing.assert_allclose(np.asarray(with_ref[2]), np.zeros((1, 2, 2)))
+
+
+def _write_styles(tmp_path, styles):
+    import json
+
+    (tmp_path / "styles.json").write_text(
+        json.dumps({"styles": styles}, ensure_ascii=False), encoding="utf-8"
+    )
+
+
+def _profile(tmp_path, name, caption):
+    return ProfileStore(tmp_path / "profiles").create(
+        name=name,
+        caption=caption,
+        source="design",
+        write_reference=lambda path: path.write_bytes(b"RIFF"),
+    )
+
+
+def test_speak_with_style_uses_its_caption_and_sampler(no_ref_config, tmp_path, monkeypatch):
+    _profile(tmp_path, "声", "プロファイルの話し方。")
+    _write_styles(
+        tmp_path,
+        [{"name": "ささやき", "caption": "ささやく。", "sampler": {"duration_scale": 1.2}}],
+    )
+    model = FakeModel(FakeResult(np.zeros(480, dtype=np.float32)))
+    backend = make_backend(no_ref_config, model, tmp_path, monkeypatch)
+
+    backend.speak("テスト", style="ささやき")
+
+    (call,) = model.calls
+    assert call["caption"] == "ささやく。"
+    assert call["duration_scale"] == 1.2
+    # スタイルが触らない項目は config.toml のまま
+    assert call["cfg_scale_speaker"] == 2.5
+
+
+def test_request_caption_and_sampler_override_style(no_ref_config, tmp_path, monkeypatch):
+    _profile(tmp_path, "声", "プロファイルの話し方。")
+    _write_styles(
+        tmp_path,
+        [
+            {
+                "name": "s",
+                "caption": "スタイル。",
+                "sampler": {"duration_scale": 1.2, "num_steps": 60},
+            }
+        ],
+    )
+    model = FakeModel(FakeResult(np.zeros(480, dtype=np.float32)))
+    backend = make_backend(no_ref_config, model, tmp_path, monkeypatch)
+
+    backend.speak("テスト", caption="引数。", sampler={"duration_scale": 0.9}, style="s")
+
+    (call,) = model.calls
+    assert call["caption"] == "引数。"
+    assert call["duration_scale"] == 0.9
+    assert call["num_steps"] == 60
+
+
+def test_style_without_caption_keeps_profile_caption(no_ref_config, tmp_path, monkeypatch):
+    _profile(tmp_path, "声", "プロファイルの話し方。")
+    _write_styles(tmp_path, [{"name": "速く", "caption": None, "sampler": {"duration_scale": 0.8}}])
+    model = FakeModel(FakeResult(np.zeros(480, dtype=np.float32)))
+    backend = make_backend(no_ref_config, model, tmp_path, monkeypatch)
+
+    backend.speak("テスト", style="速く")
+
+    (call,) = model.calls
+    assert call["caption"] == "プロファイルの話し方。"
+    assert call["duration_scale"] == 0.8
+
+
+def test_unknown_style_raises_before_generating(no_ref_config, tmp_path, monkeypatch):
+    from pairvoice.styles import StyleNotFound
+
+    _profile(tmp_path, "声", "話し方。")
+    model = FakeModel(FakeResult(np.zeros(480, dtype=np.float32)))
+    backend = make_backend(no_ref_config, model, tmp_path, monkeypatch)
+
+    with pytest.raises(StyleNotFound):
+        backend.speak("テスト", style="無い")
+
+    assert model.calls == []
+
+
+def test_speak_with_profile_name_uses_that_profile(no_ref_config, tmp_path, monkeypatch):
+    other = _profile(tmp_path, "試す声", "試すときの声。")
+    _profile(tmp_path, "使用中の声", "使用中の声。")
+    model = FakeModel(FakeResult(np.zeros(480, dtype=np.float32)))
+    backend = make_backend(no_ref_config, model, tmp_path, monkeypatch)
+
+    backend.speak("テスト", profile_id="試す声")
+
+    (call,) = model.calls
+    assert call["ref_audio"] == str(other.reference)
+
+
+def test_list_profiles_and_styles(no_ref_config, tmp_path):
+    first = _profile(tmp_path, "一つ目", "一。")
+    _write_styles(tmp_path, [{"name": "s", "caption": None, "sampler": {}}])
+    backend = MlxAudioBackend(no_ref_config, data_dir=tmp_path)
+
+    assert backend.list_profiles() == {
+        "active": first.id,
+        "items": [{"id": first.id, "name": "一つ目", "caption": "一。"}],
+    }
+    assert backend.list_styles() == [{"name": "s", "caption": None, "sampler": {}}]

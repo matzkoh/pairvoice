@@ -1887,3 +1887,37 @@ test('参照音声を書けなければ、作りかけのプロファイルを�
     await clearProfiles()
   }
 })
+
+test('GET/PUT /api/styles は styles.json を読み書きし、重なる名前を断る', async () => {
+  const { STYLES_FILE } = await import('./server.ts')
+  const server = await startServer(0)
+  const port = portOf(server)
+  const put = (styles: unknown) =>
+    fetch(`http://127.0.0.1:${port}/api/styles`, {
+      method: 'PUT',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ styles }),
+    })
+
+  const empty = await readJson(await fetch(`http://127.0.0.1:${port}/api/styles`))
+  assert.deepEqual(empty, { styles: [] })
+
+  const dup = await put([
+    { name: 'a', caption: null, sampler: {} },
+    { name: 'a ', caption: null, sampler: {} },
+  ])
+  assert.equal(dup.status, 400)
+  assert.equal((await put([{ name: 'a', caption: 1, sampler: {} }])).status, 400)
+  assert.equal((await put([{ name: 'a', caption: null, sampler: { x: [1] } }])).status, 400)
+
+  const styles = [
+    { name: 'ささやき', caption: 'ささやく。', sampler: { duration_scale: 1.2 } },
+    { name: 'ゆっくり', caption: null, sampler: {} },
+  ]
+  assert.equal((await put(styles)).status, 200)
+  const got = await readJson(await fetch(`http://127.0.0.1:${port}/api/styles`))
+  assert.deepEqual(got.styles, styles)
+  // 常駐サーバーが読む形
+  assert.deepEqual(JSON.parse(await readFile(STYLES_FILE, 'utf8')), { styles })
+  await new Promise((resolve) => server.close(resolve))
+})

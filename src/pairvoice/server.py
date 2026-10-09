@@ -7,7 +7,7 @@ from urllib.parse import urlsplit
 
 from fastapi import FastAPI, Request
 from fastapi.responses import JSONResponse
-from pydantic import BaseModel, ConfigDict, Field, StrictInt, model_validator
+from pydantic import AliasChoices, BaseModel, ConfigDict, Field, StrictInt, model_validator
 
 from .audio_state import AudioProbe
 from .config import Config
@@ -15,6 +15,7 @@ from .lifecycle import Engine, ModelUnavailable, MutedError, Superseded, limit_m
 from .llm import MlxLmBackend
 from .mute import InvalidMinutes, MuteController
 from .profiles import ProfileNotFound
+from .styles import StyleInvalid, StyleNotFound
 from .tts import AudioNotFound, MlxAudioBackend
 
 # studio（studio/server/app.ts）と同じ基準。ポートは問わない
@@ -98,14 +99,17 @@ class MixPart(BaseModel):
 class SpeakRequest(BaseModel):
     text: str
     bypass_mute: bool = False
-    # studio からの試聴で使う。指定しなければバックエンドがプロファイルの caption で解決する
+    # 声（プロファイル）の名前か ID。指定しなければ使用中のプロファイルで鳴らす。
+    # profile_id は旧名で、studio の試聴が ID で使う
+    voice: str | None = Field(default=None, validation_alias=AliasChoices("voice", "profile_id"))
+    # 話し方のスタイル（styles.json）の名前。caption と sampler の既定をそのスタイルに替える
+    style: str | None = None
+    # 話し方の指示。指定しなければスタイル → プロファイルの caption の順で解決する
     caption: str | None = None
-    # studio のプレイグラウンドで使う。指定しなければ config.toml とモデル既定に従う
+    # 指定しなければスタイル → config.toml → モデル既定の順で決まる
     sampler: SamplerOverrides | None = None
     # studio のプロファイル作成で使う。プロファイルの参照音声を使わず caption だけで作る
     design: bool = False
-    # studio の試聴で使う。使用中でないプロファイルの参照音声で鳴らす
-    profile_id: str | None = None
     # 読み上げのフックと `pairvoice say` で使う。合成したら常駐サーバーが鳴らす
     play: bool = False
     # SummaryRequest と同じ。フックが false で送る
@@ -152,6 +156,17 @@ def create_app(engine: Engine) -> FastAPI:
 
     app = FastAPI(title="pairvoice", lifespan=lifespan)
 
+    # styles.json を読む口（/speak と /styles）のどこから起きても同じ応答にする
+    @app.exception_handler(StyleNotFound)
+    async def style_not_found(request: Request, error: StyleNotFound):
+        return JSONResponse(status_code=404, content={"error": "style_not_found"})
+
+    @app.exception_handler(StyleInvalid)
+    async def style_invalid(request: Request, error: StyleInvalid):
+        return JSONResponse(
+            status_code=500, content={"error": "style_invalid", "detail": str(error)}
+        )
+
     @app.middleware("http")
     async def reject_foreign_pages(request: Request, call_next):
         if not is_local_request(request.headers.get("host"), request.headers.get("origin")):
@@ -192,7 +207,7 @@ def create_app(engine: Engine) -> FastAPI:
                     else None
                 ),
                 design=request.design,
-                profile_id=request.profile_id,
+                profile_id=request.voice,
                 play=request.play,
                 wait_download=request.wait_download,
                 mix=(
@@ -200,6 +215,7 @@ def create_app(engine: Engine) -> FastAPI:
                     if request.mix is not None
                     else None
                 ),
+                style=request.style,
             )
         except MutedError as error:
             return {"muted": True, "reason": error.reason}
@@ -228,6 +244,16 @@ def create_app(engine: Engine) -> FastAPI:
                 status_code=503, content={"error": error.code, "detail": error.detail}
             )
         return {"vector": vector}
+
+    # ファイルを読むので def にして、イベントループの外（スレッドプール）で動かす
+    @app.get("/profiles")
+    def profiles():
+        # /speak の voice に渡せる声。名前が重なっていれば、名前ではいちばん新しいものが選ばれる
+        return engine.list_profiles()
+
+    @app.get("/styles")
+    def styles():
+        return {"items": engine.list_styles()}
 
     @app.get("/health")
     async def health():

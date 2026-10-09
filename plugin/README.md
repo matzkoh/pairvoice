@@ -25,6 +25,15 @@ Claude Code の `MessageDisplay` フック。アシスタントの出力を pair
 エージェントは `pairvoice eval` で今の指示と比べてから提案し、了承を得たら studio の API で書き込む。
 要約のモデルを比べるときにも使う。
 
+## 声とスタイルを選ぶ
+
+フックは環境変数 `PAIRVOICE_VOICE`（プロファイルの名前か ID）と `PAIRVOICE_STYLE`（studio の「スタイル」画面で作ったスタイルの名前）を読む。
+空なら使用中のプロファイルの声で、その caption のまま読む。
+プロジェクトの `.claude/settings.json` の `env` に書けば、プロジェクトごとに声を変えられる。
+
+```json
+{ "env": { "PAIRVOICE_VOICE": "落ち着いた声", "PAIRVOICE_STYLE": "ささやき" } }
+```
 ## データとログ
 
 | | 場所 |
@@ -54,6 +63,7 @@ tail -30 ~/Library/Logs/speak-summary.log
 | `no speakable text` | 閉じタグやコードフェンスだけの断片で、読み上げる中身が無い |
 | `model load failed` | モデルのロードに失敗、または設定不備 |
 | `profile missing` | `ref_audio` に指定した参照音声が無い |
+| `voice not found` / `style not found` | `PAIRVOICE_VOICE` / `PAIRVOICE_STYLE` の名前のプロファイル・スタイルが無い |
 
 `QUEUED` は音声を作って常駐サーバーに渡したところまで。鳴らなかった（ミュートが入った、止めた、
 順番待ちが長すぎた）理由は常駐サーバーのログ（`~/Library/Logs/pairvoice.log`）に出る。

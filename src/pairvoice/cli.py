@@ -146,6 +146,14 @@ def main(argv: list[str] | None = None) -> int:
 
     say = sub.add_parser("say", help="任意のテキストを読み上げる（ミュートをバイパスする）")
     say.add_argument("text")
+    say.add_argument("--voice", help="声（プロファイル）の名前か ID。省くと使用中の声")
+    say.add_argument(
+        "--style",
+        help="スタイル（caption とサンプラーの組）の名前。studio の「スタイル」画面で作る",
+    )
+    say.add_argument(
+        "--caption", help="話し方の指示。スタイルやプロファイルの caption より優先する"
+    )
 
     sub.add_parser("stop", help="鳴っている読み上げと、待っている読み上げを止める")
 
@@ -233,6 +241,9 @@ def main(argv: list[str] | None = None) -> int:
             result = client.call(base, "/health", method="GET")
         elif args.command == "say":
             body = {"text": args.text, "bypass_mute": True, "play": True}
+            for key in ("voice", "style", "caption"):
+                if getattr(args, key) is not None:
+                    body[key] = getattr(args, key)
             result = client.call(base, "/speak", body=body)
         elif args.command == "stop":
             result = client.call(base, "/stop")

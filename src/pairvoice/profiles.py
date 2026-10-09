@@ -78,6 +78,24 @@ class ProfileStore:
             reference=reference,
         )
 
+    def all(self) -> list[Profile]:
+        """読めるプロファイルすべて。ID（作った日時）の古い順。"""
+        if not self.root.is_dir():
+            return []
+        found = (self.get(child.name) for child in sorted(self.root.iterdir()) if child.is_dir())
+        return [profile for profile in found if profile is not None]
+
+    def find(self, key: str) -> Profile | None:
+        """ID か名前でプロファイルを引く。同じ名前が複数あれば、いちばん新しく作ったもの。
+
+        API で声を選ぶときに使う。ID は studio でしか見えないので、名前でも引けるようにする
+        """
+        by_id = self.get(key)
+        if by_id is not None:
+            return by_id
+        named = [profile for profile in self.all() if profile.name == key]
+        return named[-1] if named else None
+
     def create(
         self,
         *,

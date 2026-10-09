@@ -8,13 +8,14 @@ Irodori-TTS に参照テキストのパラメータは存在しない。話者�
 は同じ caption でも文ごとに別人の声になるので、読み上げには使わず、プロファイルの
 声を作るときだけに使う。
 
-caption は speak() の引数 → プロファイル → caption.txt → 設定の既定値の順で解決する。
-後ろの2つは bootstrap 前にだけ効く。studio からの試聴は引数で渡り、採用済みの版を
-書き換えない。
+caption は speak() の引数 → スタイル → プロファイル → caption.txt → 設定の既定値の
+順で解決する。後ろの2つは bootstrap 前にだけ効く。studio からの試聴は引数で渡り、
+採用済みの版を書き換えない。
 
-caption と同じく sampler も3段で解決する（speak() の引数 → config.toml の
-[tts.sampler] → モデル既定）。None は「モデル既定に任せる」の意味で、キーごと
-渡さない。
+sampler は項目ごとに speak() の引数 → スタイル → config.toml の [tts.sampler] →
+モデル既定の順で決まる。None は「モデル既定に任せる」の意味で、キーごと渡さない。
+
+声（プロファイル）とスタイル（styles.py）は、API の利用者がリクエストごとに名前で選べる。
 
 読む文は合成のたびに読み辞書（reading.py）で読みに開く。フック・`pairvoice say`・studio の
 試聴のどこから来ても同じ読みになる。
@@ -44,6 +45,7 @@ from .config import TTSConfig
 from .postprocess import normalize, trim
 from .profiles import Profile, ProfileNotFound, ProfileStore
 from .reading import DICT_FILENAME, apply_dict, load_dict
+from .styles import STYLES_FILENAME, StyleStore
 
 DEFAULT_SAMPLE_RATE = 48000
 CAPTION_FILENAME = "caption.txt"
@@ -79,6 +81,7 @@ class MlxAudioBackend:
         self.model = config.model
         self._data_dir = data_dir or config.output_dir.parent
         self._profiles = ProfileStore(self._data_dir / "profiles")
+        self._styles = StyleStore(self._data_dir / STYLES_FILENAME)
         self._loaded = None
         # 次の合成で差し込む話者の表現。mix の合成の間だけ立てる（_speaking_as）
         self._injected_speaker = None
@@ -136,6 +139,19 @@ class MlxAudioBackend:
             # 黙って捨てないよう手を引く（巻き戻しを望んだのはユーザーである）。
             resolved["speaker_kv_min_t"] = None
         return resolved
+
+    def list_profiles(self) -> dict[str, object]:
+        """API の利用者が声を選ぶための一覧。参照音声のパスは見せない。"""
+        active = self._profiles.active()
+        return {
+            "active": active.id if active is not None else None,
+            "items": [
+                {"id": p.id, "name": p.name, "caption": p.caption} for p in self._profiles.all()
+            ],
+        }
+
+    def list_styles(self) -> list[dict[str, object]]:
+        return [dataclasses.asdict(style) for style in self._styles.all()]
 
     def describe_profile(self) -> dict[str, str] | None:
         profile = self._profiles.active()
@@ -291,15 +307,23 @@ class MlxAudioBackend:
         design: bool = False,
         profile_id: str | None = None,
         mix: Sequence[tuple[Path, float]] | None = None,
+        style: str | None = None,
     ) -> SpeechResult:
         """合成する。design=True はプロファイルを使わず caption だけで声を作る（候補づくり用）。
 
-        profile_id は studio の試聴用で、使用中でないプロファイルの声で鳴らす。
+        profile_id は使用中でないプロファイルの声で鳴らす。ID のほか名前でも引ける。
+        style はスタイルの名前で、caption と sampler の既定をそのスタイルに替える。
+        引数の caption と sampler はスタイルより優先する。
         mix は (参照音声, 重み) の組で、その声たちの話者の表現を重みで混ぜた声で鳴らす
         （2択で絞り込む）。プロファイルは使わない。
         text は読み辞書で読みに開いてから読む。
         """
         self._require_loaded()
+        # 合成の前に引く。名前の打ち間違いで、生成を済ませてから断ることのないように
+        if style is not None:
+            chosen = self._styles.get(style)
+            caption = caption if caption is not None else chosen.caption
+            sampler = {**chosen.sampler, **(sampler or {})}
         text = apply_dict(text, load_dict(self._data_dir / DICT_FILENAME))
 
         if mix:
@@ -333,7 +357,7 @@ class MlxAudioBackend:
     def _profile_for(self, profile_id: str | None) -> Profile:
         if profile_id is None:
             return self._profiles.active() or self._bootstrap()
-        profile = self._profiles.get(profile_id)
+        profile = self._profiles.find(profile_id)
         if profile is None:
             raise ProfileNotFound(profile_id)
         return profile

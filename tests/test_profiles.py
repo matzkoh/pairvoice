@@ -106,3 +106,25 @@ def test_get_rejects_id_with_trailing_newline(tmp_path):
     shutil.copytree(profile.reference.parent, tmp_path / "profiles" / (profile.id + "\n"))
 
     assert store.get(profile.id + "\n") is None
+
+
+def test_find_by_id_or_name_prefers_newest_of_same_name(tmp_path):
+    store = ProfileStore(tmp_path / "profiles")
+    older = store.create(
+        name="同じ名前", caption="古い。", source="auto", write_reference=write_wav
+    )
+    newer = store.create(
+        name="同じ名前", caption="新しい。", source="auto", write_reference=write_wav
+    )
+    # ID は秒単位の時刻で始まるので、同じ秒に作ると並びが乱数で決まる。作った順に並べ直す
+    if newer.id < older.id:
+        older, newer = newer, older
+
+    assert store.find(older.id) == older
+    assert store.find("同じ名前") == newer
+    assert store.find("無い名前") is None
+    assert [p.id for p in store.all()] == [older.id, newer.id]
+
+
+def test_list_is_empty_without_directory(tmp_path):
+    assert ProfileStore(tmp_path / "profiles").all() == []

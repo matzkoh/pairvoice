@@ -24,6 +24,10 @@ SPEAK_URL="$PAIRVOICE_BASE/speak"
 # git 作業ツリーに置くと、ブランチを切り替えたときに読み上げの挙動が変わってしまう。
 DATA_DIR="${PAIRVOICE_DATA_ROOT:-$HOME/Library/Application Support/pairvoice}"
 CORPUS_FILE="$DATA_DIR/corpus.jsonl" # プロンプト改善用の入力・出力ペア記録
+# 読み上げの声とスタイル。空なら使用中のプロファイルの声で、そのプロファイルの caption のまま読む。
+# Claude Code の settings.json の env に書けば、プロジェクトごとに声を変えられる
+VOICE="${PAIRVOICE_VOICE:-}"
+STYLE="${PAIRVOICE_STYLE:-}"
 
 # マジックナンバー
 readonly SUMMARY_MAX_RETRIES=3
@@ -190,7 +194,10 @@ get_summary() {
 # 鳴り終わるのは待たない（再生の順番待ちとミュートの見張りは pairvoice がする）
 request_speech() {
   local text="$1" payload response status body
-  payload=$(jq -n --arg text "$text" '{text: $text, play: true, wait_download: false}')
+  payload=$(jq -n --arg text "$text" --arg voice "$VOICE" --arg style "$STYLE" \
+    '{text: $text, play: true, wait_download: false}
+      + (if $voice == "" then {} else {voice: $voice} end)
+      + (if $style == "" then {} else {style: $style} end)')
   response=$(curl -s --max-time "$SPEAK_TIMEOUT_SECONDS" -w '\n%{http_code}' \
     -X POST "$SPEAK_URL" -H 'Content-Type: application/json' -d "$payload" 2>&1)
   status="${response##*$'\n'}"
@@ -206,6 +213,8 @@ request_speech() {
       model_downloading) log INFO "SKIP (model downloading)" ;;
       generation_failed) log INFO "SKIP (generation failed)" ;;
       profile_missing) log INFO "SKIP (profile missing)" ;;
+      profile_not_found) log WARN "SKIP (voice not found: PAIRVOICE_VOICE=$VOICE)" ;;
+      style_not_found) log WARN "SKIP (style not found: PAIRVOICE_STYLE=$STYLE)" ;;
       *) log WARN "SKIP (speak failed: http $status): $body" ;;
     esac
     return 1

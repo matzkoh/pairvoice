@@ -385,6 +385,7 @@ class Engine:
         play: bool = False,
         wait_download: bool = True,
         mix: list[tuple[str, float]] | None = None,
+        style: str | None = None,
     ):
         """play なら、合成した音声を Player の列に積んでから返す（鳴り終わるのは待たない）。"""
         # 合成を待っている間に「止める」が押されたら、出来上がっても鳴らさない
@@ -398,7 +399,14 @@ class Engine:
                 else None
             )
             result = await on_mlx_thread(
-                self._tts_backend.speak, text, caption, sampler, design, profile_id, resolved_mix
+                self._tts_backend.speak,
+                text,
+                caption,
+                sampler,
+                design,
+                profile_id,
+                resolved_mix,
+                style,
             )
             self._tts.touch()
             return result
@@ -407,6 +415,12 @@ class Engine:
         if play:
             self.player.enqueue(result.path, bypass_mute=bypass_mute, epoch=epoch)
         return result
+
+    def list_profiles(self) -> dict:
+        return self._tts_backend.list_profiles()
+
+    def list_styles(self) -> list[dict]:
+        return self._tts_backend.list_styles()
 
     async def speaker_vector(self, audio: str) -> list[float]:
         """データの置き場所の wav の話者ベクトル。2択でもとの声どうしの位置を測る。"""

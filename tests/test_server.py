@@ -499,3 +499,55 @@ def test_speaker_vector_returns_vector_without_mute():
     assert response.status_code == 200
     assert response.json() == {"vector": [0.5, -0.5]}
     assert tts.calls == [{"speaker_vector": Path("/data/generations/a.wav")}]
+
+
+def test_speak_resolves_voice_as_profile_and_forwards_style():
+    tts = FakeTTS()
+    _, client = build(tts=tts)
+
+    response = client.post(
+        "/speak", json={"text": "テスト", "voice": "既定の声", "style": "ささやき"}
+    )
+
+    assert response.status_code == 200
+    assert tts.calls[0]["profile_id"] == "既定の声"
+    assert tts.calls[0]["style"] == "ささやき"
+
+
+def test_speak_reports_unknown_style_as_404():
+    from pairvoice.styles import StyleNotFound
+
+    class MissingStyleTTS(FakeTTS):
+        def speak(self, *args, **kwargs):
+            raise StyleNotFound("無い")
+
+    _, client = build(tts=MissingStyleTTS())
+
+    response = client.post("/speak", json={"text": "テスト", "style": "無い"})
+
+    assert response.status_code == 404
+    assert response.json() == {"error": "style_not_found"}
+
+
+def test_speak_reports_broken_styles_file():
+    from pairvoice.styles import StyleInvalid
+
+    class BrokenStyleTTS(FakeTTS):
+        def speak(self, *args, **kwargs):
+            raise StyleInvalid("壊れている")
+
+    _, client = build(tts=BrokenStyleTTS())
+
+    response = client.post("/speak", json={"text": "テスト", "style": "a"})
+
+    assert response.status_code == 500
+    assert response.json() == {"error": "style_invalid", "detail": "壊れている"}
+
+
+def test_profiles_and_styles_list_choices():
+    _, client = build()
+
+    assert client.get("/profiles").json()["items"][0]["name"] == "既定の声"
+    assert client.get("/styles").json() == {
+        "items": [{"name": "ささやき", "caption": "ささやく。", "sampler": {}}]
+    }

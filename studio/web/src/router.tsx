@@ -5,6 +5,7 @@ import { Route as dictRoute } from './routes/dict'
 import { Route as profilesRoute } from './routes/profiles'
 import { Route as promptRoute } from './routes/prompt'
 import { Route as reviewRoute } from './routes/review'
+import { Route as stylesRoute } from './routes/styles'
 
 // いちばん使う画面なので、ここを入口にする
 const indexRoute = createRoute({
@@ -32,6 +33,7 @@ export const routeTree = rootRoute.addChildren([
   promptRoute,
   dictRoute,
   profilesRoute,
+  stylesRoute,
   ...legacyRedirects,
 ])
 
