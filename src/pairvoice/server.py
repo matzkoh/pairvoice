@@ -109,7 +109,7 @@ class SummaryResponse(BaseModel):
     text: str = Field(description="要約した文")
 
 
-class SpeakResponse(BaseModel):
+class SynthesisResponse(BaseModel):
     path: str = Field(description="合成した wav の絶対パス")
     relative_path: str = Field(description="データの置き場所からの相対パス")
     duration: float = Field(description="長さ（秒）")
@@ -340,11 +340,11 @@ def create_app(engine: Engine) -> FastAPI:
             return JSONResponse(status_code=409, content={"error": "dropped"})
         return {"text": text}
 
+    _VOICE_NOT_FOUND = (
+        "`profile_not_found`（`voice` の声が無い）、`style_not_found`（`style` が無い）"
+    )
     _SYNTHESIS_ERRORS: dict[int | str, dict] = {
-        404: _error(
-            "`profile_not_found`（`voice` の声が無い）、`style_not_found`（`style` が無い）、"
-            "`audio_not_found`（`mix` の wav が無い）"
-        ),
+        404: _error(_VOICE_NOT_FOUND),
         500: _STYLE_INVALID,
         503: _MODEL_UNAVAILABLE,
     }
@@ -360,7 +360,7 @@ def create_app(engine: Engine) -> FastAPI:
         "/speak",
         summary="合成して鳴らす",
         tags=["読み上げ"],
-        response_model=SpeakResponse,
+        response_model=SynthesisResponse,
         responses={409: {"model": MutedResponse, "description": "ミュート中"}, **_SYNTHESIS_ERRORS},
     )
     async def speak(request: Annotated[SpeakRequest, Body(openapi_examples=_SPEAK_EXAMPLES)]):
@@ -379,8 +379,11 @@ def create_app(engine: Engine) -> FastAPI:
         "/synthesize",
         summary="合成する（鳴らさない）",
         tags=["読み上げ"],
-        response_model=SpeakResponse,
-        responses=_SYNTHESIS_ERRORS,
+        response_model=SynthesisResponse,
+        responses={
+            **_SYNTHESIS_ERRORS,
+            404: _error(f"{_VOICE_NOT_FOUND}、`audio_not_found`（`mix` の wav が無い）"),
+        },
     )
     async def synthesize(
         request: Annotated[SynthesizeRequest, Body(openapi_examples=_SPEAK_EXAMPLES)],
