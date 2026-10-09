@@ -74,8 +74,6 @@ function isTimeout(err: unknown) {
 
 export function registerPairvoiceRoutes(addRoute: AddRoute) {
   // 試聴。ブラウザから直接 :17495 を叩くとCORSの考慮が要るため studio 経由で中継する。
-  // bypass_mute を立てるのは、studio でボタンを押す行為がユーザーの明示的な意思だから。
-  // ミュートはフックの自動読み上げを止めるための仕組みで、手で押した試聴には効かせない。
   addRoute('POST', '/api/speak', async (req, res) => {
     const body = await readJsonBody(req)
     if (typeof body.text !== 'string' || body.text.trim() === '') {
@@ -83,7 +81,6 @@ export function registerPairvoiceRoutes(addRoute: AddRoute) {
     }
     const payload: {
       text: string
-      bypass_mute: boolean
       caption?: string
       sampler?: Record<string, unknown>
       design?: true
@@ -91,7 +88,6 @@ export function registerPairvoiceRoutes(addRoute: AddRoute) {
       mix?: { audio: string; weight: number }[]
     } = {
       text: body.text,
-      bypass_mute: true,
     }
     // プロファイル作成の候補づくり。参照音声を使わず caption だけで声を作る。
     // 既定（false）はキーごと送らない
@@ -130,7 +126,7 @@ export function registerPairvoiceRoutes(addRoute: AddRoute) {
     // 成功時は SpeakResponse の形だが、pairvoice 側のバリデーションエラー等では
     // この型に無い形（detail/error）で返ることがある。中身は検証せず素通しする
     // （クライアント側が防御的に読む）。
-    await forwardToPairvoice(res, '/speak', payload)
+    await forwardToPairvoice(res, '/synthesize', payload)
   })
 
   // 2択で絞り込むときに、もとの声どうしの位置を測る話者ベクトル

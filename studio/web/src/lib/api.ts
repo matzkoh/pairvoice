@@ -55,7 +55,7 @@ export function isRecord(value: unknown): value is Record<string, unknown> {
   return typeof value === 'object' && value !== null
 }
 
-// pairvoice の /speak はバリデーションエラー等で SpeakResponse に無い形（detail/error）を
+// pairvoice の /synthesize はバリデーションエラー等で SpeakResponse に無い形（detail/error）を
 // 返すことがある。型だけではこの形を保証できないので、実際の値を見て読み分ける
 export function speakErrorMessage(result: unknown): string {
   if (isRecord(result)) {

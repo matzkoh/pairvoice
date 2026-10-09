@@ -99,11 +99,8 @@ export type ProfileItem = {
 }
 export type ProfilesResponse = { items: ProfileItem[]; active: string | null }
 
-// ミュート中は音声が返らない。呼び出し側に「鳴らなかった理由」を必ず見せるため
-// 成功と失敗を union にして、relative_path の有無で分岐させない。
-export type SpeakResponse =
-  | { muted: true; reason: string }
-  | { muted?: false; relative_path: string; duration: number }
+// /synthesize が wav を作れたときの応答。鳴らさないのでミュートでは断られない
+export type SpeakResponse = { relative_path: string; duration: number }
 
 // レビューの判定。'none' は「取り消し」を送るときだけ使う値で、POST /api/reviews は
 // この3値を受け付ける。保存された状態としての判定（CorpusItem.verdict）は 'none' を

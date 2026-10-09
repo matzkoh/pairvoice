@@ -44,7 +44,7 @@ class SamplerConfig:
 
     フィールド名は generate() の引数名そのままにしてある。名前がずれた値は黙って
     捨てられるので、途中で変換する層を作らない。項目を増やすときはここに1行足すだけで
-    config.toml と /speak の両方に効く。
+    config.toml と /synthesize の両方に効く。
 
     かつて 24kHz の参照音声のこもりを補うために cfg_scale_speaker を 1.5 まで下げていたが、
     参照音声を 44.1kHz に差し替えて原因が消えたので既定に戻した。「既定に戻した」がいまは None で表されている。

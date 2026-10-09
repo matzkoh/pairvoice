@@ -40,10 +40,10 @@ def test_llm_returns_text():
 def test_llm_reports_mute_with_reason():
     _, client = build(probe=FakeProbe(microphone=True))
 
-    response = client.post("/llm", json={"system": "s", "prompt": "p"})
+    response = client.post("/llm", json={"system": "s", "prompt": "p", "respect_mute": True})
 
-    assert response.status_code == 200
-    assert response.json() == {"muted": True, "reason": "microphone"}
+    assert response.status_code == 409
+    assert response.json() == {"error": "muted", "reason": "microphone"}
 
 
 def test_llm_requires_system_and_prompt():
@@ -101,7 +101,7 @@ def test_llm_reports_supersede_as_409(monkeypatch):
     response = client.post("/llm", json={"system": "s", "prompt": "p"})
 
     assert response.status_code == 409
-    assert response.json() == {"dropped": True}
+    assert response.json() == {"error": "dropped"}
 
 
 def test_speak_returns_paths_and_duration():
@@ -153,18 +153,26 @@ def test_speak_can_bypass_mute():
     muted = client.post("/speak", json={"text": "テスト"})
     bypassed = client.post("/speak", json={"text": "テスト", "bypass_mute": True})
 
-    assert muted.json() == {"muted": True, "reason": "microphone"}
+    assert muted.status_code == 409
+    assert muted.json() == {"error": "muted", "reason": "microphone"}
     assert bypassed.status_code == 200
 
 
-def test_llm_can_bypass_mute():
+def test_synthesize_ignores_mute():
     _, client = build(probe=FakeProbe(microphone=True))
 
-    muted = client.post("/llm", json={"system": "s", "prompt": "p"})
-    bypassed = client.post("/llm", json={"system": "s", "prompt": "p", "bypass_mute": True})
+    response = client.post("/synthesize", json={"text": "テスト"})
 
-    assert muted.json() == {"muted": True, "reason": "microphone"}
-    assert "text" in bypassed.json()
+    assert response.status_code == 200
+    assert response.json()["relative_path"] == "generations/x.wav"
+
+
+def test_llm_ignores_mute_unless_asked():
+    _, client = build(probe=FakeProbe(microphone=True))
+
+    response = client.post("/llm", json={"system": "s", "prompt": "p"})
+
+    assert "text" in response.json()
 
 
 def test_speak_forwards_caption_to_backend():
@@ -189,7 +197,9 @@ def test_speak_forwards_design_flag_to_backend():
     tts = FakeTTS()
     _, client = build(tts=tts)
 
-    response = client.post("/speak", json={"text": "候補", "caption": "試す声。", "design": True})
+    response = client.post(
+        "/synthesize", json={"text": "候補", "caption": "試す声。", "design": True}
+    )
 
     assert response.status_code == 200
     assert tts.calls == [
@@ -214,7 +224,7 @@ def test_speak_forwards_sampler_overrides_to_backend():
     _, client = build(tts=tts)
 
     response = client.post(
-        "/speak",
+        "/synthesize",
         json={"text": "テスト", "sampler": {"num_steps": 60, "rng_seed": 7}},
     )
 
@@ -246,7 +256,7 @@ def test_speak_drops_unset_sampler_keys():
     tts = FakeTTS()
     _, client = build(tts=tts)
 
-    client.post("/speak", json={"text": "テスト", "sampler": {"num_steps": 60}})
+    client.post("/synthesize", json={"text": "テスト", "sampler": {"num_steps": 60}})
 
     # 未指定は「モデル既定に任せる」。None を詰めて送ると config の値を潰してしまう
     assert tts.calls[0]["sampler"] == {"num_steps": 60}
@@ -256,7 +266,7 @@ def test_speak_rejects_unknown_sampler_key():
     _, client = build()
 
     response = client.post(
-        "/speak",
+        "/synthesize",
         json={"text": "テスト", "sampler": {"num_stpes": 60}},
     )
 
@@ -373,20 +383,20 @@ def test_get_mute_reports_current_state():
     assert response.json() == {"active": True, "reason": "audio_output", "until": None}
 
 
-def test_speak_with_play_queues_the_audio():
+def test_speak_queues_the_audio():
     engine, client = build()
 
-    client.post("/speak", json={"text": "テスト", "play": True})
+    client.post("/speak", json={"text": "テスト"})
 
     assert client.get("/health").json()["playback"] == {"playing": False, "waiting": 1}
     assert client.post("/stop").json() == {"stopped": 1}
     assert engine.player.describe() == {"playing": False, "waiting": 0}
 
 
-def test_speak_without_play_does_not_queue():
+def test_synthesize_does_not_queue():
     engine, client = build()
 
-    client.post("/speak", json={"text": "テスト"})
+    client.post("/synthesize", json={"text": "テスト"})
 
     assert engine.player.describe()["waiting"] == 0
 
@@ -422,7 +432,7 @@ def test_speak_forwards_mix_as_resolved_paths_and_weights():
     _, client = build(tts=tts)
 
     response = client.post(
-        "/speak",
+        "/synthesize",
         json={
             "text": "テスト",
             "caption": "女性の声。",
@@ -444,7 +454,7 @@ def test_speak_reports_mix_outside_data_root_as_404():
     _, client = build()
 
     response = client.post(
-        "/speak", json={"text": "テスト", "mix": [{"audio": "../secret.wav", "weight": 1}]}
+        "/synthesize", json={"text": "テスト", "mix": [{"audio": "../secret.wav", "weight": 1}]}
     )
 
     assert response.status_code == 404
@@ -456,7 +466,7 @@ def test_speak_accepts_negative_mix_weight_for_extrapolation():
     _, client = build(tts=tts)
 
     response = client.post(
-        "/speak",
+        "/synthesize",
         json={
             "text": "テスト",
             "mix": [
@@ -485,7 +495,7 @@ def test_speak_accepts_negative_mix_weight_for_extrapolation():
 def test_speak_rejects_mix_that_cannot_be_a_voice(mix):
     _, client = build()
 
-    response = client.post("/speak", json={"text": "テスト", "mix": mix})
+    response = client.post("/synthesize", json={"text": "テスト", "mix": mix})
 
     assert response.status_code == 422
 

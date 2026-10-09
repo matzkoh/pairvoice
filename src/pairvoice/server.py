@@ -49,15 +49,15 @@ API_DESCRIPTION = """\
 pairvoice の常駐サーバーの API。要約（mlx-lm）と音声合成（Irodori-TTS）を1本のキューで順に処理する。
 
 - 待ち受けは 127.0.0.1 だけ。ブラウザで開いた外部のページ（Host か Origin がループバックでない要求）は 403 で断る
-- ミュート中は合成せず、200 で `{"muted": true, "reason": ...}` を返す（`bypass_mute` で無視できる）
+- ミュート中は `/speak`（鳴らす）と `respect_mute` 付きの `/llm` を 409 `{"error": "muted", "reason": ...}` で断る。`/speak` は `bypass_mute` で鳴らせる。`/synthesize` は wav を作るだけなのでミュートを見ない
 - 声は `voice`（プロファイルの名前か ID）、話し方は `style`（studio の「スタイル」画面で作る名前）で選ぶ。選べる名前は `GET /profiles` と `GET /styles` で引ける
 """
 
 # /docs の「Try it out」の初期値。例が無いと Swagger UI はすべての項目を 0 で埋めた本文を出し、
 # そのまま送ると num_steps: 0 などの壊れた合成になる
-_SPEAK_BASIC = {"text": "テスト全部通ったよ。", "play": True}
+_SPEAK_BASIC = {"text": "テスト全部通ったよ。"}
 _SPEAK_EXAMPLES: dict[str, Example] = {
-    "basic": {"summary": "使用中の声で鳴らす", "value": _SPEAK_BASIC},
+    "basic": {"summary": "使用中の声で読む", "value": _SPEAK_BASIC},
     "voice_and_style": {
         "summary": "声とスタイルを選ぶ",
         "value": {**_SPEAK_BASIC, "voice": "優しい", "style": "ゆっくり"},
@@ -99,7 +99,7 @@ _STYLE_INVALID = _error("`style_invalid`（styles.json が壊れている）")
 
 
 class MutedResponse(BaseModel):
-    muted: Literal[True] = Field(description="ミュート中で、合成・要約しなかった")
+    error: Literal["muted"] = Field(description="ミュート中で、合成・要約しなかった")
     reason: str = Field(
         description="`manual`（手動）、`microphone`（マイク使用中）、`audio_output`（ほかのアプリが音を出している）など"
     )
@@ -126,11 +126,13 @@ class SummaryRequest(BaseModel):
         le=MAX_TOKENS_LIMIT,
         description="生成する最大トークン数。省くと config.toml の `[llm] max_tokens`",
     )
-    # pairvoice eval が使う。読み上げないので、ミュートを見ず、後発に追い越されても捨てない
-    bypass_mute: bool = Field(default=False, description="ミュート中でも要約する")
+    respect_mute: bool = Field(
+        default=False,
+        description="ミュート中なら要約せず 409 `muted` を返す（読み上げに使う要約のため）",
+    )
     droppable: bool = Field(
         default=True,
-        description="待っている間に後発の要約が来たら、これを捨てて 409 を返す（読み上げの古い要約を飛ばすため）",
+        description="待っている間に後発の要約が来たら、これを捨てて 409 `dropped` を返す（読み上げの古い要約を飛ばすため）",
     )
     wait_download: WaitDownload = True
 
@@ -187,11 +189,10 @@ class MixPart(BaseModel):
     )
 
 
-class SpeakRequest(BaseModel):
+class SynthesisRequest(BaseModel):
+    """/speak と /synthesize の両方にある項目。"""
+
     text: str = Field(description="読む文。合成の直前に読み辞書（dict.tsv）で読みに開く")
-    bypass_mute: bool = Field(
-        default=False, description="ミュート中でも合成する（`play` なら鳴らす）"
-    )
     voice: str | None = Field(
         default=None,
         # profile_id は旧名で、studio の試聴が ID で使う
@@ -208,6 +209,14 @@ class SpeakRequest(BaseModel):
         default=None,
         description="話し方の指示。省くとスタイル → プロファイルの caption の順で決まる。空文字は caption なしで読む",
     )
+    wait_download: WaitDownload = True
+
+
+class SpeakRequest(SynthesisRequest):
+    bypass_mute: bool = Field(default=False, description="ミュート中でも鳴らす")
+
+
+class SynthesizeRequest(SynthesisRequest):
     sampler: SamplerOverrides | None = Field(
         default=None, description="項目ごとにスタイルと config.toml より優先する"
     )
@@ -215,11 +224,6 @@ class SpeakRequest(BaseModel):
         default=False,
         description="studio のプロファイル作成用。参照音声を使わず caption だけで声を作る",
     )
-    play: bool = Field(
-        default=False,
-        description="合成したら常駐サーバーが鳴らす（鳴り終わるのは待たずに返る）。false なら wav を作るだけ",
-    )
-    wait_download: WaitDownload = True
     mix: list[MixPart] | None = Field(
         default=None,
         min_length=1,
@@ -273,7 +277,7 @@ def create_app(engine: Engine) -> FastAPI:
         lifespan=lifespan,
     )
 
-    # styles.json を読む口（/speak と /styles）のどこから起きても同じ応答にする
+    # ドメインの例外は、どのエンドポイントから起きても同じ応答にする
     @app.exception_handler(StyleNotFound)
     async def style_not_found(request: Request, error: StyleNotFound):
         return JSONResponse(status_code=404, content={"error": "style_not_found"})
@@ -283,6 +287,22 @@ def create_app(engine: Engine) -> FastAPI:
         return JSONResponse(
             status_code=500, content={"error": "style_invalid", "detail": str(error)}
         )
+
+    @app.exception_handler(MutedError)
+    async def muted(request: Request, error: MutedError):
+        return JSONResponse(status_code=409, content={"error": "muted", "reason": error.reason})
+
+    @app.exception_handler(ProfileNotFound)
+    async def profile_not_found(request: Request, error: ProfileNotFound):
+        return JSONResponse(status_code=404, content={"error": "profile_not_found"})
+
+    @app.exception_handler(AudioNotFound)
+    async def audio_not_found(request: Request, error: AudioNotFound):
+        return JSONResponse(status_code=404, content={"error": "audio_not_found"})
+
+    @app.exception_handler(ModelUnavailable)
+    async def model_unavailable(request: Request, error: ModelUnavailable):
+        return JSONResponse(status_code=503, content={"error": error.code, "detail": error.detail})
 
     @app.middleware("http")
     async def reject_foreign_pages(request: Request, call_next):
@@ -294,11 +314,12 @@ def create_app(engine: Engine) -> FastAPI:
         "/llm",
         summary="要約する",
         tags=["読み上げ"],
-        response_model=SummaryResponse | MutedResponse,
+        response_model=SummaryResponse,
         responses={
             409: {
-                "description": "後発の要約に追い越されて捨てた（`droppable` のとき）",
-                "content": {"application/json": {"example": {"dropped": True}}},
+                "model": MutedResponse | ErrorResponse,
+                "description": "ミュート中（`respect_mute` のとき）か、"
+                "後発の要約に追い越されて捨てた（`droppable` のとき、`error` は `dropped`）",
             },
             503: _MODEL_UNAVAILABLE,
         },
@@ -311,71 +332,79 @@ def create_app(engine: Engine) -> FastAPI:
                 system=request.system,
                 prompt=request.prompt,
                 max_tokens=request.max_tokens,
-                bypass_mute=request.bypass_mute,
+                respect_mute=request.respect_mute,
                 droppable=request.droppable,
                 wait_download=request.wait_download,
             )
-        except MutedError as error:
-            return {"muted": True, "reason": error.reason}
         except Superseded:
-            return JSONResponse(status_code=409, content={"dropped": True})
-        except ModelUnavailable as error:
-            return JSONResponse(
-                status_code=503, content={"error": error.code, "detail": error.detail}
-            )
+            return JSONResponse(status_code=409, content={"error": "dropped"})
         return {"text": text}
 
-    @app.post(
-        "/speak",
-        summary="合成する（`play` なら鳴らす）",
-        tags=["読み上げ"],
-        response_model=SpeakResponse | MutedResponse,
-        responses={
-            404: _error(
-                "`profile_not_found`（`voice` の声が無い）、`style_not_found`（`style` が無い）、"
-                "`audio_not_found`（`mix` の wav が無い）"
-            ),
-            500: _STYLE_INVALID,
-            503: _MODEL_UNAVAILABLE,
-        },
-    )
-    async def speak(request: Annotated[SpeakRequest, Body(openapi_examples=_SPEAK_EXAMPLES)]):
-        try:
-            result = await engine.speak(
-                request.text,
-                bypass_mute=request.bypass_mute,
-                caption=request.caption,
-                sampler=(
-                    request.sampler.model_dump(exclude_none=True)
-                    if request.sampler is not None
-                    else None
-                ),
-                design=request.design,
-                profile_id=request.voice,
-                play=request.play,
-                wait_download=request.wait_download,
-                mix=(
-                    [(part.audio, part.weight) for part in request.mix]
-                    if request.mix is not None
-                    else None
-                ),
-                style=request.style,
-            )
-        except MutedError as error:
-            return {"muted": True, "reason": error.reason}
-        except ProfileNotFound:
-            return JSONResponse(status_code=404, content={"error": "profile_not_found"})
-        except AudioNotFound:
-            return JSONResponse(status_code=404, content={"error": "audio_not_found"})
-        except ModelUnavailable as error:
-            return JSONResponse(
-                status_code=503, content={"error": error.code, "detail": error.detail}
-            )
+    _SYNTHESIS_ERRORS: dict[int | str, dict] = {
+        404: _error(
+            "`profile_not_found`（`voice` の声が無い）、`style_not_found`（`style` が無い）、"
+            "`audio_not_found`（`mix` の wav が無い）"
+        ),
+        500: _STYLE_INVALID,
+        503: _MODEL_UNAVAILABLE,
+    }
+
+    def speech_response(result) -> dict:
         return {
             "path": str(result.path),
             "relative_path": result.relative_path,
             "duration": result.duration,
         }
+
+    @app.post(
+        "/speak",
+        summary="合成して鳴らす",
+        tags=["読み上げ"],
+        response_model=SpeakResponse,
+        responses={409: {"model": MutedResponse, "description": "ミュート中"}, **_SYNTHESIS_ERRORS},
+    )
+    async def speak(request: Annotated[SpeakRequest, Body(openapi_examples=_SPEAK_EXAMPLES)]):
+        """再生の列に積んだら返り、鳴り終わるのは待たない。積んだあとに入ったミュートでは鳴らない。"""
+        result = await engine.speak(
+            request.text,
+            bypass_mute=request.bypass_mute,
+            caption=request.caption,
+            profile_id=request.voice,
+            wait_download=request.wait_download,
+            style=request.style,
+        )
+        return speech_response(result)
+
+    @app.post(
+        "/synthesize",
+        summary="合成する（鳴らさない）",
+        tags=["読み上げ"],
+        response_model=SpeakResponse,
+        responses=_SYNTHESIS_ERRORS,
+    )
+    async def synthesize(
+        request: Annotated[SynthesizeRequest, Body(openapi_examples=_SPEAK_EXAMPLES)],
+    ):
+        """wav を作るだけで、ミュートは見ない。studio の試聴と声づくりが使う。"""
+        result = await engine.synthesize(
+            request.text,
+            caption=request.caption,
+            sampler=(
+                request.sampler.model_dump(exclude_none=True)
+                if request.sampler is not None
+                else None
+            ),
+            design=request.design,
+            profile_id=request.voice,
+            wait_download=request.wait_download,
+            mix=(
+                [(part.audio, part.weight) for part in request.mix]
+                if request.mix is not None
+                else None
+            ),
+            style=request.style,
+        )
+        return speech_response(result)
 
     @app.post(
         "/speaker-vector",
@@ -384,20 +413,12 @@ def create_app(engine: Engine) -> FastAPI:
         responses={404: _error("`audio_not_found`"), 503: _MODEL_UNAVAILABLE},
     )
     async def speaker_vector(request: SpeakerVectorRequest):
-        try:
-            vector = await engine.speaker_vector(request.audio)
-        except AudioNotFound:
-            return JSONResponse(status_code=404, content={"error": "audio_not_found"})
-        except ModelUnavailable as error:
-            return JSONResponse(
-                status_code=503, content={"error": error.code, "detail": error.detail}
-            )
-        return {"vector": vector}
+        return {"vector": await engine.speaker_vector(request.audio)}
 
     # ファイルを読むので def にして、イベントループの外（スレッドプール）で動かす
     @app.get("/profiles", summary="声の一覧", tags=["声"])
     def profiles():
-        """`/speak` の `voice` に渡せる声（プロファイル）。`active` は使用中の声の ID。"""
+        """`/speak` と `/synthesize` の `voice` に渡せる声（プロファイル）。`active` は使用中の声の ID。"""
         return engine.list_profiles()
 
     @app.get(
@@ -407,7 +428,7 @@ def create_app(engine: Engine) -> FastAPI:
         responses={500: _STYLE_INVALID},
     )
     def styles():
-        """`/speak` の `style` に渡せるスタイル。`caption` が null のスタイルはプロファイルの caption のまま読む。"""
+        """`/speak` と `/synthesize` の `style` に渡せるスタイル。`caption` が null のスタイルはプロファイルの caption のまま読む。"""
         return {"items": engine.list_styles()}
 
     @app.get("/health", summary="状態", tags=["状態"])

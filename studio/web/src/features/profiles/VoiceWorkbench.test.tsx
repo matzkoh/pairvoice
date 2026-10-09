@@ -142,11 +142,11 @@ it('サンプラーの値が不正なら生成せず、理由を出す', async (
 })
 
 it('合成が失敗したらそのテイクに理由を出し、残りの待機テイクは捨てる', async () => {
-  vi.mocked(apiSend).mockResolvedValue({ muted: true, reason: 'manual' })
+  vi.mocked(apiSend).mockResolvedValue({ error: 'model_load_failed' })
   renderWorkbench()
   fireEvent.change(screen.getByLabelText(/候補数/), { target: { value: '3' } })
   await generate()
-  expect(await screen.findByText(/ミュート中/)).toBeTruthy()
+  expect(await screen.findByText(/model_load_failed/)).toBeTruthy()
   expect(screen.getAllByRole('button', { name: /テイク \d+ を再生/ })).toHaveLength(1)
   expect(apiSend).toHaveBeenCalledTimes(1)
 })

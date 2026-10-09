@@ -335,16 +335,16 @@ class Engine:
         if state.active:
             raise MutedError(state.reason or "manual")
 
-    async def _run_unless_muted(self, fn: Callable, *, bypass_mute: bool, droppable: bool):
-        """ミュートを、キューに入れる前と Runner で実行する直前の2回確かめてから fn を実行する。"""
-        if not bypass_mute:
+    async def _run(self, fn: Callable, *, check_mute: bool, droppable: bool):
+        """Runner で fn を実行する。check_mute なら、キューに入れる前と実行する直前の2回ミュートを確かめる。"""
+        if check_mute:
             # 通知音のような短い音なら止むのを待つ。キューの外なので Runner は塞がない
             self._raise_if_muted(await self.mute.wait_state())
 
         async def work():
             # キューで待っている間にミュートが有効化されうるので、実行直前にもう一度判定する。
             # 投入前のチェックは早期に返せる分だけ得なので残す
-            if not bypass_mute:
+            if check_mute:
                 # ここで音が止むのを待つと Runner を塞ぐので、ほかのアプリの音は見ない。
                 # 音は Player が鳴らす直前に確かめる
                 self._raise_if_muted(self.mute.state(include_output=False))
@@ -357,13 +357,13 @@ class Engine:
         system: str,
         prompt: str,
         max_tokens: int | None = None,
-        bypass_mute: bool = False,
+        respect_mute: bool = False,
         droppable: bool = True,
         wait_download: bool = True,
     ) -> str:
         """droppable なら、待っている間に後発の要約が来たら捨てる（もう読み上げる意味が無い）。
 
-        読み上げに使わない要約（`pairvoice eval`）は bypass_mute と droppable=False で呼ぶ。
+        読み上げに使う要約（フック）は respect_mute で呼び、ミュート中は要約しない。
         """
 
         async def work():
@@ -372,24 +372,22 @@ class Engine:
             self._llm.touch()
             return text
 
-        return await self._run_unless_muted(work, bypass_mute=bypass_mute, droppable=droppable)
+        return await self._run(work, check_mute=respect_mute, droppable=droppable)
 
-    async def speak(
+    async def synthesize(
         self,
         text: str,
-        bypass_mute: bool = False,
         caption: str | None = None,
         sampler: dict | None = None,
         design: bool = False,
         profile_id: str | None = None,
-        play: bool = False,
         wait_download: bool = True,
         mix: list[tuple[str, float]] | None = None,
         style: str | None = None,
+        *,
+        check_mute: bool = False,
     ):
-        """play なら、合成した音声を Player の列に積んでから返す（鳴り終わるのは待たない）。"""
-        # 合成を待っている間に「止める」が押されたら、出来上がっても鳴らさない
-        epoch = self.player.epoch
+        """wav を作るだけ。鳴らさないのでミュートは見ない（speak が check_mute で頼むときを除く）。"""
 
         async def work():
             await self._tts.ensure_loaded(wait_download=wait_download)
@@ -411,9 +409,29 @@ class Engine:
             self._tts.touch()
             return result
 
-        result = await self._run_unless_muted(work, bypass_mute=bypass_mute, droppable=False)
-        if play:
-            self.player.enqueue(result.path, bypass_mute=bypass_mute, epoch=epoch)
+        return await self._run(work, check_mute=check_mute, droppable=False)
+
+    async def speak(
+        self,
+        text: str,
+        bypass_mute: bool = False,
+        caption: str | None = None,
+        profile_id: str | None = None,
+        wait_download: bool = True,
+        style: str | None = None,
+    ):
+        """合成した音声を Player の列に積んでから返す（鳴り終わるのは待たない）。"""
+        # 合成を待っている間に「止める」が押されたら、出来上がっても鳴らさない
+        epoch = self.player.epoch
+        result = await self.synthesize(
+            text,
+            caption=caption,
+            profile_id=profile_id,
+            wait_download=wait_download,
+            style=style,
+            check_mute=not bypass_mute,
+        )
+        self.player.enqueue(result.path, bypass_mute=bypass_mute, epoch=epoch)
         return result
 
     def list_profiles(self) -> dict:
@@ -433,7 +451,7 @@ class Engine:
             return vector
 
         # 測るのは studio の操作で、音は出さないのでミュートは効かせない
-        return await self._run_unless_muted(work, bypass_mute=True, droppable=False)
+        return await self._run(work, check_mute=False, droppable=False)
 
     async def warmup(self) -> dict:
         # ロードも直列キューを通し、llm と tts を順に読み込む（並行だとピークメモリが両方の合計になる）

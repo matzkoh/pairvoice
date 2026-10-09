@@ -1,6 +1,6 @@
 """話し方のスタイル（名前付きの caption + sampler の組）の読み込み。
 
-データの置き場所の styles.json に置き、studio が書いて常駐サーバーが読む。/speak の
+データの置き場所の styles.json に置き、studio が書いて常駐サーバーが読む。/speak・/synthesize の
 style で名前を指定すると、そのリクエストだけこの caption と sampler で合成する。
 合成のたびに読むので、studio で直した版が再起動なしに効く。
 

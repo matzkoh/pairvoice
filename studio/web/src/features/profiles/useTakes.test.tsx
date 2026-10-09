@@ -96,12 +96,10 @@ it('次の生成は前のテイクを残して上に積む', async () => {
 })
 
 it('失敗したらそのテイクに理由を出し、残りの待機テイクは捨てる', async () => {
-  vi.mocked(apiSend)
-    .mockResolvedValueOnce(OK)
-    .mockResolvedValueOnce({ muted: true, reason: 'manual' })
+  vi.mocked(apiSend).mockResolvedValueOnce(OK).mockResolvedValueOnce({ error: 'model_load_failed' })
   render(<Harness />)
   await click('A を3件')
-  expect(rows()).toEqual(['10:done:声A:-', '11:error:声A:ミュート中（manual）'])
+  expect(rows()).toEqual(['10:done:声A:-', '11:error:声A:model_load_failed'])
   expect(screen.getByTestId('running').textContent).toBe('idle')
 })
 

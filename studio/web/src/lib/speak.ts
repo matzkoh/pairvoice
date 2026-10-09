@@ -1,4 +1,4 @@
-// /speak を1回叩くところ。試聴と候補づくりのテイク生成はすべてここを通る。
+// /synthesize を1回叩くところ。試聴と候補づくりのテイク生成はすべてここを通る。
 //
 // api.ts ではなく別ファイルに置くのは、テストが apiSend をモジュール境界で差し替える
 // ため。api.ts の中から apiSend を呼ぶとその差し替えを素通りしてしまう。
@@ -23,17 +23,13 @@ export function audioFileUrl(relativePath: string) {
   return `/api/audio-file?path=${encodeURIComponent(relativePath)}`
 }
 
-export type SpeakSuccess = Extract<SpeakResponse, { relative_path: string }>
-
-// 応答は「ミュートされた」「音が返らなかった」「鳴った」の3通りで、後ろ2つの見分け方を
-// 呼び出し側に散らすと、応答の形が変わったときに片方だけ古い判定が残る。鳴らなかった
-// 場合は必ず例外にして、成功の形だけを返す。
-export async function speakOnce(body: SpeakBody, signal?: AbortSignal): Promise<SpeakSuccess> {
+// 音が返らなかった場合は必ず例外にして、成功の形だけを返す。見分け方を呼び出し側に
+// 散らすと、応答の形が変わったときに一部だけ古い判定が残る
+export async function speakOnce(body: SpeakBody, signal?: AbortSignal): Promise<SpeakResponse> {
   // 打ち切らない呼び出しは、これまでどおり3引数で送る
   const result = signal
     ? await apiSend<SpeakResponse>('/api/speak', 'POST', body, { signal })
     : await apiSend<SpeakResponse>('/api/speak', 'POST', body)
-  if ('muted' in result && result.muted) throw new Error(`ミュート中（${result.reason}）`)
   if (!('relative_path' in result) || !result.relative_path) {
     throw new Error(speakErrorMessage(result))
   }

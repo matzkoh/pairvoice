@@ -119,7 +119,7 @@ class MlxAudioBackend:
         """generate() に渡すサンプラーを決める（config → 上書きの2段）。
 
         None は「モデル既定に任せる」なのでキーごと落とす。項目ごとの配線を持たないので、
-        SamplerConfig に1行足せば config.toml と /speak の両方に効く。
+        SamplerConfig に1行足せば config.toml と /synthesize の両方に効く。
         例外は speaker_kv_min_t の1つだけで、これは None のまま残す。
         """
         merged: dict[str, object] = dict(dataclasses.asdict(self._config.sampler))

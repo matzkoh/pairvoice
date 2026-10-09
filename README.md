@@ -106,11 +106,11 @@ studio の「プロファイル」画面で、
 
 ```bash
 curl -s http://127.0.0.1:17495/speak -H 'Content-Type: application/json' \
-  -d '{"text": "テスト", "voice": "落ち着いた声", "style": "ささやき", "play": true}'
+  -d '{"text": "テスト", "voice": "落ち着いた声", "style": "ささやき"}'
 pairvoice say --voice 落ち着いた声 --style ささやき "テスト"
 ```
 
-`/speak` の `caption` と `sampler` はスタイルより優先する。
+`caption` はスタイルより優先する。鳴らさずに wav だけ作る `/synthesize` は、ミュートを見ず、`sampler` も受け付ける。
 選べる名前は `GET /profiles` と `GET /styles` で引ける。
 API のすべてのエンドポイントと項目は、常駐サーバーが動いている間 http://127.0.0.1:17495/docs で引ける。
 Claude Code の読み上げでは、環境変数 `PAIRVOICE_VOICE` と `PAIRVOICE_STYLE` で選ぶ（プロジェクトの `.claude/settings.json` の `env` に書けば、プロジェクトごとに変えられる）。

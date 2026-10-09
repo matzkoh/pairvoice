@@ -156,8 +156,7 @@ def daemon_summarizer(base: str, max_tokens: int | None = None) -> Summarize:
                 "system": system,
                 "prompt": prompt,
                 "max_tokens": max_tokens,
-                # 鳴らさないのでミュートを見ず、読み上げの要約に追い越されても1件も欠けさせない
-                "bypass_mute": True,
+                # 読み上げの要約に追い越されても1件も欠けさせない
                 "droppable": False,
             },
             timeout=300,

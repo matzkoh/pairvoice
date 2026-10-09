@@ -1258,7 +1258,6 @@ test('POST /api/speak は design と profile_id を pairvoice へ中継する', 
     assert.deepEqual(fake.requests[0]!.body, {
       text: '候補',
       caption: '試す声。',
-      bypass_mute: true,
       design: true,
     })
     // 試聴するプロファイルは ID の形のものだけを中継し、ほかは 400 で断る
@@ -1321,7 +1320,7 @@ test('POST /api/speak は mix を、POST /api/speaker-vector は audio を pairv
   }
 })
 
-test('POST /api/speak は text と caption を pairvoice へ中継し、ミュートを迂回する', async () => {
+test('POST /api/speak は text と caption を pairvoice の /synthesize へ中継する', async () => {
   const fake = await startFakePairvoice()
   const prevUrl = process.env.PAIRVOICE_URL
   process.env.PAIRVOICE_URL = fake.url
@@ -1335,12 +1334,10 @@ test('POST /api/speak は text と caption を pairvoice へ中継し、ミュ�
     })
     assert.equal(res.status, 200)
     assert.equal(fake.requests.length, 1)
-    assert.equal(fake.requests[0]!.url, '/speak')
-    // 手で押した試聴を止める意味はない。ミュートはフックの自動読み上げを止める仕組み
+    assert.equal(fake.requests[0]!.url, '/synthesize')
     assert.deepEqual(fake.requests[0]!.body, {
       text: 'テスト',
       caption: '試している声。',
-      bypass_mute: true,
     })
   } finally {
     await new Promise((resolve) => server.close(resolve))
@@ -1380,7 +1377,7 @@ test('POST /api/speak は caption を省略したときペイロードに captio
     assert.equal(fake.requests.length, 1)
     // caption 未指定は「採用済みの版で読む」の意味。キーごと送らない
     assert.ok(!('caption' in fake.requests[0]!.body), 'caption キーは含まれるべきではない')
-    assert.deepEqual(fake.requests[0]!.body, { text: 'テスト', bypass_mute: true })
+    assert.deepEqual(fake.requests[0]!.body, { text: 'テスト' })
   } finally {
     await new Promise((resolve) => server.close(resolve))
     process.env.PAIRVOICE_URL = prevUrl
@@ -1403,7 +1400,7 @@ test('POST /api/speak は空白のみの caption を空の caption として中�
     assert.equal(res.status, 200)
     assert.equal(fake.requests.length, 1)
     // 空は「caption なしで読む」の指定。省略（プロファイルの caption で読む）とは区別する
-    assert.deepEqual(fake.requests[0]!.body, { text: 'テスト', bypass_mute: true, caption: '' })
+    assert.deepEqual(fake.requests[0]!.body, { text: 'テスト', caption: '' })
   } finally {
     await new Promise((resolve) => server.close(resolve))
     process.env.PAIRVOICE_URL = prevUrl
@@ -1426,7 +1423,6 @@ test('POST /api/speak は sampler を pairvoice へ素通しで中継する', as
     assert.equal(res.status, 200)
     assert.deepEqual(fake.requests[0]!.body, {
       text: 'テスト',
-      bypass_mute: true,
       sampler: { num_steps: 60, rng_seed: 7 },
     })
   } finally {

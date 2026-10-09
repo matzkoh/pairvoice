@@ -130,7 +130,7 @@ async def test_summarize_refuses_when_muted():
     engine = make_engine(probe=FakeProbe(microphone=True))
 
     with pytest.raises(MutedError) as error:
-        await engine.summarize(system="s", prompt="p")
+        await engine.summarize(system="s", prompt="p", respect_mute=True)
 
     assert error.value.reason == "microphone"
 
@@ -140,6 +140,16 @@ async def test_speak_refuses_when_muted():
 
     with pytest.raises(MutedError):
         await engine.speak("テスト")
+
+
+async def test_synthesize_ignores_mute():
+    tts = FakeTTS()
+    engine = make_engine(probe=FakeProbe(microphone=True), tts=tts)
+
+    result = await engine.synthesize("テスト")
+
+    assert result.relative_path == "generations/x.wav"
+    assert len(tts.calls) == 1
 
 
 async def test_speak_can_bypass_mute():
@@ -154,10 +164,10 @@ async def test_speak_can_bypass_mute():
     ]
 
 
-async def test_summarize_can_bypass_mute():
+async def test_summarize_ignores_mute_unless_asked():
     engine = make_engine(probe=FakeProbe(microphone=True))
 
-    assert await engine.summarize(system="s", prompt="p", bypass_mute=True)
+    assert await engine.summarize(system="s", prompt="p")
 
 
 async def test_summarize_that_is_not_droppable_survives_a_later_request():
@@ -186,7 +196,7 @@ async def test_summarize_rechecks_mute_after_waiting_in_queue():
 
     first_task = asyncio.create_task(engine.summarize(system="s", prompt="1"))
     await asyncio.sleep(0.03)  # first がロードを開始しキューを塞ぐのを待つ
-    second_task = asyncio.create_task(engine.summarize(system="s", prompt="2"))
+    second_task = asyncio.create_task(engine.summarize(system="s", prompt="2", respect_mute=True))
     await asyncio.sleep(0.03)  # second が投入前チェックを通過し待機に入るのを待つ
     probe.microphone = True
 
@@ -205,7 +215,7 @@ async def test_speak_rechecks_mute_after_waiting_in_queue():
     tts = FakeTTS(load_delay=0.15)
     engine = make_engine(probe=probe, tts=tts)
 
-    first_task = asyncio.create_task(engine.speak("先行"))
+    first_task = asyncio.create_task(engine.synthesize("先行"))
     await asyncio.sleep(0.03)
     second_task = asyncio.create_task(engine.speak("後発"))
     await asyncio.sleep(0.03)
@@ -250,7 +260,7 @@ async def test_in_queue_check_does_not_look_at_other_audio():
     tts = FakeTTS(load_delay=0.15)
     engine = make_engine(probe=probe, tts=tts)
 
-    first_task = asyncio.create_task(engine.speak("先行"))
+    first_task = asyncio.create_task(engine.synthesize("先行"))
     await asyncio.sleep(0.03)
     second_task = asyncio.create_task(engine.speak("後発"))
     await asyncio.sleep(0.03)
@@ -286,12 +296,12 @@ async def test_waiting_summary_is_superseded_but_speech_is_not():
     tts = FakeTTS(load_delay=0.15)
     engine = make_engine(tts=tts)
 
-    slow = asyncio.create_task(engine.speak("ゆっくり"))
+    slow = asyncio.create_task(engine.synthesize("ゆっくり"))
     await asyncio.sleep(0.03)
     first = asyncio.create_task(engine.summarize(system="s", prompt="1"))
     await asyncio.sleep(0.03)
     second = asyncio.create_task(engine.summarize(system="s", prompt="2"))
-    third = asyncio.create_task(engine.speak("捨てられない"))
+    third = asyncio.create_task(engine.synthesize("捨てられない"))
 
     results = await gather_results([slow, first, second, third])
 
@@ -371,7 +381,7 @@ async def test_health_does_not_reevaluate_loaded_model():
     # preflight() を再評価して misconfigured に書き換えてはいけない。
     tts = FakeTTS()
     engine = make_engine(tts=tts)
-    await engine.speak("先行")  # tts を load 済みにする
+    await engine.synthesize("先行")  # tts を load 済みにする
 
     tts.preflight_problem = "ref_audio_missing"
     health = engine.health()
@@ -452,7 +462,7 @@ async def test_speak_passes_caption_override_to_backend():
     tts = FakeTTS()
     engine = make_engine(tts=tts)
 
-    await engine.speak("テスト", caption="試している声。")
+    await engine.synthesize("テスト", caption="試している声。")
 
     assert tts.calls == [
         {
@@ -469,7 +479,7 @@ async def test_speak_forwards_design_flag_to_backend():
     tts = FakeTTS()
     engine = make_engine(tts=tts)
 
-    await engine.speak("候補", caption="試す声。", design=True)
+    await engine.synthesize("候補", caption="試す声。", design=True)
 
     assert tts.calls == [
         {"text": "候補", "caption": "試す声。", "sampler": None, "design": True, "profile_id": None}
@@ -480,7 +490,7 @@ async def test_speak_forwards_sampler_override_to_backend():
     tts = FakeTTS()
     engine = make_engine(tts=tts)
 
-    await engine.speak("テスト", sampler={"num_steps": 60})
+    await engine.synthesize("テスト", sampler={"num_steps": 60})
 
     assert tts.calls == [
         {
@@ -545,7 +555,7 @@ async def test_mlx_work_runs_on_one_dedicated_thread():
     # 既定のスレッドプールは複数のワーカーを持つ。並べて投げても同じ1本に集まること
     await asyncio.gather(*(asyncio.to_thread(time.sleep, 0.01) for _ in range(8)))
     await engine.summarize(system="s", prompt="p")
-    await engine.speak("テスト", bypass_mute=True)
+    await engine.synthesize("テスト")
     await engine.summarize(system="s", prompt="p2")
     engine._llm._idle_unload_seconds = -1
     assert await engine._llm.unload_if_idle()

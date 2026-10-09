@@ -240,7 +240,7 @@ def main(argv: list[str] | None = None) -> int:
         elif args.command == "status":
             result = client.call(base, "/health", method="GET")
         elif args.command == "say":
-            body = {"text": args.text, "bypass_mute": True, "play": True}
+            body = {"text": args.text, "bypass_mute": True}
             for key in ("voice", "style", "caption"):
                 if getattr(args, key) is not None:
                     body[key] = getattr(args, key)

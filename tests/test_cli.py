@@ -123,14 +123,13 @@ def test_say_bypasses_mute(calls, config_path, monkeypatch):
     assert cli.main(["--config", config_path, "say", "テスト"]) == 0
     assert calls[0]["url"] == "http://127.0.0.1:17495/speak"
     # 鳴らすのは常駐サーバー
-    assert calls[0]["body"] == {"text": "テスト", "bypass_mute": True, "play": True}
+    assert calls[0]["body"] == {"text": "テスト", "bypass_mute": True}
 
     args = ["--config", config_path, "say", "テスト", "--voice", "声", "--style", "ささやき"]
     assert cli.main(args) == 0
     assert calls[1]["body"] == {
         "text": "テスト",
         "bypass_mute": True,
-        "play": True,
         "voice": "声",
         "style": "ささやき",
     }

@@ -3,7 +3,7 @@
 # 失敗しても Claude Code 本体の動作に影響しないよう、常に exit 0 で終わる。
 #
 # 直列化・ミュート判定・モデルの常駐・再生は pairvoice 側の責務。このスクリプトは
-# 要約と音声化（play: true で、鳴らすのも pairvoice）を1回ずつ叩くだけ。
+# 要約と音声化（/speak で、鳴らすのも pairvoice）を1回ずつ叩くだけ。
 # 要約と音声化には数秒かかるので、パイプライン全体をバックグラウンドに
 # 逃がしてから即座に終了する（Claude Code の画面更新を待たせない）。
 
@@ -150,7 +150,7 @@ get_summary() {
   fi
   # 本文は標準入力で渡す。引数に載せると長い出力で ARG_MAX を超えて jq も curl も動かない
   payload=$(printf '%s' "$text" | jq -Rs --rawfile system "$DATA_DIR/prompt.txt" \
-    '{prompt: ., system: $system, wait_download: false}')
+    '{prompt: ., system: $system, respect_mute: true, wait_download: false}')
 
   for attempt in $(seq 1 "$SUMMARY_MAX_RETRIES"); do
     response=$(printf '%s' "$payload" | curl -s --max-time "$LLM_TIMEOUT_SECONDS" -w '\n%{http_code}' \
@@ -158,7 +158,13 @@ get_summary() {
     local status="${response##*$'\n'}" body="${response%$'\n'*}"
 
     case "$status" in
-      409) SUMMARY_STATUS="superseded"; return 1 ;;
+      409)
+        case "$(printf '%s' "$body" | jq -r '.error // "unknown"' 2>/dev/null)" in
+          muted) SUMMARY_STATUS="muted: $(printf '%s' "$body" | jq -r '.reason // "unknown"' 2>/dev/null)" ;;
+          *) SUMMARY_STATUS="superseded" ;;
+        esac
+        return 1
+        ;;
       503)
         # サーバーのエラーコードをログの文言に直す
         case "$(printf '%s' "$body" | jq -r '.error // "unknown"' 2>/dev/null)" in
@@ -172,11 +178,6 @@ get_summary() {
         ;;
       000) SUMMARY_STATUS="$(unanswered_reason)"; return 1 ;;
     esac
-
-    if [ "$(printf '%s' "$body" | jq -r '.muted // false' 2>/dev/null)" = "true" ]; then
-      SUMMARY_STATUS="muted: $(printf '%s' "$body" | jq -r '.reason // "unknown"' 2>/dev/null)"
-      return 1
-    fi
 
     local candidate
     candidate=$(printf '%s' "$body" | jq -r '.text // empty' 2>/dev/null)
@@ -195,7 +196,7 @@ get_summary() {
 request_speech() {
   local text="$1" payload response status body
   payload=$(jq -n --arg text "$text" --arg voice "$VOICE" --arg style "$STYLE" \
-    '{text: $text, play: true, wait_download: false}
+    '{text: $text, wait_download: false}
       + (if $voice == "" then {} else {voice: $voice} end)
       + (if $style == "" then {} else {style: $style} end)')
   response=$(curl -s --max-time "$SPEAK_TIMEOUT_SECONDS" -w '\n%{http_code}' \
@@ -209,6 +210,7 @@ request_speech() {
   fi
   if [ "$status" != "200" ]; then
     case "$(printf '%s' "$body" | jq -r '.error // "unknown"' 2>/dev/null)" in
+      muted) log INFO "SKIP (muted: $(printf '%s' "$body" | jq -r '.reason' 2>/dev/null))" ;;
       model_load_failed) log INFO "SKIP (model load failed)" ;;
       model_downloading) log INFO "SKIP (model downloading)" ;;
       generation_failed) log INFO "SKIP (generation failed)" ;;
@@ -217,10 +219,6 @@ request_speech() {
       style_not_found) log WARN "SKIP (style not found: PAIRVOICE_STYLE=$STYLE)" ;;
       *) log WARN "SKIP (speak failed: http $status): $body" ;;
     esac
-    return 1
-  fi
-  if [ "$(printf '%s' "$body" | jq -r '.muted // false' 2>/dev/null)" = "true" ]; then
-    log INFO "SKIP (muted: $(printf '%s' "$body" | jq -r '.reason' 2>/dev/null))"
     return 1
   fi
   printf '%s' "$(printf '%s' "$body" | jq -r '.relative_path // empty' 2>/dev/null)"
