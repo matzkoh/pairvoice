@@ -43,7 +43,7 @@ import numpy as np
 
 from .config import TTSConfig
 from .postprocess import normalize, trim
-from .profiles import Profile, ProfileNotFound, ProfileStore
+from .profiles import PROFILES_DIRNAME, Profile, ProfileNotFound, ProfileStore
 from .reading import DICT_FILENAME, apply_dict, load_dict
 from .styles import STYLES_FILENAME, StyleStore
 
@@ -63,6 +63,15 @@ class AudioNotFound(Exception):
     """指定された音声がデータの置き場所に無い（外を指している・消された）。"""
 
 
+def resolve_data_audio(data_dir: Path, relative: str) -> Path:
+    """データの置き場所からの相対パスを、置き場所の中の wav に解決する。"""
+    root = data_dir.resolve()
+    path = (root / relative).resolve()
+    if not path.is_relative_to(root) or path.suffix != ".wav" or not path.is_file():
+        raise AudioNotFound(relative)
+    return path
+
+
 @dataclass(frozen=True)
 class SpeechResult:
     path: Path
@@ -79,8 +88,8 @@ class MlxAudioBackend:
     def __init__(self, config: TTSConfig, data_dir: Path | None = None) -> None:
         self._config = config
         self.model = config.model
-        self._data_dir = data_dir or config.output_dir.parent
-        self._profiles = ProfileStore(self._data_dir / "profiles")
+        self._data_dir = data_dir or config.data_root
+        self._profiles = ProfileStore(self._data_dir / PROFILES_DIRNAME)
         self._styles = StyleStore(self._data_dir / STYLES_FILENAME)
         self._loaded = None
         # 次の合成で差し込む話者の表現。mix の合成の間だけ立てる（_speaking_as）
@@ -139,19 +148,6 @@ class MlxAudioBackend:
             # 黙って捨てないよう手を引く（巻き戻しを望んだのはユーザーである）。
             resolved["speaker_kv_min_t"] = None
         return resolved
-
-    def list_profiles(self) -> dict[str, object]:
-        """API の利用者が声を選ぶための一覧。参照音声のパスは見せない。"""
-        active = self._profiles.active()
-        return {
-            "active": active.id if active is not None else None,
-            "items": [
-                {"id": p.id, "name": p.name, "caption": p.caption} for p in self._profiles.all()
-            ],
-        }
-
-    def list_styles(self) -> list[dict[str, object]]:
-        return [dataclasses.asdict(style) for style in self._styles.all()]
 
     def describe_profile(self) -> dict[str, str] | None:
         profile = self._profiles.active()
@@ -272,12 +268,7 @@ class MlxAudioBackend:
         return state
 
     def resolve_audio(self, relative: str) -> Path:
-        """studio が渡すデータの置き場所からの相対パスを、置き場所の中の wav に解決する。"""
-        root = self._data_dir.resolve()
-        path = (root / relative).resolve()
-        if not path.is_relative_to(root) or path.suffix != ".wav" or not path.is_file():
-            raise AudioNotFound(relative)
-        return path
+        return resolve_data_audio(self._data_dir, relative)
 
     def speaker_vector(self, path: Path) -> list[float]:
         """話者の表現の時間平均。声どうしの近さを測る物差しにする。"""

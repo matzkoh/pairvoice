@@ -25,7 +25,7 @@ export function badRequest(res: http.ServerResponse, message: string) {
   sendJson(res, 400, { error: 'bad_request', message })
 }
 
-// pairvoice の応答をそのまま中継する（POST の proxy 2本が使う）。中身は検証せず
+// pairvoice の JSON の応答をそのまま中継する（routes/pairvoice.ts の中継が使う）。中身は検証せず
 // 素通しするが、JSON とも限らない: pairvoice が例外で 500 になったときの本文は
 // uvicorn の `Internal Server Error`（text/plain）で、response.json() はそこで構文
 // エラーを投げる。すると addRoute の catch が studio 自身の internal_error として
@@ -52,12 +52,12 @@ export async function relayPairvoice(res: http.ServerResponse, response: Respons
 export class BodyTooLargeError extends Error {}
 export class InvalidJsonError extends Error {}
 
-// JSON の本文の上限。プロンプトや辞書の全置換で足りる
+// JSON の本文の上限。studio が自分で受ける本文（レビュー・試聴の指示）には十分
 const JSON_BODY_MAX_BYTES = 10 * 1024 * 1024
 
 // 上限は読みながら数える。Content-Length の事前確認だけでは、chunked で送られた
 // 本文を青天井でメモリに積む
-export function readBodyBuffer(req: http.IncomingMessage, maxBytes: number) {
+function readBodyBuffer(req: http.IncomingMessage, maxBytes: number) {
   return new Promise<Buffer>((resolve, reject) => {
     const chunks: Buffer[] = []
     let size = 0
@@ -77,11 +77,11 @@ export function readBodyBuffer(req: http.IncomingMessage, maxBytes: number) {
   })
 }
 
-export async function readBody(req: http.IncomingMessage, maxBytes = JSON_BODY_MAX_BYTES) {
-  return (await readBodyBuffer(req, maxBytes)).toString('utf8')
+async function readBody(req: http.IncomingMessage) {
+  return (await readBodyBuffer(req, JSON_BODY_MAX_BYTES)).toString('utf8')
 }
 
-// 無い・ファイルでないなら 404。音声を返す経路（コーパス・試聴・プロファイル）はすべてここを通る。
+// 無い・ファイルでないなら 404。ファイルから音声を返す経路（コーパス・試聴）はすべてここを通る。
 // 開いてから応答を書き始める。stat と open の間に消される（maintain() の掃除やプロファイルの
 // 削除）・読めない場合に、200 を書いた後で ReadStream の 'error' が誰にも拾われず落ちるため
 export async function streamWav(res: http.ServerResponse, file: string) {

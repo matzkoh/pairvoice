@@ -1,4 +1,3 @@
-import crypto from 'node:crypto'
 import fsp from 'node:fs/promises'
 import path from 'node:path'
 
@@ -37,16 +36,6 @@ export function makeAudioPathResolver(root: string) {
 }
 
 export const resolveAudioPath = makeAudioPathResolver(DATA_ROOT)
-
-export async function atomicWrite(filePath: string, content: string) {
-  await fsp.mkdir(path.dirname(filePath), { recursive: true })
-  const tmp = path.join(
-    path.dirname(filePath),
-    `.${path.basename(filePath)}.${process.pid}.${crypto.randomBytes(4).toString('hex')}.tmp`,
-  )
-  await fsp.writeFile(tmp, content, 'utf8')
-  await fsp.rename(tmp, filePath)
-}
 
 // JSONL は追記専用で、後の行が新しい。1回の呼び出しの行はまとめて1回で書く。
 // 前の書き込みが途中で切れて末尾に改行が無ければ、改行を足してから書く（そのまま続けると

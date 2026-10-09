@@ -22,7 +22,7 @@ Claude Code の `MessageDisplay` フック。アシスタントの出力を pair
 ## 要約を改善する
 
 `/pairvoice:tune` で、studio のレビューを材料に要約の指示（`prompt.txt`）の改善案を作らせる。
-エージェントは `pairvoice eval` で今の指示と比べてから提案し、了承を得たら studio の API で書き込む。
+エージェントは `pairvoice eval` で今の指示と比べてから提案し、了承を得たら pairvoice の API で書き込む。
 要約のモデルを比べるときにも使う。
 
 ## 声とスタイルを選ぶ

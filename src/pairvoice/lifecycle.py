@@ -17,6 +17,7 @@ from enum import StrEnum
 from typing import Protocol
 
 from . import generations
+from .config import Config
 from .player import Player
 
 _log = logging.getLogger(__name__)
@@ -330,6 +331,10 @@ class Engine:
         self._tasks: list[asyncio.Task] = []
         self._last_prune: float | None = None
 
+    @property
+    def config(self) -> Config:
+        return self._config
+
     @staticmethod
     def _raise_if_muted(state) -> None:
         if state.active:
@@ -433,12 +438,6 @@ class Engine:
         )
         self.player.enqueue(result.path, bypass_mute=bypass_mute, epoch=epoch)
         return result
-
-    def list_profiles(self) -> dict:
-        return self._tts_backend.list_profiles()
-
-    def list_styles(self) -> list[dict]:
-        return self._tts_backend.list_styles()
 
     async def speaker_vector(self, audio: str) -> list[float]:
         """データの置き場所の wav の話者ベクトル。2択でもとの声どうしの位置を測る。"""

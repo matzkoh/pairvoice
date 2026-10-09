@@ -274,9 +274,10 @@ def _http_error_message(failed: error.HTTPError) -> str:
 def _eval(config, base: str, args: argparse.Namespace) -> int:
     from . import evaluation
     from .config import default_data_root
+    from .prompt import PROMPT_FILENAME
 
     data_root = default_data_root()
-    prompt_path = args.prompt or data_root / "prompt.txt"
+    prompt_path = args.prompt or data_root / PROMPT_FILENAME
     try:
         system = prompt_path.read_text(encoding="utf-8")
         cases = evaluation.load_tsv_cases(args.cases or evaluation.DEFAULT_CASES)

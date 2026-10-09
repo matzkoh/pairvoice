@@ -1,3 +1,4 @@
+import tempfile
 from importlib.metadata import version
 from pathlib import Path
 
@@ -13,10 +14,15 @@ from tests.fakes import FakeProbe
 from tests.test_engine import FakeLLM, FakeTTS
 
 
-def build(*, probe=None, llm=None, tts=None, mute_config=None):
+def build(*, probe=None, llm=None, tts=None, mute_config=None, data_root=None):
     config = Config(
         llm=LLMConfig(model="fake/llm", load_timeout_seconds=1),
-        tts=TTSConfig(model="fake/tts", load_timeout_seconds=1),
+        # 既定の置き場所（利用者のデータ）を書き換えないよう、テストごとに空の場所を渡す
+        tts=TTSConfig(
+            model="fake/tts",
+            load_timeout_seconds=1,
+            output_dir=(data_root or Path(tempfile.mkdtemp())) / "generations",
+        ),
         mute=mute_config or MuteConfig(),
     )
     engine = Engine(
@@ -555,15 +561,6 @@ def test_speak_reports_broken_styles_file():
     assert response.json() == {"error": "style_invalid", "detail": "壊れている"}
 
 
-def test_profiles_and_styles_list_choices():
-    _, client = build()
-
-    assert client.get("/profiles").json()["items"][0]["name"] == "既定の声"
-    assert client.get("/styles").json() == {
-        "items": [{"name": "ささやき", "caption": "ささやく。", "sampler": {}}]
-    }
-
-
 def test_openapi_documents_version_and_every_field():
     _, client = build()
 
@@ -580,3 +577,81 @@ def test_openapi_documents_version_and_every_field():
     ]
     assert undocumented == []
     assert {"404", "500", "503"} <= spec["paths"]["/speak"]["post"]["responses"].keys()
+
+
+def test_restart_answers_before_asking_launchd(monkeypatch):
+    calls = []
+    monkeypatch.setattr("pairvoice.server.launchd.restart", lambda: calls.append("restart"))
+    _, client = build()
+
+    response = client.post("/restart")
+
+    assert response.status_code == 202
+    assert response.json() == {"restarting": True}
+    assert calls == ["restart"]
+
+
+def test_shutdown_sends_sigterm_to_itself(monkeypatch):
+    import os
+    import signal
+
+    killed = []
+    monkeypatch.setattr("pairvoice.server.os.kill", lambda pid, sig: killed.append((pid, sig)))
+    _, client = build()
+
+    response = client.post("/shutdown")
+
+    assert response.status_code == 202
+    assert killed == [(os.getpid(), signal.SIGTERM)]
+
+
+def test_studio_open_reports_missing_node(monkeypatch):
+    from pairvoice import studio_process
+
+    def missing():
+        raise studio_process.NodeNotFound()
+
+    monkeypatch.setattr("pairvoice.server.studio_process.open_studio", missing)
+    _, client = build()
+
+    response = client.post("/studio/open")
+
+    assert response.status_code == 503
+    assert response.json()["error"] == "node_not_found"
+
+
+def test_studio_restart_reports_not_running(monkeypatch):
+    monkeypatch.setattr("pairvoice.server.studio_process.restart_studio", lambda: False)
+    _, client = build()
+
+    response = client.post("/studio/restart")
+
+    assert response.status_code == 409
+    assert response.json() == {"error": "studio_not_running"}
+
+
+def test_eval_summarizes_given_cases_with_given_prompt(tmp_path):
+    llm = FakeLLM()
+    _, client = build(llm=llm, data_root=tmp_path)
+
+    response = client.post(
+        "/eval", json={"prompt": "ルール", "cases": [{"id": "c1", "input": "作業ログ"}]}
+    )
+
+    assert response.status_code == 200
+    body = response.json()
+    (result,) = body["results"]
+    assert result["id"] == "c1"
+    assert result["output"] == "やった、テスト全部通ったよ。"
+    assert "ALL_PASS" in body["summary"]
+    assert llm.calls[0]["system"] == "ルール"
+
+
+def test_eval_defaults_to_saved_prompt(tmp_path):
+    (tmp_path / "prompt.txt").write_text("保存したルール", encoding="utf-8")
+    llm = FakeLLM()
+    _, client = build(llm=llm, data_root=tmp_path)
+
+    client.post("/eval", json={"cases": [{"id": "c1", "input": "ログ"}]})
+
+    assert llm.calls[0]["system"] == "保存したルール"

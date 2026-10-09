@@ -34,6 +34,10 @@ async function readJson(res: Response): Promise<any> {
   return res.json()
 }
 
+function jsonInit(method: string, body: unknown) {
+  return { method, headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(body) }
+}
+
 // /api/mute の中継先を一時的に差し替えるための偽pairvoice。受けたリクエストを
 // method/url/bodyで記録するだけで、実際の17495やsettings.jsonには一切依存しない。
 async function startFakePairvoice() {
@@ -461,17 +465,17 @@ import { execFileSync } from 'node:child_process'
 // 二重実装されている。食い違うと studio のプレビューが嘘をつくので、記号・CRLF を含む辞書で
 // 両者が同じ結果になるかを見る
 test('Python の apply_dict と JS の applyDict は記号や CRLF を含む辞書で一致する', async () => {
-  const { parseDictTsv, applyDict } = await import('./server.ts')
+  const { applyDict } = await import('./server.ts')
   const dir = await mkdtemp(path.join(os.tmpdir(), 'pairvoice-dict-'))
   try {
     const lf = 'A\tエー\tメモ\n&\tアンド\n#\tシャープ\nq\t"引用"\nb\t\\&\nエー\tえー\n'
     // Windows のエディタで保存されると CRLF になる。行末の \r を置換先に混ぜない
     const crlf = lf.replaceAll('\n', '\r\n')
-    assert.deepEqual(parseDictTsv(crlf), parseDictTsv(lf))
     const input = 'A & # q b A'
     for (const tsv of [lf, crlf]) {
       const dictPath = path.join(dir, 'dict.tsv')
       await writeFile(dictPath, tsv)
+      // 合成は load_dict で読んで置き換え、studio のプレビューは GET /dict（read_rows）の行で置き換える
       const out = execFileSync(
         'uv',
         [
@@ -479,52 +483,22 @@ test('Python の apply_dict と JS の applyDict は記号や CRLF を含む辞�
           '--quiet',
           'python',
           '-c',
-          'import sys; from pathlib import Path; from pairvoice.reading import apply_dict, load_dict; ' +
-            'sys.stdout.write(apply_dict(sys.argv[2], load_dict(Path(sys.argv[1]))))',
+          'import json, sys; from pathlib import Path; ' +
+            'from pairvoice.reading import apply_dict, load_dict, read_rows; ' +
+            'p = Path(sys.argv[1]); ' +
+            'json.dump({"applied": apply_dict(sys.argv[2], load_dict(p)), "rows": read_rows(p)}, sys.stdout)',
           dictPath,
           input,
         ],
         { cwd: path.join(import.meta.dirname, '..'), encoding: 'utf8' },
       )
-      assert.equal(out, applyDict(input, parseDictTsv(lf)), tsv === crlf ? 'CRLF' : 'LF')
+      const { applied, rows } = JSON.parse(out)
+      assert.equal(applied, applyDict(input, rows), tsv === crlf ? 'CRLF' : 'LF')
     }
   } finally {
     await rm(dir, { recursive: true, force: true })
   }
 })
-
-test('GET/PUT /api/dict round-trips rows, rejects empty "from"', async () => {
-  const { DICT_FILE } = await import('./server.ts')
-  const server = await startServer(0)
-  const port = portOf(server)
-
-  const putBad = await fetch(`http://127.0.0.1:${port}/api/dict`, {
-    method: 'PUT',
-    headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify({ rows: [{ from: '', to: 'x', memo: '' }] }),
-  })
-  assert.equal(putBad.status, 400)
-
-  const rows = [
-    { from: '通っ', to: 'とおっ', memo: '' },
-    { from: '#', to: '', memo: 'PR番号のハッシュを除去' },
-  ]
-  const putOk = await fetch(`http://127.0.0.1:${port}/api/dict`, {
-    method: 'PUT',
-    headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify({ rows }),
-  })
-  assert.equal(putOk.status, 200)
-
-  const getRes = await fetch(`http://127.0.0.1:${port}/api/dict`)
-  const body = await readJson(getRes)
-  assert.deepEqual(body.rows, rows)
-
-  const raw = await (await import('node:fs/promises')).readFile(DICT_FILE, 'utf8')
-  assert.equal(raw, '通っ\tとおっ\t\n#\t\tPR番号のハッシュを除去\n')
-  await new Promise((resolve) => server.close(resolve))
-})
-
 test('POST /api/dict/test applies rows in order without saving', async () => {
   const server = await startServer(0)
   const port = portOf(server)
@@ -541,93 +515,6 @@ test('POST /api/dict/test applies rows in order without saving', async () => {
   })
   const body = await readJson(res)
   assert.equal(body.result, 'PR 4688 がとおった')
-  await new Promise((resolve) => server.close(resolve))
-})
-
-test('PUT /api/prompt は保存した内容を履歴の最新として残し、GET に反映する', async () => {
-  const { PROMPT_FILE, HISTORY_DIR } = await import('./server.ts')
-  const fsp = await import('node:fs/promises')
-  // 履歴の件数と最新の中身を見るので、このテストは履歴を空にしてから始める
-  await fsp.rm(HISTORY_DIR, { recursive: true, force: true })
-  await fsp.mkdir(HISTORY_DIR, { recursive: true })
-  await writeFile(PROMPT_FILE, '旧プロンプト', 'utf8')
-
-  const server = await startServer(0)
-  const port = portOf(server)
-
-  const putRes = await fetch(`http://127.0.0.1:${port}/api/prompt`, {
-    method: 'PUT',
-    headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify({ text: '新プロンプト' }),
-  })
-  assert.equal(putRes.status, 200)
-
-  const getRes = await fetch(`http://127.0.0.1:${port}/api/prompt`)
-  assert.equal((await readJson(getRes)).text, '新プロンプト')
-
-  // 「かつて動いていた版はすべて履歴にある」ので、いま動いている版が履歴の最新になる
-  const historyFiles = (await fsp.readdir(HISTORY_DIR)).toSorted()
-  assert.equal(historyFiles.length, 1)
-  const snapshotContent = await fsp.readFile(path.join(HISTORY_DIR, historyFiles.at(-1)!), 'utf8')
-  assert.equal(snapshotContent, '新プロンプト')
-
-  const emptyRes = await fetch(`http://127.0.0.1:${port}/api/prompt`, {
-    method: 'PUT',
-    headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify({ text: '' }),
-  })
-  assert.equal(emptyRes.status, 400)
-
-  await new Promise((resolve) => server.close(resolve))
-})
-
-test('POST /api/prompt/restore restores a snapshot and rejects path traversal names', async () => {
-  const { PROMPT_FILE, HISTORY_DIR } = await import('./server.ts')
-  // 前のテストが作ったスナップショットが累積するため、このテストは履歴を空にしてから始める
-  const fsp = await import('node:fs/promises')
-  await fsp.rm(HISTORY_DIR, { recursive: true, force: true })
-  await fsp.mkdir(HISTORY_DIR, { recursive: true })
-  await writeFile(PROMPT_FILE, '初期プロンプト', 'utf8')
-  const server = await startServer(0)
-  const port = portOf(server)
-
-  const put = (text: string) =>
-    fetch(`http://127.0.0.1:${port}/api/prompt`, {
-      method: 'PUT',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ text }),
-    })
-  await put('版A')
-  // スナップショットのファイル名はミリ秒精度の時刻なので、保存の間隔を空けて衝突を避ける
-  await new Promise((r) => setTimeout(r, 5))
-  await put('版B')
-
-  const historyRes = await fetch(`http://127.0.0.1:${port}/api/prompt/history`)
-  const { items } = await readJson(historyRes)
-  assert.equal(items.length, 2) // 保存した2版がどちらも履歴にある（新しい順）
-
-  const restoreRes = await fetch(`http://127.0.0.1:${port}/api/prompt/restore`, {
-    method: 'POST',
-    headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify({ name: items.at(-1).name }), // 古い方＝版A
-  })
-  assert.equal(restoreRes.status, 200)
-
-  const afterRes = await fetch(`http://127.0.0.1:${port}/api/prompt`)
-  assert.equal((await readJson(afterRes)).text, '版A')
-
-  // 復元も「その版が再び動き出した」記録として履歴に1件増え、最新が現行版と一致する
-  const after = await readJson(await fetch(`http://127.0.0.1:${port}/api/prompt/history`))
-  assert.equal(after.items.length, 3)
-  assert.equal(await fsp.readFile(path.join(HISTORY_DIR, after.items[0].name), 'utf8'), '版A')
-
-  const evilRes = await fetch(`http://127.0.0.1:${port}/api/prompt/restore`, {
-    method: 'POST',
-    headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify({ name: '../../../etc/passwd' }),
-  })
-  assert.equal(evilRes.status, 400)
-
   await new Promise((resolve) => server.close(resolve))
 })
 
@@ -666,13 +553,11 @@ test('dist が無いときは 500 ではなく手順を書いた案内を返す'
   })
 })
 
-test('プロンプトはデータの置き場所から読み、静的ファイルはコードの置き場所から配信する', async () => {
+test('データの置き場所はコードの外にあり、静的ファイルはコードの置き場所から配信する', async () => {
   const { DATA_ROOT, DIST_DIR } = await import('./server.ts')
   // テストは PAIRVOICE_DATA_ROOT を一時ディレクトリに向けてあるので、コードの置き場所の外になる
   assert.ok(!DATA_ROOT.startsWith(path.dirname(STUDIO_DIR) + path.sep))
   assert.equal(DIST_DIR, path.join(STUDIO_DIR, 'web', 'dist'))
-
-  await writeFile(path.join(DATA_ROOT, 'prompt.txt'), 'データ側のプロンプト', 'utf8')
 
   await withDist(
     async () => {
@@ -687,9 +572,6 @@ test('プロンプトはデータの置き場所から読み、静的ファイ�
       const server = await startServer(0)
       try {
         const base = `http://127.0.0.1:${portOf(server)}`
-        const prompt = await readJson(await fetch(`${base}/api/prompt`))
-        assert.equal(prompt.text, 'データ側のプロンプト')
-
         // index.html はリポジトリ側の studio/web/dist から配信される
         const page = await fetch(`${base}/`)
         assert.equal(page.status, 200)
@@ -730,15 +612,6 @@ test('SPA なので実ファイルに無いパスも index.html を返す（/rev
   )
 })
 
-test('データの置き場所がまだ存在しなくても書き込みが通る', async () => {
-  // server.ts は読み込み時に定数を確定するので DATA_ROOT を差し替えられない。
-  // 実際に効くのは atomicWrite が親ディレクトリを作るかどうかなので、そこを直接固定する。
-  const { atomicWrite } = await import('./server.ts')
-  const target = path.join(tmpRoot, 'not-created-yet', 'pairvoice', 'prompt.txt')
-  await atomicWrite(target, 'ようこそ')
-  assert.equal(await readFile(target, 'utf8'), 'ようこそ')
-})
-
 test('parseHistoryTs / parseCorpusTs read the two timestamp formats on the same number line', async () => {
   const { parseHistoryTs, parseCorpusTs } = await import('./server.ts')
   // snapshotPrompt が付ける名前（ISO の : と . を - に潰したもの）を時刻に戻せること
@@ -774,39 +647,42 @@ async function withPromptSnapshotAt(name: string, fn: () => Promise<void>) {
 }
 
 test('現行プロンプトの開始時刻は中身で決まる（同じ内容の保存し直しでは動かない）', async () => {
-  const { HISTORY_DIR, PROMPT_FILE, writePromptWithSnapshot, currentPromptSince } =
-    await import('./server.ts')
+  const { HISTORY_DIR, PROMPT_FILE, currentPromptSince } = await import('./server.ts')
   await fs.promises.mkdir(HISTORY_DIR, { recursive: true })
   const before = new Set(await readdir(HISTORY_DIR))
+  // pairvoice（prompt.py）と同じく、prompt.txt を書いた後に書いた内容で版を撮る
+  let at = Date.parse('2999-01-01T00:00:00.000Z')
+  const save = async (text: string) => {
+    await writeFile(PROMPT_FILE, text, 'utf8')
+    const name = `prompt-${new Date(at).toISOString().replace(/[:.]/g, '-')}.txt`
+    await writeFile(path.join(HISTORY_DIR, name), text, 'utf8')
+    at += 1000
+  }
   try {
-    await writePromptWithSnapshot('ひとつ前の版')
-    await new Promise((r) => setTimeout(r, 5)) // スナップショット名は ms 単位なので衝突を避ける
-    await writePromptWithSnapshot('いまの版')
+    await save('ひとつ前の版')
+    await save('いまの版')
     const since = await currentPromptSince()
     assert.ok(since !== null, '境界が引けていない')
 
     // 中身を変えずに保存し直しても境界は動かない。動くと、何も変えていないのに
     // 直前までの読み上げが全部「旧プロンプト」に落ちてレビュー待ちが消える。
-    await new Promise((r) => setTimeout(r, 5))
-    await writePromptWithSnapshot('いまの版')
+    await save('いまの版')
     assert.equal(await currentPromptSince(), since)
 
     // 中身が変われば境界は進む
-    await new Promise((r) => setTimeout(r, 5))
-    await writePromptWithSnapshot('次の版')
+    await save('次の版')
     assert.ok((await currentPromptSince())! > since) // 直前に書いた版が履歴の最新
 
-    // studio を通さず prompt.txt を書き換えると、いつからの版か分からないので境界を引かない
+    // API を通さず prompt.txt を書き換えると、いつからの版か分からないので境界を引かない
     await writeFile(PROMPT_FILE, '履歴に無い版', 'utf8')
     assert.equal(await currentPromptSince(), null)
   } finally {
-    // 実時刻のスナップショットを残すと /api/prompt/history のテストの並び順を壊す
+    // 未来の日付の版を残すと、ほかのテストの境界を握ってしまう
     for (const name of await readdir(HISTORY_DIR)) {
       if (!before.has(name)) await rm(path.join(HISTORY_DIR, name), { force: true })
     }
   }
 })
-
 test('GET /api/corpus marks readings made before the current prompt as stale', async () => {
   const { CORPUS_FILE } = await import('./server.ts')
   await writeFile(
@@ -894,352 +770,6 @@ test('POST /api/speak は pairvoice の JSON でない 500 を読める形で申
     await new Promise((resolve) => server.close(resolve))
     process.env.PAIRVOICE_URL = prevUrl
     await fake.close()
-  }
-})
-
-// プロファイルを直接置く。pairvoice（profiles.py）が書くのと同じ形
-async function placeProfile(id: string, meta: Record<string, unknown>, { active = false } = {}) {
-  const { PROFILES_DIR } = await import('./server.ts')
-  const dir = path.join(PROFILES_DIR, id)
-  await fs.promises.mkdir(dir, { recursive: true })
-  await writeFile(path.join(dir, 'reference.wav'), 'RIFF\0\0\0\0WAVE')
-  await writeFile(path.join(dir, 'profile.json'), JSON.stringify(meta))
-  if (active) await writeFile(path.join(PROFILES_DIR, 'active'), `${id}\n`)
-  return dir
-}
-
-async function clearProfiles() {
-  const { PROFILES_DIR } = await import('./server.ts')
-  await rm(PROFILES_DIR, { recursive: true, force: true })
-}
-
-async function readProfileJson(id: string) {
-  const { PROFILES_DIR } = await import('./server.ts')
-  return JSON.parse(await readFile(path.join(PROFILES_DIR, id, 'profile.json'), 'utf8'))
-}
-
-test('PATCH /api/profiles/:id の caption は使用中でなくても書け、そのプロファイルの履歴に版を残す', async () => {
-  const { HISTORY_DIR, PROFILES_DIR } = await import('./server.ts')
-  await clearProfiles()
-  await placeProfile(
-    'p-a',
-    { name: 'a', caption: '使用中の声。', source: 'design' },
-    { active: true },
-  )
-  await placeProfile('p-b', {
-    name: 'b',
-    caption: '前の声。',
-    source: 'design',
-    created_at: 'x',
-  })
-  await fs.promises.mkdir(HISTORY_DIR, { recursive: true })
-  const promptsBefore = await readdir(HISTORY_DIR)
-  const server = await startServer(0)
-  try {
-    const base = `http://127.0.0.1:${portOf(server)}/api/profiles`
-    const res = await fetch(`${base}/p-b`, jsonInit('PATCH', { caption: ' 新しく採用した声。 ' }))
-    assert.equal(res.status, 200)
-    assert.equal((await readJson(res)).caption, '新しく採用した声。')
-    const meta = await readProfileJson('p-b')
-    assert.equal(meta.caption, '新しく採用した声。')
-    // caption 以外は書き換えない
-    assert.equal(meta.name, 'b')
-    assert.equal(meta.created_at, 'x')
-    assert.equal((await readProfileJson('p-a')).caption, '使用中の声。')
-
-    // 版はそのプロファイルの中に残り、ほかのプロファイルとプロンプトの履歴には混ざらない
-    const history = await readJson(await fetch(`${base}/p-b/caption/history`))
-    assert.equal(history.items.length, 1)
-    const saved = path.join(PROFILES_DIR, 'p-b', 'history', history.items[0].name)
-    assert.equal(await readFile(saved, 'utf8'), '新しく採用した声。')
-    assert.equal((await readJson(await fetch(`${base}/p-a/caption/history`))).items.length, 0)
-    assert.deepEqual(await readdir(HISTORY_DIR), promptsBefore)
-    assert.equal((await fetch(`${base}/p-missing/caption/history`)).status, 404)
-  } finally {
-    await new Promise((resolve) => server.close(resolve))
-    await clearProfiles()
-  }
-})
-
-test('PATCH /api/profiles/:id は caption を空にでき、空の名前と、どちらも無い本文を拒否する', async () => {
-  await clearProfiles()
-  await placeProfile('p-a', { name: 'a', caption: '声。', source: 'design' }, { active: true })
-  const server = await startServer(0)
-  try {
-    const url = `http://127.0.0.1:${portOf(server)}/api/profiles/p-a`
-    assert.equal((await fetch(url, jsonInit('PATCH', { name: '' }))).status, 400)
-    assert.equal((await fetch(url, jsonInit('PATCH', {}))).status, 400)
-    assert.equal((await readProfileJson('p-a')).caption, '声。')
-
-    // 空の caption は「caption なしで読む」の指定として保存する
-    assert.equal((await fetch(url, jsonInit('PATCH', { caption: '   ' }))).status, 200)
-    assert.equal((await readProfileJson('p-a')).caption, '')
-  } finally {
-    await new Promise((resolve) => server.close(resolve))
-    await clearProfiles()
-  }
-})
-
-test('POST /api/profiles/:id/caption/restore はそのプロファイルの版を戻し、ほかの名前を拒否する', async () => {
-  await clearProfiles()
-  await placeProfile(
-    'p-a',
-    { name: 'a', caption: '最初の声。', source: 'design' },
-    { active: true },
-  )
-  await placeProfile('p-b', { name: 'b', caption: 'B の声。', source: 'design' })
-  const server = await startServer(0)
-  try {
-    const base = `http://127.0.0.1:${portOf(server)}/api/profiles`
-    const put = (caption: string) => fetch(`${base}/p-a`, jsonInit('PATCH', { caption }))
-    await put('ひとつ前の声。')
-    await new Promise((r) => setTimeout(r, 5)) // 名前は ms 単位なので衝突を避ける
-    await put('いまの声。')
-
-    const history = await readJson(await fetch(`${base}/p-a/caption/history`))
-    const oldest = history.items[history.items.length - 1].name
-    const restore = (id: string, name: string) =>
-      fetch(`${base}/${id}/caption/restore`, jsonInit('POST', { name }))
-    assert.equal((await restore('p-a', oldest)).status, 200)
-    assert.equal((await readProfileJson('p-a')).caption, 'ひとつ前の声。')
-
-    // 復元も1件増える（その版が再び動き出した記録）
-    const after = await readJson(await fetch(`${base}/p-a/caption/history`))
-    assert.equal(after.items.length, history.items.length + 1)
-
-    // ほかのプロファイルの版は当てられない
-    assert.equal((await restore('p-b', oldest)).status, 404)
-    assert.equal((await readProfileJson('p-b')).caption, 'B の声。')
-    assert.equal((await restore('p-missing', oldest)).status, 404)
-    assert.equal((await restore('p-a', '../../../etc/passwd')).status, 400)
-    // プロンプトの版を caption として復元できてはいけない
-    assert.equal((await restore('p-a', 'prompt-2099-01-01T00-00-00-000Z.txt')).status, 400)
-  } finally {
-    await new Promise((resolve) => server.close(resolve))
-    await clearProfiles()
-  }
-})
-
-test('GET /api/profiles は新しい順に並べ、使用中の ID を添える', async () => {
-  await clearProfiles()
-  await placeProfile('p-old', {
-    name: '古い',
-    caption: '古い声。',
-    source: 'auto',
-    created_at: '2026-01-01T00:00:00Z',
-  })
-  await placeProfile(
-    'p-new',
-    { name: '新しい', caption: '新しい声。', source: 'design', created_at: '2026-02-01T00:00:00Z' },
-    { active: true },
-  )
-  // 参照音声の無いものは載せない（pairvoice も読み飛ばす）
-  const broken = await placeProfile('p-broken', { name: '壊れ', caption: '声。', source: 'upload' })
-  await rm(path.join(broken, 'reference.wav'))
-  const server = await startServer(0)
-  try {
-    const port = portOf(server)
-    const body = await readJson(await fetch(`http://127.0.0.1:${port}/api/profiles`))
-    assert.deepEqual(
-      body.items.map((item: { id: string }) => item.id),
-      ['p-new', 'p-old'],
-    )
-    assert.equal(body.active, 'p-new')
-  } finally {
-    await new Promise((resolve) => server.close(resolve))
-    await clearProfiles()
-  }
-})
-
-test('POST /api/profiles は試聴のテイクからプロファイルを作り、未設定なら使用中にする', async () => {
-  const { DATA_ROOT, PROFILES_DIR } = await import('./server.ts')
-  await clearProfiles()
-  const take = path.join(DATA_ROOT, 'generations', 'take.wav')
-  await fs.promises.mkdir(path.dirname(take), { recursive: true })
-  await writeFile(take, pcmWav(10, [1, 2, 3]))
-  const server = await startServer(0)
-  try {
-    const port = portOf(server)
-    const create = (name: string) =>
-      fetch(`http://127.0.0.1:${port}/api/profiles`, {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ name, caption: '作った声。', takes: ['generations/take.wav'] }),
-      })
-    const first = await create('一つ目')
-    assert.equal(first.status, 201)
-    const created = await readJson(first)
-    assert.equal(created.source, 'design')
-    assert.equal(created.caption, '作った声。')
-    assert.deepEqual(
-      await readFile(path.join(PROFILES_DIR, created.id, 'reference.wav')),
-      pcmWav(10, [1, 2, 3]),
-    )
-    assert.equal(
-      (await readJson(await fetch(`http://127.0.0.1:${port}/api/profiles`))).active,
-      created.id,
-    )
-
-    // 2つ目は使用中を奪わない
-    const second = await readJson(await create('二つ目'))
-    const list = await readJson(await fetch(`http://127.0.0.1:${port}/api/profiles`))
-    assert.equal(list.active, created.id)
-    assert.ok(list.items.some((item: { id: string }) => item.id === second.id))
-  } finally {
-    await new Promise((resolve) => server.close(resolve))
-    await clearProfiles()
-    await rm(take, { force: true })
-  }
-})
-
-// モノラル・16bit の PCM wav
-function pcmWav(sampleRate: number, samples: readonly number[]) {
-  const data = Buffer.alloc(samples.length * 2)
-  samples.forEach((v, i) => data.writeInt16LE(v, i * 2))
-  const header = Buffer.alloc(44)
-  header.write('RIFF', 0, 'latin1')
-  header.writeUInt32LE(36 + data.length, 4)
-  header.write('WAVEfmt ', 8, 'latin1')
-  header.writeUInt32LE(16, 16)
-  header.writeUInt16LE(1, 20)
-  header.writeUInt16LE(1, 22)
-  header.writeUInt32LE(sampleRate, 24)
-  header.writeUInt32LE(sampleRate * 2, 28)
-  header.writeUInt16LE(2, 32)
-  header.writeUInt16LE(16, 34)
-  header.write('data', 36, 'latin1')
-  header.writeUInt32LE(data.length, 40)
-  return Buffer.concat([header, data])
-}
-
-test('POST /api/profiles はテイクを複数渡すと、短い無音を挟んで1本の参照音声につなぐ', async () => {
-  const { DATA_ROOT, PROFILES_DIR } = await import('./server.ts')
-  await clearProfiles()
-  const dir = path.join(DATA_ROOT, 'generations')
-  await fs.promises.mkdir(dir, { recursive: true })
-  await writeFile(path.join(dir, 'one.wav'), pcmWav(10, [1, 2]))
-  await writeFile(path.join(dir, 'two.wav'), pcmWav(10, [3]))
-  await writeFile(path.join(dir, 'other-rate.wav'), pcmWav(20, [4]))
-  const server = await startServer(0)
-  try {
-    const port = portOf(server)
-    const create = (takes: string[]) =>
-      fetch(`http://127.0.0.1:${port}/api/profiles`, {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ name: 'つないだ声', caption: '', takes }),
-      })
-    const res = await create(['generations/one.wav', 'generations/two.wav'])
-    assert.equal(res.status, 201)
-    const created = await readJson(res)
-    const joined = await readFile(path.join(PROFILES_DIR, created.id, 'reference.wav'))
-    // 0.3 秒の無音（10Hz なら 3 サンプル）を挟む
-    assert.deepEqual(joined, pcmWav(10, [1, 2, 0, 0, 0, 3]))
-
-    // 形式の違う wav はつながない
-    const mismatch = await create(['generations/one.wav', 'generations/other-rate.wav'])
-    assert.equal(mismatch.status, 400)
-  } finally {
-    await new Promise((resolve) => server.close(resolve))
-    await clearProfiles()
-    for (const name of ['one.wav', 'two.wav', 'other-rate.wav']) {
-      await rm(path.join(dir, name), { force: true })
-    }
-  }
-})
-
-test('POST /api/profiles は参照音声やデータの置き場所の外の wav を取り込み元にさせない', async () => {
-  await clearProfiles()
-  await placeProfile('p-a', { name: 'a', caption: '声。', source: 'design' })
-  const server = await startServer(0)
-  try {
-    const port = portOf(server)
-    for (const take of [
-      'profiles/p-a/reference.wav',
-      '../outside.wav',
-      'generations/missing.wav',
-    ]) {
-      const res = await fetch(`http://127.0.0.1:${port}/api/profiles`, {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ name: 'x', caption: '声。', takes: [take] }),
-      })
-      assert.ok(res.status === 400 || res.status === 404, `${take}: ${res.status}`)
-    }
-  } finally {
-    await new Promise((resolve) => server.close(resolve))
-    await clearProfiles()
-  }
-})
-
-test('POST /api/profiles は wav 本体を取り込み、wav でなければ 400 を返す', async () => {
-  const { PROFILES_DIR } = await import('./server.ts')
-  await clearProfiles()
-  const server = await startServer(0)
-  try {
-    const port = portOf(server)
-    const url = `http://127.0.0.1:${port}/api/profiles?name=${encodeURIComponent('手持ち')}&caption=${encodeURIComponent('低い声。')}`
-    const ok = await fetch(url, {
-      method: 'POST',
-      headers: { 'Content-Type': 'audio/wav' },
-      body: Buffer.from('RIFF\0\0\0\0WAVEdata'),
-    })
-    assert.equal(ok.status, 201)
-    const created = await readJson(ok)
-    assert.equal(created.name, '手持ち')
-    assert.equal(created.source, 'upload')
-    assert.equal(
-      await readFile(path.join(PROFILES_DIR, created.id, 'reference.wav'), 'latin1'),
-      'RIFF\0\0\0\0WAVEdata',
-    )
-
-    const mp3 = await fetch(url, {
-      method: 'POST',
-      headers: { 'Content-Type': 'audio/mpeg' },
-      body: Buffer.from('ID3\x03\x00'),
-    })
-    assert.equal(mp3.status, 400)
-  } finally {
-    await new Promise((resolve) => server.close(resolve))
-    await clearProfiles()
-  }
-})
-
-function jsonInit(method: string, body: unknown) {
-  return { method, headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(body) }
-}
-
-test('プロファイルの切り替え・名前の変更・削除', async () => {
-  const { PROFILES_DIR } = await import('./server.ts')
-  await clearProfiles()
-  await placeProfile('p-a', { name: 'a', caption: 'A の声。', source: 'design' }, { active: true })
-  await placeProfile('p-b', { name: 'b', caption: 'B の声。', source: 'upload' })
-  const server = await startServer(0)
-  try {
-    const port = portOf(server)
-    const base = `http://127.0.0.1:${port}/api/profiles`
-
-    assert.equal((await fetch(`${base}/active`, jsonInit('PUT', { id: 'p-missing' }))).status, 404)
-    assert.equal((await fetch(`${base}/active`, jsonInit('PUT', { id: '../x' }))).status, 404)
-    assert.equal((await fetch(`${base}/active`, jsonInit('PUT', { id: 'p-b' }))).status, 200)
-    assert.equal(await readFile(path.join(PROFILES_DIR, 'active'), 'utf8'), 'p-b\n')
-
-    const renamed = await fetch(`${base}/p-a`, jsonInit('PATCH', { name: '改名' }))
-    assert.equal((await readJson(renamed)).name, '改名')
-    assert.equal((await readProfileJson('p-a')).caption, 'A の声。')
-
-    // 使用中は消せない
-    assert.equal((await fetch(`${base}/p-b`, { method: 'DELETE' })).status, 409)
-    assert.equal((await fetch(`${base}/p-a`, { method: 'DELETE' })).status, 200)
-    assert.equal(fs.existsSync(path.join(PROFILES_DIR, 'p-a')), false)
-
-    const audio = await fetch(`${base}/p-b/audio`)
-    assert.equal(audio.status, 200)
-    assert.equal(audio.headers.get('content-type'), 'audio/wav')
-    assert.equal((await fetch(`${base}/p-a/audio`)).status, 404)
-  } finally {
-    await new Promise((resolve) => server.close(resolve))
-    await clearProfiles()
   }
 })
 
@@ -1525,7 +1055,7 @@ test('Host が 127.0.0.1 / localhost / [::1] なら、ポートが何でも通�
       'LOCALHOST',
       '[::1]:8080',
     ]) {
-      assert.equal(await requestWithHeaders(port, '/api/dict', { host }), 200, host)
+      assert.equal(await requestWithHeaders(port, '/api/corpus', { host }), 200, host)
     }
   } finally {
     server.close()
@@ -1545,7 +1075,7 @@ test('外部のページの Origin は、Host がローカルでも 403 にす�
       )
     }
     assert.equal(
-      await requestWithHeaders(port, '/api/dict', { host, origin: 'http://localhost:17493' }),
+      await requestWithHeaders(port, '/api/corpus', { host, origin: 'http://localhost:17493' }),
       200,
     )
   } finally {
@@ -1589,49 +1119,10 @@ test('開けない音声は 500 で返し、プロセスを落とさない', asy
   }
 })
 
-test('chunked で上限を超える wav は 413 で断る', async () => {
-  await clearProfiles()
-  await withServer(async (base) => {
-    const { port } = new URL(base)
-    const status = await new Promise<number>((resolve, reject) => {
-      const req = http.request(
-        {
-          host: '127.0.0.1',
-          port,
-          method: 'POST',
-          path: '/api/profiles?name=big',
-          headers: { 'Content-Type': 'audio/wav', 'Transfer-Encoding': 'chunked' },
-        },
-        (res) => {
-          res.resume()
-          resolve(res.statusCode ?? 0)
-        },
-      )
-      // 断られた後の書き込みは EPIPE / ECONNRESET になりうる。応答が来ていればそれでよい
-      req.on('error', reject)
-      const chunk = Buffer.alloc(1024 * 1024)
-      let sent = 0
-      const pump = () => {
-        while (sent < 60) {
-          sent++
-          if (!req.write(chunk)) {
-            req.once('drain', pump)
-            return
-          }
-        }
-        req.end()
-      }
-      pump()
-    })
-    assert.equal(status, 413)
-    assert.equal((await readJson(await fetch(`${base}/api/profiles`))).items.length, 0)
-  })
-})
-
 test('JSON として読めない本文やオブジェクトでない本文は 400 にする', async () => {
   await withServer(async (base) => {
     for (const body of ['{', 'null', '[]', '1', '"x"']) {
-      const res = await rawRequest(base, '/api/dict', 'PUT', body)
+      const res = await rawRequest(base, '/api/reviews', 'POST', body)
       assert.equal(res.status, 400, body)
       assert.equal((await readJson(res)).error, 'invalid_json', body)
     }
@@ -1639,27 +1130,6 @@ test('JSON として読めない本文やオブジェクトでない本文は 40
       assert.equal((await rawRequest(base, pathname, 'POST', 'null')).status, 400, pathname)
     }
   })
-})
-
-test('辞書の行がオブジェクトでなければ 400、タブや改行を含む値も 400 にする', async () => {
-  const { DICT_FILE } = await import('./server.ts')
-  await writeFile(DICT_FILE, 'a\tb\t\n')
-  await withServer(async (base) => {
-    for (const rows of [[null], [1], ['x']]) {
-      assert.equal((await fetch(`${base}/api/dict`, jsonInit('PUT', { rows }))).status, 400)
-      const tried = await fetch(`${base}/api/dict/test`, jsonInit('POST', { text: 'a', rows }))
-      assert.equal(tried.status, 400)
-    }
-    for (const row of [
-      { from: 'a\tb', to: 'x', memo: '' },
-      { from: 'a', to: 'x\ny', memo: '' },
-      { from: 'a', to: 'x', memo: 'm\r' },
-    ]) {
-      const res = await fetch(`${base}/api/dict`, jsonInit('PUT', { rows: [row] }))
-      assert.equal(res.status, 400, JSON.stringify(row))
-    }
-  })
-  assert.equal(await readFile(DICT_FILE, 'utf8'), 'a\tb\t\n')
 })
 
 test('JSONL の末尾が改行で終わっていなければ、新しい行を壊れた行から切り離す', async () => {
@@ -1675,25 +1145,6 @@ test('JSONL の末尾が改行で終わっていなければ、新しい行を�
   const lines = (await readFile(REVIEWS_FILE, 'utf8')).split('\n')
   assert.equal(lines[0], '{"message_id":"cut","verd')
   assert.equal(JSON.parse(lines[1]!).message_id, 'after-cut')
-})
-
-test('同じプロファイルへの PATCH が重なっても、どちらの変更も残る', async () => {
-  await clearProfiles()
-  await placeProfile('p-a', { name: 'a', caption: '声。', source: 'design' }, { active: true })
-  await withServer(async (base) => {
-    for (let i = 0; i < 5; i++) {
-      const [r1, r2] = await Promise.all([
-        fetch(`${base}/api/profiles/p-a`, jsonInit('PATCH', { name: `名前${i}` })),
-        fetch(`${base}/api/profiles/p-a`, jsonInit('PATCH', { caption: `声${i}。` })),
-      ])
-      assert.equal(r1.status, 200)
-      assert.equal(r2.status, 200)
-      const meta = await readProfileJson('p-a')
-      assert.equal(meta.name, `名前${i}`)
-      assert.equal(meta.caption, `声${i}。`)
-    }
-  })
-  await clearProfiles()
 })
 
 test('pairvoice に繋がらなければ /api/mute と /api/speak は 502 で申告する', async () => {
@@ -1780,8 +1231,10 @@ test('POST /api/reviews は message_id と ideal の型を確かめ、GET /api/c
 
 test('GET /api/audio-file は生成音声と参照音声だけを配り、symlink で外へ出させない', async () => {
   const { DATA_ROOT } = await import('./server.ts')
-  await clearProfiles()
-  await placeProfile('p-a', { name: 'a', caption: '', source: 'design' })
+  const profiles = path.join(DATA_ROOT, 'profiles')
+  await mkdir(path.join(profiles, 'p-a'), { recursive: true })
+  await writeFile(path.join(profiles, 'p-a', 'reference.wav'), 'RIFF\0\0\0\0WAVE')
+  await writeFile(path.join(profiles, 'p-a', 'profile.json'), '{}')
   const gen = path.join(DATA_ROOT, 'generations')
   await mkdir(gen, { recursive: true })
   const outside = await mkdtemp(path.join(os.tmpdir(), 'studio-outside-'))
@@ -1818,102 +1271,88 @@ test('GET /api/audio-file は生成音声と参照音声だけを配り、symlin
     await rm(link, { force: true })
     await rm(inner, { force: true })
     await rm(outside, { recursive: true, force: true })
-    await clearProfiles()
+    await rm(profiles, { recursive: true, force: true })
   }
 })
 
-test('CRLF の dict.tsv を読んでも行末に \\r を残さず、そのまま保存し直せる', async () => {
-  const { DICT_FILE } = await import('./server.ts')
-  await writeFile(DICT_FILE, 'a\tb\tm\r\nc\td\r\n')
+test('プロンプト・辞書・スタイル・声の読み書きは、パスから /api を外して pairvoice へ中継する', async () => {
+  const seen: { method?: string; url?: string; type?: string; body: string }[] = []
+  const upstream = await startFakeUpstream((req, res) => {
+    const chunks: Buffer[] = []
+    req.on('data', (c: Buffer) => chunks.push(c))
+    req.on('end', () => {
+      seen.push({
+        method: req.method,
+        url: req.url,
+        type: req.headers['content-type'],
+        body: Buffer.concat(chunks).toString('utf8'),
+      })
+      if (req.url?.endsWith('/audio')) {
+        res.writeHead(200, { 'Content-Type': 'audio/wav' })
+        res.end('RIFFwav')
+        return
+      }
+      res.writeHead(req.url === '/profiles/p-x' ? 404 : 200, {
+        'Content-Type': 'application/json',
+      })
+      res.end(JSON.stringify({ relayed: req.url }))
+    })
+  })
+  const prevUrl = process.env.PAIRVOICE_URL
+  process.env.PAIRVOICE_URL = upstream.url
   try {
     await withServer(async (base) => {
-      const { rows } = await readJson(await fetch(`${base}/api/dict`))
-      assert.deepEqual(rows, [
-        { from: 'a', to: 'b', memo: 'm' },
-        { from: 'c', to: 'd', memo: '' },
-      ])
-      assert.equal((await fetch(`${base}/api/dict`, jsonInit('PUT', { rows }))).status, 200)
+      const put = await fetch(`${base}/api/prompt`, jsonInit('PUT', { text: 'ルール' }))
+      assert.equal(put.status, 200)
+      assert.deepEqual(await readJson(put), { relayed: '/prompt' })
+
+      const upload = await fetch(`${base}/api/profiles/upload?name=${encodeURIComponent('声')}`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'audio/wav' },
+        body: 'RIFF\0\0\0\0WAVE',
+      })
+      assert.equal(upload.status, 200)
+
+      // pairvoice の 404 はそのまま返す
+      const missing = await fetch(`${base}/api/profiles/p-x`, { method: 'DELETE' })
+      assert.equal(missing.status, 404)
+
+      // 音声は JSON に包まずに流す
+      const audio = await fetch(`${base}/api/profiles/p-a/audio`)
+      assert.equal(audio.headers.get('content-type'), 'audio/wav')
+      assert.equal(await audio.text(), 'RIFFwav')
     })
+    assert.deepEqual(
+      seen.map(({ method, url, type, body }) => ({ method, url, type, body })),
+      [
+        {
+          method: 'PUT',
+          url: '/prompt',
+          type: 'application/json',
+          body: JSON.stringify({ text: 'ルール' }),
+        },
+        {
+          method: 'POST',
+          url: `/profiles/upload?name=${encodeURIComponent('声')}`,
+          type: 'audio/wav',
+          body: 'RIFF\0\0\0\0WAVE',
+        },
+        { method: 'DELETE', url: '/profiles/p-x', type: undefined, body: '' },
+        { method: 'GET', url: '/profiles/p-a/audio', type: undefined, body: '' },
+      ],
+    )
   } finally {
-    await rm(DICT_FILE, { force: true })
+    process.env.PAIRVOICE_URL = prevUrl
+    await upstream.close()
   }
 })
 
-test('プロファイルの削除は、同時に走る PATCH にディレクトリを作り直させない', async () => {
-  const { PROFILES_DIR } = await import('./server.ts')
-  await clearProfiles()
+test('pairvoice に繋がらなければ、中継する読み書きも 502 で申告する', async () => {
   await withServer(async (base) => {
-    for (let i = 0; i < 30; i++) {
-      const id = `p-race${i}`
-      await placeProfile(id, { name: 'n', caption: '', source: 'design' })
-      // PATCH が読み終えてから書くまでの間に DELETE が消すように、PATCH を先に出す
-      const patch = fetch(`${base}/api/profiles/${id}`, jsonInit('PATCH', { caption: `声${i}。` }))
-      await new Promise((r) => setTimeout(r, i % 3))
-      const [del] = await Promise.all([
-        fetch(`${base}/api/profiles/${id}`, { method: 'DELETE' }),
-        patch,
-      ])
-      assert.equal(del.status, 200)
-      assert.equal(fs.existsSync(path.join(PROFILES_DIR, id)), false, id)
+    for (const pathname of ['/api/prompt', '/api/dict', '/api/styles', '/api/profiles']) {
+      const res = await fetch(`${base}${pathname}`)
+      assert.equal(res.status, 502, pathname)
+      assert.equal((await readJson(res)).error, 'pairvoice_unreachable', pathname)
     }
   })
-  await clearProfiles()
-})
-
-test('参照音声を書けなければ、作りかけのプロファイルを残さない', async () => {
-  const { DATA_ROOT, PROFILES_DIR } = await import('./server.ts')
-  await clearProfiles()
-  const gen = path.join(DATA_ROOT, 'generations')
-  await mkdir(gen, { recursive: true })
-  const take = path.join(gen, 'unreadable.wav')
-  await writeFile(take, 'RIFF\0\0\0\0WAVE')
-  await fs.promises.chmod(take, 0o000)
-  try {
-    await withServer(async (base) => {
-      const res = await fetch(
-        `${base}/api/profiles`,
-        jsonInit('POST', { name: 'x', takes: ['generations/unreadable.wav'] }),
-      )
-      assert.equal(res.status, 500)
-    })
-    assert.deepEqual(await readdir(PROFILES_DIR).catch(() => []), [])
-  } finally {
-    await fs.promises.chmod(take, 0o644)
-    await rm(take, { force: true })
-    await clearProfiles()
-  }
-})
-
-test('GET/PUT /api/styles は styles.json を読み書きし、重なる名前を断る', async () => {
-  const { STYLES_FILE } = await import('./server.ts')
-  const server = await startServer(0)
-  const port = portOf(server)
-  const put = (styles: unknown) =>
-    fetch(`http://127.0.0.1:${port}/api/styles`, {
-      method: 'PUT',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ styles }),
-    })
-
-  const empty = await readJson(await fetch(`http://127.0.0.1:${port}/api/styles`))
-  assert.deepEqual(empty, { styles: [] })
-
-  const dup = await put([
-    { name: 'a', caption: null, sampler: {} },
-    { name: 'a ', caption: null, sampler: {} },
-  ])
-  assert.equal(dup.status, 400)
-  assert.equal((await put([{ name: 'a', caption: 1, sampler: {} }])).status, 400)
-  assert.equal((await put([{ name: 'a', caption: null, sampler: { x: [1] } }])).status, 400)
-
-  const styles = [
-    { name: 'ささやき', caption: 'ささやく。', sampler: { duration_scale: 1.2 } },
-    { name: 'ゆっくり', caption: null, sampler: {} },
-  ]
-  assert.equal((await put(styles)).status, 200)
-  const got = await readJson(await fetch(`http://127.0.0.1:${port}/api/styles`))
-  assert.deepEqual(got.styles, styles)
-  // 常駐サーバーが読む形
-  assert.deepEqual(JSON.parse(await readFile(STYLES_FILE, 'utf8')), { styles })
-  await new Promise((resolve) => server.close(resolve))
 })

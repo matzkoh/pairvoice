@@ -1,4 +1,6 @@
 import type http from 'node:http'
+import { Readable } from 'node:stream'
+import { pipeline } from 'node:stream/promises'
 
 import type { PairvoiceHealth, StudioHealth } from '../../shared/api-types.ts'
 import {
@@ -13,12 +15,14 @@ import {
 import { pairvoiceBase } from '../paths.ts'
 import type { AddRoute } from '../router.ts'
 import { resolveAudioPath } from '../storage.ts'
-import { PROFILE_ID_PATTERN } from './profiles.ts'
+
+// pairvoice（profiles.py）のプロファイル ID と同じ形
+const PROFILE_ID_PATTERN = /^p-[0-9A-Za-z-]+$/
 
 // ミュートの切り替えは pairvoice が即答する。待たせ続けるより、止まっていると早く伝える
 const MUTE_TIMEOUT_MS = 3000
 
-// POST で pairvoice に中継する。繋がらない・時間切れは、studio 自身の失敗（500）と
+// pairvoice に中継する。繋がらない・時間切れは、studio 自身の失敗（500）と
 // 区別できるよう 502 で申告する。画面は message を出す。クライアントが先に切った
 // 場合は返す先が無いので何もしない。timeoutMs を省くと待ち続ける（試聴は合成の列で
 // フックの読み上げやモデルの読み込み・ダウンロードの後ろに並び、何分かかるか読めない。
@@ -26,7 +30,7 @@ const MUTE_TIMEOUT_MS = 3000
 async function forwardToPairvoice(
   res: http.ServerResponse,
   target: string,
-  payload: unknown,
+  init: RequestInit,
   timeoutMs?: number,
 ) {
   // 待っている間にクライアントが切ったら、pairvoice への要求も切る。待ち続ける接続を
@@ -38,14 +42,24 @@ async function forwardToPairvoice(
   res.on('close', onClose)
   try {
     const response = await fetch(`${pairvoiceBase()}${target}`, {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify(payload),
+      ...init,
       signal:
         timeoutMs === undefined
           ? clientGone.signal
           : AbortSignal.any([clientGone.signal, AbortSignal.timeout(timeoutMs)]),
     })
+    const contentType = response.headers.get('content-type') ?? ''
+    if (contentType.startsWith('audio/') && response.body) {
+      res.writeHead(response.status, {
+        'Content-Type': contentType,
+        ...(response.headers.has('content-length') && {
+          'Content-Length': response.headers.get('content-length')!,
+        }),
+      })
+      // 書き始めた後の失敗は伝えようがないので捨てる（streamWav と同じ）
+      await pipeline(Readable.fromWeb(response.body), res).catch(() => {})
+      return
+    }
     await relayPairvoice(res, response, target)
   } catch (err) {
     if (clientGone.signal.aborted || res.headersSent) return
@@ -62,6 +76,47 @@ async function forwardToPairvoice(
   }
 }
 
+function postJson(payload: unknown): RequestInit {
+  return {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify(payload),
+  }
+}
+
+// プロンプト・読み辞書・スタイル・声の読み書きは pairvoice の API が持つ（書くのは
+// pairvoice だけ）。パスから /api を外し、クエリも本文もそのまま中継する
+const RELAYED_ROUTES = [
+  ['GET', '/prompt'],
+  ['PUT', '/prompt'],
+  ['GET', '/prompt/history'],
+  ['POST', '/prompt/restore'],
+  ['GET', '/dict'],
+  ['PUT', '/dict'],
+  ['GET', '/styles'],
+  ['PUT', '/styles'],
+  ['GET', '/profiles'],
+  ['POST', '/profiles'],
+  ['POST', '/profiles/upload'],
+  ['PUT', '/profiles/active'],
+  ['PATCH', '/profiles/:id'],
+  ['DELETE', '/profiles/:id'],
+  ['GET', '/profiles/:id/audio'],
+  ['GET', '/profiles/:id/caption/history'],
+  ['POST', '/profiles/:id/caption/restore'],
+] as const
+
+function relayInit(req: http.IncomingMessage): RequestInit {
+  const contentType = req.headers['content-type']
+  const hasBody = req.method !== 'GET' && req.method !== 'DELETE'
+  return {
+    method: req.method,
+    ...(contentType && { headers: { 'Content-Type': contentType } }),
+    // 本文は読み溜めずに流す（声の wav は数十 MB になる）
+    ...(hasBody && { body: Readable.toWeb(req), duplex: 'half' }),
+  }
+}
+
 type MixPart = { audio: string; weight: number }
 
 function isMixPart(part: unknown): part is MixPart {
@@ -73,6 +128,13 @@ function isTimeout(err: unknown) {
 }
 
 export function registerPairvoiceRoutes(addRoute: AddRoute) {
+  for (const [method, pattern] of RELAYED_ROUTES) {
+    addRoute(method, `/api${pattern}`, (req, res) =>
+      // http.Server が渡すリクエストには url が必ず入る（型の上でだけ optional）
+      forwardToPairvoice(res, req.url!.slice('/api'.length), relayInit(req)),
+    )
+  }
+
   // 試聴。ブラウザから直接 :17495 を叩くとCORSの考慮が要るため studio 経由で中継する。
   addRoute('POST', '/api/speak', async (req, res) => {
     const body = await readJsonBody(req)
@@ -126,7 +188,7 @@ export function registerPairvoiceRoutes(addRoute: AddRoute) {
     // 成功時は SpeakResponse の形だが、pairvoice 側のバリデーションエラー等では
     // この型に無い形（detail/error）で返ることがある。中身は検証せず素通しする
     // （クライアント側が防御的に読む）。
-    await forwardToPairvoice(res, '/synthesize', payload)
+    await forwardToPairvoice(res, '/synthesize', postJson(payload))
   })
 
   // 2択で絞り込むときに、もとの声どうしの位置を測る話者ベクトル
@@ -135,7 +197,7 @@ export function registerPairvoiceRoutes(addRoute: AddRoute) {
     if (typeof body.audio !== 'string' || body.audio === '') {
       return badRequest(res, 'audio (non-empty string) is required')
     }
-    await forwardToPairvoice(res, '/speaker-vector', { audio: body.audio })
+    await forwardToPairvoice(res, '/speaker-vector', postJson({ audio: body.audio }))
   })
 
   // 試聴で生成された音声は corpus.jsonl に載らないので /api/audio/:message_id では
@@ -176,6 +238,6 @@ export function registerPairvoiceRoutes(addRoute: AddRoute) {
     const hasMinutes = body.minutes != null
     const target = hasMinutes ? '/mute' : '/unmute'
     const payload = hasMinutes ? { minutes: body.minutes } : {}
-    await forwardToPairvoice(res, target, payload, MUTE_TIMEOUT_MS)
+    await forwardToPairvoice(res, target, postJson(payload), MUTE_TIMEOUT_MS)
   })
 }

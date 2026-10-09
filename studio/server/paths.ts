@@ -18,10 +18,7 @@ export const HISTORY_DIR = path.join(DATA_ROOT, 'history')
 export const CORPUS_FILE = path.join(DATA_ROOT, 'corpus.jsonl')
 export const REVIEWS_FILE = path.join(DATA_ROOT, 'reviews.jsonl')
 export const ARCHIVES_FILE = path.join(DATA_ROOT, 'archives.jsonl')
-export const DICT_FILE = path.join(DATA_ROOT, 'dict.tsv')
 export const PROMPT_FILE = path.join(DATA_ROOT, 'prompt.txt')
-export const PROFILES_DIR = path.join(DATA_ROOT, 'profiles')
-export const STYLES_FILE = path.join(DATA_ROOT, 'styles.json')
 // 定数ではなく毎回envを読む関数にしてある。テストが同一プロセス内で複数の
 // pairvoice到達先（疎通不可なポート／スタブサーバー）を使い分けられるようにするため
 // （constだとモジュール読み込み時の値に固定され、テストごとの差し替えができない）。

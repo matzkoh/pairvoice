@@ -6,8 +6,8 @@
 
 | 部分 | 場所 | 中身 |
 | --- | --- | --- |
-| 常駐サーバー | `src/pairvoice/` | Python / FastAPI。`127.0.0.1:17495`。要約（mlx-lm）と音声合成（mlx-audio / Irodori-TTS） |
-| studio | `studio/` | `server.ts`（Node の標準ライブラリだけ、`127.0.0.1:17494`）と React 19 + Vite のフロント（`web/`） |
+| 常駐サーバー | `src/pairvoice/` | Python / FastAPI。`127.0.0.1:17495`。要約（mlx-lm）と音声合成（mlx-audio / Irodori-TTS）、プロンプト・辞書・スタイル・声の読み書き |
+| studio | `studio/` | `server.ts`（Node の標準ライブラリだけ、`127.0.0.1:17494`）と React 19 + Vite のフロント（`web/`）。プロンプト・辞書・スタイル・声は常駐サーバーへ中継する |
 | 読み上げフック | `plugin/` | Claude Code プラグイン（フックと、要約を改善する `tune` スキル）。マーケットプレイスはリポジトリ直下の `.claude-plugin/marketplace.json` |
 | メニューバー | `src/pairvoice/menubar.py` | 常駐サーバーの子として起きる |
 

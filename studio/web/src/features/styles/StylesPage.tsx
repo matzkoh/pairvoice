@@ -19,14 +19,12 @@ export function StylesPage() {
   const { data: profiles } = useSuspenseQuery(profilesQueryOptions())
   const { data: health } = useSuspenseQuery(healthQueryOptions())
   // 選んでいるスタイルの名前。null は作成フォーム
-  const [selectedName, setSelectedName] = useState<string | null>(
-    () => data.styles[0]?.name ?? null,
-  )
+  const [selectedName, setSelectedName] = useState<string | null>(() => data.items[0]?.name ?? null)
   const [rawStatus, setStatus] = useState<ProfileStatus | null>(null)
   const status = useTransientStatus(rawStatus)
   const audioRef = useRef<HTMLAudioElement>(null)
 
-  const selected = data.styles.find((s) => s.name === selectedName) ?? null
+  const selected = data.items.find((s) => s.name === selectedName) ?? null
 
   function play(url: string) {
     const player = audioRef.current
@@ -47,7 +45,7 @@ export function StylesPage() {
       <div className="grid grid-cols-[14rem_minmax(0,1fr)] items-start gap-6">
         <nav aria-label="スタイル一覧" className="space-y-1">
           <ul className="space-y-1">
-            {data.styles.map((style) => (
+            {data.items.map((style) => (
               <li key={style.name}>
                 <button
                   type="button"
@@ -80,7 +78,7 @@ export function StylesPage() {
         <StyleEditor
           key={selected?.name ?? ''}
           style={selected}
-          styles={data.styles}
+          styles={data.items}
           profiles={profiles}
           baseSampler={health.pairvoice?.tts.sampler}
           pairvoiceDown={health.pairvoice === null}

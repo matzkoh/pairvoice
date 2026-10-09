@@ -91,7 +91,7 @@ export function StyleEditor({
   function write(next: StyleData[], message: string, done: () => void) {
     startSave(async () => {
       try {
-        await apiSend('/api/styles', 'PUT', { styles: next })
+        await apiSend('/api/styles', 'PUT', { items: next })
         await invalidateStyles(queryClient)
         onStatus({ message, isError: false })
         done()

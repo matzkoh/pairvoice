@@ -68,7 +68,7 @@ it('保存は同じ名前の1件だけを差し替え、config.toml と違う値
 
   await waitFor(() => expect(BASE.onSaved).toHaveBeenCalledWith('ささやき'))
   expect(putBody()).toEqual({
-    styles: [
+    items: [
       { name: 'ささやき', caption: '小声で。', sampler: { duration_scale: 1.2 } },
       { name: 'ゆっくり', caption: null, sampler: {} },
     ],
@@ -90,7 +90,7 @@ it('新しいスタイルはプロファイルの caption のまま読む。capt
   fireEvent.click(screen.getByRole('button', { name: '保存' }))
   await waitFor(() => expect(BASE.onSaved).toHaveBeenCalledWith('速く'))
   expect(putBody()).toEqual({
-    styles: [...BASE.styles, { name: '速く', caption: null, sampler: {} }],
+    items: [...BASE.styles, { name: '速く', caption: null, sampler: {} }],
   })
 })
 

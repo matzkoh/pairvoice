@@ -1,4 +1,5 @@
 // studio の /api/* が返す形。server.ts と web/src の両方が参照する。
+// プロンプト・辞書・スタイル・声は pairvoice の API をそのまま中継するので、正本は pairvoice の /docs。
 // ここに置く型は「HTTP を越える形」だけに限る。サーバー内部の都合は入れない。
 
 // pairvoice の /health が申告するモデルの状態。enum ではなく union で書く
@@ -70,14 +71,14 @@ export type StudioHealth = {
 
 export type PromptResponse = { text: string }
 
-// 辞書の1行。TSV の1行が from/to/memo の3列（server.ts の parseDictTsv）。
+// 辞書の1行。TSV の1行が from/to/memo の3列（pairvoice の reading.read_rows）。
 export type DictRowData = { from: string; to: string; memo: string }
 export type DictResponse = { rows: DictRowData[] }
 // 話し方のスタイル。styles.json の1件で、常駐サーバー（styles.py）が /speak の style で読む。
 // caption が null なら声のプロファイルの caption のまま読む。sampler は config.toml から
 // 動かす項目だけを持つ
 export type StyleData = { name: string; caption: string | null; sampler: SamplerOverrides }
-export type StylesResponse = { styles: StyleData[] }
+export type StylesResponse = { items: StyleData[] }
 // /api/dict/test のプレビュー結果。dict タブが試し打ちに使う（旧 app.js:1139 の data.result）。
 export type DictTestResponse = { result: string }
 
@@ -85,7 +86,6 @@ export type DictTestResponse = { result: string }
 // ハイフンに置換したファイル名由来の値で、日付として parse できない（表示専用）。
 export type HistoryItem = { name: string; ts: string }
 export type HistoryResponse = { items: HistoryItem[] }
-export type OkResponse = { ok: true }
 
 // 声のプロファイル（参照音声 + caption）。design = studio で caption から作った、
 // upload = 手持ちの wav を取り込んだ、auto / import = pairvoice が初回に作った

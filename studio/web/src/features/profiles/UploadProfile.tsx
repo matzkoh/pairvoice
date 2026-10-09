@@ -34,7 +34,7 @@ export function UploadProfile({ onStatus, onCreated }: Props) {
     const query = new URLSearchParams({ name: name.trim(), caption: caption.trim() })
     startTransition(async () => {
       try {
-        const created = await apiUpload<ProfileItem>(`/api/profiles?${query}`, file)
+        const created = await apiUpload<ProfileItem>(`/api/profiles/upload?${query}`, file)
         await invalidateProfiles(queryClient)
         onStatus({ message: `「${created.name}」を取り込みました`, isError: false })
         setFile(null)

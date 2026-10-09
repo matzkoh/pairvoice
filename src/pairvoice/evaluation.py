@@ -100,15 +100,16 @@ def load_review_cases(data_root: Path) -> list[Case]:
     return cases
 
 
+def judge(case: Case, output: str, style: str) -> dict:
+    """1ケースの要約を規則で判定し、ケースの項目と合わせた記録にする。"""
+    judged = checker.evaluate(output, style=style)
+    record = {k: v for k, v in asdict(case).items() if v is not None}
+    record["output"] = judged.pop("text")
+    return record | judged
+
+
 def run_cases(cases: Iterable[Case], summarize: Summarize, system: str, style: str) -> list[dict]:
-    results = []
-    for case in cases:
-        output = summarize(system, case.input)
-        judged = checker.evaluate(output, style=style)
-        record = {k: v for k, v in asdict(case).items() if v is not None}
-        record["output"] = judged.pop("text")
-        results.append(record | judged)
-    return results
+    return [judge(case, summarize(system, case.input), style) for case in cases]
 
 
 def format_summary(results: list[dict]) -> str:

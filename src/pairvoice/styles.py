@@ -1,6 +1,6 @@
 """話し方のスタイル（名前付きの caption + sampler の組）の読み込み。
 
-データの置き場所の styles.json に置き、studio が書いて常駐サーバーが読む。/speak・/synthesize の
+データの置き場所の styles.json に置き、API（studio の画面も）で書いて合成のたびに読む。/speak・/synthesize の
 style で名前を指定すると、そのリクエストだけこの caption と sampler で合成する。
 合成のたびに読むので、studio で直した版が再起動なしに効く。
 
@@ -10,12 +10,14 @@ sampler だけを変える（速さだけ変える、など）。
 
 from __future__ import annotations
 
+import dataclasses
 import json
 import typing
 from dataclasses import dataclass
 from pathlib import Path
 
 from .config import SamplerConfig, _coerce
+from .files import atomic_write
 
 STYLES_FILENAME = "styles.json"
 # 合成のたびに読み直すので、型注釈の解決は1回で済ませる
@@ -35,6 +37,10 @@ class StyleNotFound(Exception):
 
 class StyleInvalid(Exception):
     """styles.json が読めない、または形が違う。手で書き換えたときに起きる。"""
+
+
+class StyleRejected(ValueError):
+    """保存しようとしたスタイルの形が違う。styles.json は書き換えない。"""
 
 
 def _parse_sampler(name: str, raw: object) -> dict[str, object]:
@@ -92,6 +98,25 @@ class StyleStore:
         except ValueError as error:
             raise StyleInvalid(f"styles.json が JSON として壊れています: {error}") from error
         return _parse(raw)
+
+    def save(self, entries: list[dict]) -> list[Style]:
+        """全件を置き換える。1件でも崩れていれば StyleRejected で、何も書かない。"""
+        try:
+            parsed = _parse({"styles": entries})
+        except StyleInvalid as invalid:
+            raise StyleRejected(str(invalid)) from invalid
+        styles = [dataclasses.replace(style, name=style.name.strip()) for style in parsed]
+        seen: set[str] = set()
+        for style in styles:
+            if not style.name:
+                raise StyleRejected("スタイルの name を空にはできません")
+            # /speak は名前で引くので、重なると後ろのスタイルに届かない
+            if style.name in seen:
+                raise StyleRejected(f"スタイル「{style.name}」が重なっています")
+            seen.add(style.name)
+        body = {"styles": [dataclasses.asdict(style) for style in styles]}
+        atomic_write(self.path, json.dumps(body, ensure_ascii=False, indent=2) + "\n")
+        return styles
 
     def get(self, name: str) -> Style:
         for style in self.all():

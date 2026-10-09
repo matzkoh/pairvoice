@@ -97,6 +97,11 @@ class TTSConfig:
     sampler: SamplerConfig = field(default_factory=SamplerConfig)
     profile: ProfileConfig = field(default_factory=ProfileConfig)
 
+    @property
+    def data_root(self) -> Path:
+        """合成と API が読み書きするデータの置き場所。生成音声の置き場所の親。"""
+        return self.output_dir.parent
+
 
 @dataclass(frozen=True)
 class MuteConfig:

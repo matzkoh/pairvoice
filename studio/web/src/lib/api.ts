@@ -89,8 +89,8 @@ export type ApiOptions = {
   signal?: AbortSignal
 }
 
-// サーバーは失敗を必ず { error, message? } の形で返す（badRequest はどちらも持つ、
-// server.ts の badRequest 定義）。message があれば人間向けの説明なのでそれを使い、
+// サーバーは失敗を必ず { error, message? } か、pairvoice を中継した { error, detail? } の形で返す（badRequest は前者、
+// server.ts の badRequest 定義）。message・detail があれば人間向けの説明なのでそれを使い、
 // 無ければ error のコード（例: 'profile_in_use'）を使う。JSON として読めない
 // 応答（プロキシのエラーページ等）は今までどおり `${path}: ${status} ${body}` に
 // フォールバックする。body をそのまま message にすると、インライン表示（各画面）に生 JSON が
@@ -99,8 +99,14 @@ function describeError(path: string, status: number, body: string): string {
   try {
     const parsed: unknown = JSON.parse(body)
     if (parsed && typeof parsed === 'object') {
-      const { message, error } = parsed as { message?: unknown; error?: unknown }
+      const { message, detail, error } = parsed as {
+        message?: unknown
+        detail?: unknown
+        error?: unknown
+      }
       if (typeof message === 'string' && message) return message
+      // pairvoice を中継した応答は { error, detail } の形
+      if (typeof detail === 'string' && detail) return detail
       if (typeof error === 'string' && error) return error
     }
   } catch {
@@ -161,7 +167,7 @@ export async function apiGetBlob(path: string, opts?: ApiOptions): Promise<Blob>
   return res.blob()
 }
 
-// 音声ファイルの取り込み（POST /api/profiles）専用。apiSend のように JSON にすると
+// 音声ファイルの取り込み（POST /api/profiles/upload）専用。apiSend のように JSON にすると
 // バイト列が壊れるので、ファイルの型のまま本体として送る。
 export async function apiUpload<T>(path: string, file: Blob, opts?: ApiOptions): Promise<T> {
   const res = await send(path, {

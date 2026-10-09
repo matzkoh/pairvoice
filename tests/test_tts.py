@@ -724,15 +724,3 @@ def test_speak_with_profile_name_uses_that_profile(no_ref_config, tmp_path, monk
 
     (call,) = model.calls
     assert call["ref_audio"] == str(other.reference)
-
-
-def test_list_profiles_and_styles(no_ref_config, tmp_path):
-    first = _profile(tmp_path, "一つ目", "一。")
-    _write_styles(tmp_path, [{"name": "s", "caption": None, "sampler": {}}])
-    backend = MlxAudioBackend(no_ref_config, data_dir=tmp_path)
-
-    assert backend.list_profiles() == {
-        "active": first.id,
-        "items": [{"id": first.id, "name": "一つ目", "caption": "一。"}],
-    }
-    assert backend.list_styles() == [{"name": "s", "caption": None, "sampler": {}}]

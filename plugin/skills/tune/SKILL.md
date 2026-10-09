@@ -19,26 +19,26 @@ description: pairvoice の読み上げ要約を改善するときに使う。要
 1. 現状を測る: `pairvoice eval --reviews --out <tmp>/baseline.jsonl`。`--reviews` は studio のレビューをケースに加える。結果の各行の `verdict` が `bad` なら `ideal`（理想の出力）に近づけるのが目標、`good` なら `reference`（そのときの出力）の良さを保つのが条件。
 2. 候補を作る: `prompt.txt` を写して直す。👎 の傾向を規則として足すより、既存の規則を明確にする方を先に試す。
 3. 候補を測る: `pairvoice eval --prompt <tmp>/candidate.txt --reviews --out <tmp>/candidate.jsonl`。ALL_PASS 率、`bad` が `ideal` に近づいたか、`good` が劣化していないかを baseline と同じケースで比べる。2〜3を納得いくまで繰り返す。
-4. 反映する: 変更点と比較結果（改善例・劣化例を含む）を利用者に見せ、了承を得てから studio の API で書く。
+4. 反映する: 変更点と比較結果（改善例・劣化例を含む）を利用者に見せ、了承を得てから pairvoice の API で書く。
 
    ```bash
    jq -n --rawfile text <tmp>/candidate.txt '{text: $text}' |
-     curl -sf -X PUT http://127.0.0.1:17494/api/prompt -H 'Content-Type: application/json' -d @-
+     curl -sf -X PUT http://127.0.0.1:17495/prompt -H 'Content-Type: application/json' -d @-
    ```
 
-   studio が履歴を撮るので、利用者は studio のプロンプト画面から戻せる。studio が動いていなければ `pairvoice studio` で起こす。フックは読み上げのたびに `prompt.txt` を読むので、再起動は要らない。
+   pairvoice が履歴を撮るので、利用者は studio のプロンプト画面（または `POST /prompt/restore`）から戻せる。フックは読み上げのたびに `prompt.txt` を読むので、再起動は要らない。
 
 ## 読み辞書を直す
 
 pairvoice が合成の直前に `dict.tsv` で表記を読みに置き換える（要約の評価には効かない）。書き込みは全置換なので、取り直した辞書に足してから `PUT` する。
 
 ```bash
-curl -sf http://127.0.0.1:17494/api/dict |
+curl -sf http://127.0.0.1:17495/dict |
   jq '.rows += [{from: "README", to: "リードミー", memo: ""}]' |
-  curl -sf -X PUT http://127.0.0.1:17494/api/dict -H 'Content-Type: application/json' -d @-
+  curl -sf -X PUT http://127.0.0.1:17495/dict -H 'Content-Type: application/json' -d @-
 ```
 
-`from` が同じ行が既にあれば、足さずにその行を書き換える。置き換えは上の行から順に部分一致で当てるので、長い表記を先に置き、短すぎる表記は避ける（「通り」は「予定通り」まで化ける）。結果は `POST /api/dict/test`（`{text, rows}`）で確かめられる。
+`from` が同じ行が既にあれば、足さずにその行を書き換える。置き換えは上の行から順に部分一致で当てるので、長い表記を先に置き、短すぎる表記は避ける（「通り」は「予定通り」まで化ける）。結果は studio の `POST http://127.0.0.1:17494/api/dict/test`（`{text, rows}`）で確かめられる。
 
 ## モデルを比べる
 

@@ -2,24 +2,30 @@
 
 from __future__ import annotations
 
+import asyncio
+import os
+import signal
 from contextlib import asynccontextmanager
 from importlib.metadata import version
 from typing import Annotated, Literal
 from urllib.parse import urlsplit
 
-from fastapi import Body, FastAPI, Request
+from fastapi import BackgroundTasks, Body, FastAPI, Request
 from fastapi.openapi.models import Example
 from fastapi.responses import JSONResponse
 from pydantic import BaseModel, ConfigDict, Field, StrictInt, model_validator
 
+from . import evaluation, launchd, studio_process
+from .api_errors import ErrorResponse, fail, install_error_handlers
+from .api_errors import error_doc as _error
 from .audio_state import AudioProbe
 from .config import Config
+from .data_api import data_router
 from .lifecycle import Engine, ModelUnavailable, MutedError, Superseded, limit_mlx_cache
 from .llm import MlxLmBackend
 from .mute import MAX_MINUTES, MIN_MINUTES, InvalidMinutes, MuteController
-from .profiles import ProfileNotFound
-from .styles import StyleInvalid, StyleNotFound
-from .tts import AudioNotFound, MlxAudioBackend
+from .prompt import PromptStore
+from .tts import MlxAudioBackend
 
 # studio（studio/server/app.ts）と同じ基準。ポートは問わない
 LOCAL_HOSTNAMES = frozenset({"127.0.0.1", "localhost", "[::1]"})
@@ -78,16 +84,6 @@ WaitDownload = Annotated[
     ),
 ]
 DataAudioPath = Annotated[str, Field(description="データの置き場所からの相対パス（wav）")]
-
-
-class ErrorResponse(BaseModel):
-    error: str = Field(description="エラーの種類")
-    detail: str | None = Field(default=None, description="補足（無いこともある）")
-
-
-def _error(description: str) -> dict:
-    """エラーの応答。どれも {"error": コード, "detail": 補足} の形（ErrorResponse）。"""
-    return {"model": ErrorResponse, "description": description}
 
 
 _MODEL_UNAVAILABLE = _error(
@@ -240,6 +236,19 @@ class SpeakerVectorRequest(BaseModel):
     audio: DataAudioPath
 
 
+class EvalCase(BaseModel):
+    id: str = Field(description="結果に添える ID")
+    input: str = Field(description="要約する作業ログ")
+
+
+class EvalRequest(BaseModel):
+    prompt: str | None = Field(
+        default=None, description="評価するシステムプロンプト。省くと使用中の prompt.txt"
+    )
+    cases: list[EvalCase] | None = Field(default=None, description="省くと同梱のケース")
+    reviews: bool = Field(default=False, description="studio のレビュー（👍 / 👎）もケースに加える")
+
+
 class MuteRequest(BaseModel):
     # 既定の lax だと true が 1 に化ける。範囲の判定は MuteController に任せる（400）
     minutes: StrictInt | None = Field(
@@ -260,6 +269,8 @@ def build_engine(config: Config) -> Engine:
 
 
 def create_app(engine: Engine) -> FastAPI:
+    data_root = engine.config.tts.data_root
+
     @asynccontextmanager
     async def lifespan(app: FastAPI):
         await engine.start()
@@ -275,32 +286,16 @@ def create_app(engine: Engine) -> FastAPI:
         lifespan=lifespan,
     )
 
-    # ドメインの例外は、どのエンドポイントから起きても同じ応答にする
-    @app.exception_handler(StyleNotFound)
-    async def style_not_found(request: Request, error: StyleNotFound):
-        return JSONResponse(status_code=404, content={"error": "style_not_found"})
+    install_error_handlers(app)
 
-    @app.exception_handler(StyleInvalid)
-    async def style_invalid(request: Request, error: StyleInvalid):
-        return JSONResponse(
-            status_code=500, content={"error": "style_invalid", "detail": str(error)}
-        )
-
+    # 応答の形が {"error", "detail"} でない2つ
     @app.exception_handler(MutedError)
     async def muted(request: Request, error: MutedError):
         return JSONResponse(status_code=409, content={"error": "muted", "reason": error.reason})
 
-    @app.exception_handler(ProfileNotFound)
-    async def profile_not_found(request: Request, error: ProfileNotFound):
-        return JSONResponse(status_code=404, content={"error": "profile_not_found"})
-
-    @app.exception_handler(AudioNotFound)
-    async def audio_not_found(request: Request, error: AudioNotFound):
-        return JSONResponse(status_code=404, content={"error": "audio_not_found"})
-
     @app.exception_handler(ModelUnavailable)
     async def model_unavailable(request: Request, error: ModelUnavailable):
-        return JSONResponse(status_code=503, content={"error": error.code, "detail": error.detail})
+        return fail(503, error.code, error.detail)
 
     @app.middleware("http")
     async def reject_foreign_pages(request: Request, call_next):
@@ -416,22 +411,6 @@ def create_app(engine: Engine) -> FastAPI:
     async def speaker_vector(request: SpeakerVectorRequest):
         return {"vector": await engine.speaker_vector(request.audio)}
 
-    # ファイルを読むので def にして、イベントループの外（スレッドプール）で動かす
-    @app.get("/profiles", summary="声の一覧", tags=["声"])
-    def profiles():
-        """`/speak` と `/synthesize` の `voice` に渡せる声（プロファイル）。`active` は使用中の声の ID。"""
-        return engine.list_profiles()
-
-    @app.get(
-        "/styles",
-        summary="スタイルの一覧",
-        tags=["声"],
-        responses={500: _STYLE_INVALID},
-    )
-    def styles():
-        """`/speak` と `/synthesize` の `style` に渡せるスタイル。`caption` が null のスタイルはプロファイルの caption のまま読む。"""
-        return {"items": engine.list_styles()}
-
     @app.get("/health", summary="状態", tags=["状態"])
     async def health():
         """モデルの状態、使用中の声、ミュート、キューの混み具合。"""
@@ -461,10 +440,7 @@ def create_app(engine: Engine) -> FastAPI:
         try:
             state = engine.mute.mute(request.minutes)
         except InvalidMinutes as error:
-            return JSONResponse(
-                status_code=400,
-                content={"error": "invalid_minutes", "detail": str(error)},
-            )
+            return fail(400, "invalid_minutes", str(error))
         return state.describe()
 
     @app.post("/unmute", summary="ミュートを解く", tags=["ミュート"])
@@ -472,4 +448,76 @@ def create_app(engine: Engine) -> FastAPI:
         state = engine.mute.unmute()
         return {"active": state.active}
 
+    @app.post("/restart", status_code=202, summary="常駐サーバーを再起動する", tags=["運用"])
+    async def restart(background: BackgroundTasks):
+        """応答を返してから LaunchAgent に再起動させる。config.toml の変更を反映するのに使う。
+
+        studio は切り離して動いているので再起動されない（`/studio/restart`）。
+        """
+        background.add_task(launchd.restart)
+        return {"restarting": True}
+
+    @app.post("/shutdown", status_code=202, summary="常駐サーバーを終了する", tags=["運用"])
+    async def shutdown(background: BackgroundTasks):
+        """応答を返してから終了する。メニューの「pairvoice を終了」と同じく、LaunchAgent は復活させない。"""
+        # serve の signal ハンドラがメニューバーを片付けて終了コード 0 で降りる
+        background.add_task(os.kill, os.getpid(), signal.SIGTERM)
+        return {"stopping": True}
+
+    @app.post(
+        "/studio/open",
+        summary="studio をブラウザで開く",
+        tags=["運用"],
+        responses={503: _error("`node_not_found`")},
+    )
+    def open_studio():
+        """動いていなければ起動してから開く。"""
+        studio_process.open_studio()
+        return {"url": f"http://127.0.0.1:{studio_process.STUDIO_PORT}"}
+
+    @app.post(
+        "/studio/restart",
+        summary="studio を立て直す",
+        tags=["運用"],
+        responses={
+            409: _error("`studio_not_running`（動いていない。`/studio/open` で起動する）"),
+            503: _error("`node_not_found`"),
+        },
+    )
+    def restart_studio():
+        """動いている studio だけを止めて起動し直す。開いているタブは再読み込みが要る。"""
+        if not studio_process.restart_studio():
+            return fail(409, "studio_not_running")
+        return {"restarted": True}
+
+    def load_eval_inputs(request: EvalRequest) -> tuple[str, list[evaluation.Case]]:
+        system = request.prompt if request.prompt is not None else PromptStore(data_root).read()
+        if request.cases is not None:
+            cases = [evaluation.Case(id=c.id, input=c.input) for c in request.cases]
+        else:
+            cases = evaluation.load_tsv_cases(evaluation.DEFAULT_CASES)
+        if request.reviews:
+            cases += evaluation.load_review_cases(data_root)
+        return system, cases
+
+    @app.post(
+        "/eval",
+        summary="要約プロンプトを評価する",
+        tags=["運用"],
+        responses={503: _MODEL_UNAVAILABLE},
+    )
+    async def evaluate(request: EvalRequest):
+        """ケースを常駐サーバーのモデルで要約し、規則で判定する（`pairvoice eval` と同じ）。
+
+        ケースの数だけ要約するので時間がかかる。読み上げの要約とは同じ列に並ぶ。
+        """
+        # corpus.jsonl は伸び続けるので、ファイルを読むのはイベントループの外で行う
+        system, cases = await asyncio.to_thread(load_eval_inputs, request)
+        results = []
+        for case in cases:
+            output = await engine.summarize(system, case.input, droppable=False)
+            results.append(evaluation.judge(case, output, engine.config.eval.style))
+        return {"summary": evaluation.format_summary(results), "results": results}
+
+    app.include_router(data_router(data_root))
     return app

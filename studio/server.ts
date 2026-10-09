@@ -1,22 +1,15 @@
 #!/usr/bin/env node
-import fs from 'node:fs'
 import http from 'node:http'
 import { fileURLToPath } from 'node:url'
 
 import { createStudioServer } from './server/app.ts'
-import { DEFAULT_PORT, HISTORY_DIR } from './server/paths.ts'
+import { DEFAULT_PORT } from './server/paths.ts'
 
 // テストが取り出す名前。定数は server/paths.ts が読み込み時に確定する
 export * from './server/paths.ts'
-export {
-  currentPromptSince,
-  parseCorpusTs,
-  parseHistoryTs,
-  snapshotPrompt,
-  writePromptWithSnapshot,
-} from './server/history.ts'
-export { applyDict, parseDictTsv } from './server/routes/dict.ts'
-export { atomicWrite, makeAudioPathResolver } from './server/storage.ts'
+export { currentPromptSince, parseCorpusTs, parseHistoryTs } from './server/history.ts'
+export { applyDict } from './server/routes/dict.ts'
+export { makeAudioPathResolver } from './server/storage.ts'
 
 export function startServer(port = DEFAULT_PORT) {
   const server = createStudioServer()
@@ -35,7 +28,6 @@ if (isMain) {
     if (args[i] === '--open') shouldOpen = true
   }
   // DIST_DIR は pnpm build が作る成果物なのでここでは作らない（無ければ 503 で案内する）。
-  fs.mkdirSync(HISTORY_DIR, { recursive: true })
   const server = await startServer(port)
   // 127.0.0.1 に listen した直後なので address は AddressInfo。--port 0 を渡したときの
   // 実ポートを出すために読む（型の上でだけ string | null もありうるので、その場合は指定値）。
