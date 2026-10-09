@@ -22,6 +22,7 @@ import {
 import { PROFILES_DIR } from '../paths.ts'
 import type { AddRoute } from '../router.ts'
 import { atomicWrite, resolveAudioPath } from '../storage.ts'
+import { concatWavs, hasWavHeader, WavFormatError } from '../wav.ts'
 
 // ---- 声のプロファイル ----
 // profiles/<id>/{reference.wav, profile.json} と、使用中の ID を書いた profiles/active。
@@ -34,6 +35,9 @@ export const PROFILE_ID_PATTERN = /^p-[0-9A-Za-z-]+$/
 const PROFILE_SOURCES: readonly ProfileSource[] = ['design', 'upload', 'auto', 'import']
 // 手持ちの wav を取り込むときの上限。数十秒の参照音声で足りる
 const PROFILE_UPLOAD_MAX_BYTES = 50 * 1024 * 1024
+// テイクをつなぐときの数の上限と、間に挟む無音
+const PROFILE_MAX_TAKES = 8
+const TAKE_GAP_SECONDS = 0.3
 
 type ProfileMeta = Omit<ProfileItem, 'id'>
 
@@ -158,21 +162,14 @@ async function createProfile(
   return readProfile(id)
 }
 
-function isWav(buffer: Buffer) {
-  // 中身の妥当性は合成時に mlx-audio が判断する。ここでは取り違え（mp3 等）だけを弾く
-  return (
-    buffer.length >= 12 &&
-    buffer.subarray(0, 4).toString('latin1') === 'RIFF' &&
-    buffer.subarray(8, 12).toString('latin1') === 'WAVE'
-  )
-}
 export function registerProfileRoutes(addRoute: AddRoute) {
   addRoute('GET', '/api/profiles', async (req, res) => {
     sendJson(res, 200, await listProfiles())
   })
 
-  // 2通りの作り方を1本で受ける。JSON なら試聴のテイク（design: true で作った候補）の
-  // wav から、audio/wav ならその本体を取り込む（名前と caption はクエリで渡す）
+  // 2通りの作り方を1本で受ける。JSON なら試聴のテイク（pairvoice が合成した wav）を短い
+  // 無音を挟んで1本の参照音声につなぎ（Irodori-TTS は同じ話者の短い発話を合わせて 30 秒ほどの
+  // 参照音声を勧める）、audio/wav ならその本体を取り込む（名前と caption はクエリで渡す）
   addRoute('POST', '/api/profiles', async (req, res, ctx) => {
     const contentType = req.headers['content-type'] ?? ''
     if (contentType.startsWith('audio/')) {
@@ -183,7 +180,8 @@ export function registerProfileRoutes(addRoute: AddRoute) {
       const declared = Number(req.headers['content-length'])
       if (declared > PROFILE_UPLOAD_MAX_BYTES) throw new BodyTooLargeError('wav is too large')
       const audio = await readBodyBuffer(req, PROFILE_UPLOAD_MAX_BYTES)
-      if (!isWav(audio)) return badRequest(res, 'body must be a wav file')
+      // 中身の妥当性は合成時に mlx-audio が判断する
+      if (!hasWavHeader(audio)) return badRequest(res, 'body must be a wav file')
       const created = await createProfile({ name, caption, source: 'upload' }, (target) =>
         fsp.writeFile(target, audio),
       )
@@ -196,16 +194,31 @@ export function registerProfileRoutes(addRoute: AddRoute) {
     if (!name) return badRequest(res, 'name is required')
     // 試聴のテイクは tts.output_dir（名前は設定しだい）に出る。他のプロファイルの参照音声を
     // 取り込み元にさせない
-    const take = typeof body.take === 'string' ? await resolveAudioPath(body.take) : null
+    const requested = Array.isArray(body.takes) ? body.takes : []
+    if (requested.length === 0 || requested.length > PROFILE_MAX_TAKES) {
+      return badRequest(res, 'takes (1 to 8 wav paths) is required')
+    }
     const profilesDir = path.resolve(PROFILES_DIR) + path.sep
-    if (!take || take.startsWith(profilesDir)) return badRequest(res, 'valid take is required')
+    const takes: string[] = []
+    for (const relative of requested) {
+      const take = typeof relative === 'string' ? await resolveAudioPath(relative) : null
+      if (!take || take.startsWith(profilesDir)) return badRequest(res, 'valid take is required')
+      try {
+        if (!(await fsp.stat(take)).isFile()) return notFound(res)
+      } catch {
+        return notFound(res)
+      }
+      takes.push(take)
+    }
+    let joined: Buffer
     try {
-      if (!(await fsp.stat(take)).isFile()) return notFound(res)
-    } catch {
-      return notFound(res)
+      joined = concatWavs(await Promise.all(takes.map((t) => fsp.readFile(t))), TAKE_GAP_SECONDS)
+    } catch (err) {
+      if (err instanceof WavFormatError) return badRequest(res, `takes: ${err.message}`)
+      throw err
     }
     const created = await createProfile({ name, caption, source: 'design' }, (target) =>
-      fsp.copyFile(take, target),
+      fsp.writeFile(target, joined),
     )
     sendJson(res, 201, created)
   })

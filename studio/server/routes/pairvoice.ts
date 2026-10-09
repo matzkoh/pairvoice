@@ -1,7 +1,15 @@
 import type http from 'node:http'
 
 import type { PairvoiceHealth, StudioHealth } from '../../shared/api-types.ts'
-import { badRequest, notFound, readJsonBody, relayPairvoice, sendJson, streamWav } from '../http.ts'
+import {
+  badRequest,
+  isRecord,
+  notFound,
+  readJsonBody,
+  relayPairvoice,
+  sendJson,
+  streamWav,
+} from '../http.ts'
 import { pairvoiceBase } from '../paths.ts'
 import type { AddRoute } from '../router.ts'
 import { resolveAudioPath } from '../storage.ts'
@@ -54,6 +62,12 @@ async function forwardToPairvoice(
   }
 }
 
+type MixPart = { audio: string; weight: number }
+
+function isMixPart(part: unknown): part is MixPart {
+  return isRecord(part) && typeof part.audio === 'string' && typeof part.weight === 'number'
+}
+
 function isTimeout(err: unknown) {
   return err instanceof DOMException && err.name === 'TimeoutError'
 }
@@ -74,6 +88,7 @@ export function registerPairvoiceRoutes(addRoute: AddRoute) {
       sampler?: Record<string, unknown>
       design?: true
       profile_id?: string
+      mix?: { audio: string; weight: number }[]
     } = {
       text: body.text,
       bypass_mute: true,
@@ -88,6 +103,14 @@ export function registerPairvoiceRoutes(addRoute: AddRoute) {
         return badRequest(res, 'invalid profile_id')
       }
       payload.profile_id = body.profile_id
+    }
+    // 2択で絞り込むときの、もとの声を重みで混ぜた声。パスの検証は pairvoice が行う
+    // （データの置き場所の外を指していれば 404）
+    if (body.mix !== undefined) {
+      if (!Array.isArray(body.mix) || body.mix.length === 0 || !body.mix.every(isMixPart)) {
+        return badRequest(res, 'mix must be a non-empty array of {audio, weight}')
+      }
+      payload.mix = body.mix.map(({ audio, weight }: MixPart) => ({ audio, weight }))
     }
     // caption 未指定は「プロファイルの caption で読む」、空文字は「caption なしで読む」の意味。
     // 文字列でなければ送らない
@@ -108,6 +131,15 @@ export function registerPairvoiceRoutes(addRoute: AddRoute) {
     // この型に無い形（detail/error）で返ることがある。中身は検証せず素通しする
     // （クライアント側が防御的に読む）。
     await forwardToPairvoice(res, '/speak', payload)
+  })
+
+  // 2択で絞り込むときに、もとの声どうしの位置を測る話者ベクトル
+  addRoute('POST', '/api/speaker-vector', async (req, res) => {
+    const body = await readJsonBody(req)
+    if (typeof body.audio !== 'string' || body.audio === '') {
+      return badRequest(res, 'audio (non-empty string) is required')
+    }
+    await forwardToPairvoice(res, '/speaker-vector', { audio: body.audio })
   })
 
   // 試聴で生成された音声は corpus.jsonl に載らないので /api/audio/:message_id では

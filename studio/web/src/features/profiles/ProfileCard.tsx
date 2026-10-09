@@ -7,6 +7,7 @@ import { Badge } from '@/components/ui/badge'
 import { Button } from '@/components/ui/button'
 import { Input } from '@/components/ui/input'
 import { apiSend, toErrorMessage } from '@/lib/api'
+import { isImeConfirm } from '@/lib/hotkeys'
 
 import type { ProfileItem } from '../../../../shared/api-types'
 import { SOURCE_LABELS } from './ProfileList'
@@ -73,7 +74,7 @@ export function ProfileCard({ item, isActive, onPlay, onStatus, onDeleted }: Pro
             onChange={(e) => setName(e.target.value)}
             onBlur={rename}
             onKeyDown={(e) => {
-              if (e.key === 'Enter') rename()
+              if (e.key === 'Enter' && !isImeConfirm(e.nativeEvent)) rename()
               if (e.key === 'Escape') {
                 editing.current = false
                 setName(item.name)

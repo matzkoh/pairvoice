@@ -69,6 +69,8 @@ async function send(path: string, init?: RequestInit): Promise<Response> {
   try {
     return await fetch(path, init)
   } catch (cause) {
+    // 呼び出し側が打ち切ったのは、サーバーに届かなかったのとは別の出来事
+    if (init?.signal?.aborted) throw cause
     throw new UnreachableServerError(path, cause)
   }
 }
@@ -83,6 +85,8 @@ export type ApiOptions = {
   // 判定は応答ではなく「そのエンドポイントに 404 が起こり得ることを知っている」
   // 呼び出し側に持たせる。
   allowNotFound?: boolean
+  // 画面を離れた・次へ進んだときに、待っている要求を打ち切る
+  signal?: AbortSignal
 }
 
 // サーバーは失敗を必ず { error, message? } の形で返す（badRequest はどちらも持つ、
@@ -138,10 +142,14 @@ export async function apiSend<T>(
   body?: unknown,
   opts?: ApiOptions,
 ): Promise<T> {
-  const init: RequestInit =
-    body === undefined
-      ? { method }
-      : { method, headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(body) }
+  const init: RequestInit = {
+    method,
+    signal: opts?.signal,
+    ...(body !== undefined && {
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(body),
+    }),
+  }
   return unwrap<T>(await send(path, init), path, opts)
 }
 

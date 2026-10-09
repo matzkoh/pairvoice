@@ -5,7 +5,7 @@ import pytest
 
 from pairvoice.config import ProfileConfig, SamplerConfig, TTSConfig
 from pairvoice.profiles import ProfileNotFound, ProfileStore
-from pairvoice.tts import ANCHOR_TEXT, MlxAudioBackend
+from pairvoice.tts import ANCHOR_TEXT, AudioNotFound, MlxAudioBackend
 
 
 class FakeResult:
@@ -515,3 +515,104 @@ def test_resolve_caption_ignores_non_utf8_caption_file(config, tmp_path):
     backend = MlxAudioBackend(config, data_dir=tmp_path)
 
     assert backend.resolve_caption() == ("やわらかい声。", "config")
+
+
+class FakeDiT:
+    """encode_conditions_full の差し替えを確かめるための DiT の代わり。"""
+
+    def encode_conditions_full(self, **kwargs):
+        return ("text", "text_mask", "speaker", "speaker_mask", "caption", "caption_mask")
+
+
+class MixModel(FakeModel):
+    """generate の中で、差し込まれた話者の表現が encode_conditions_full から出てくるかを記録する。"""
+
+    def __init__(self, result):
+        super().__init__(result)
+        self.model = FakeDiT()
+        self.config = type(
+            "Config", (), {"dit": type("DiT", (), {"speaker_patch_size": 4, "latent_dim": 32})}
+        )()
+        self.seen = []
+        self.encoded = []
+
+    def _encode_ref_audios(self, audios):
+        self.encoded.append(audios)
+        return "latent", "mask"
+
+    def generate(self, text, **kwargs):
+        refs = self._encode_ref_audios(["wav"])
+        with_ref = self.model.encode_conditions_full(ref_latent="ref")
+        without_ref = self.model.encode_conditions_full(ref_latent=None)
+        self.seen.append((refs, with_ref, without_ref))
+        return super().generate(text, **kwargs)
+
+
+def test_speak_with_mix_injects_weighted_speaker_state(no_ref_config, tmp_path, monkeypatch):
+    import mlx.core as mx
+
+    model = MixModel(FakeResult(np.zeros(480, dtype=np.float32)))
+    backend = make_backend(no_ref_config, model, tmp_path, monkeypatch)
+    a, b = tmp_path / "a.wav", tmp_path / "b.wav"
+    states = {a: mx.ones((1, 3, 2)), b: mx.full((1, 5, 2), 3.0)}
+    monkeypatch.setattr(backend, "_speaker_state", lambda path: states[path])
+
+    backend.speak("テスト", caption="女性の声。", mix=[(a, 1.0), (b, 3.0)])
+
+    (refs, with_ref, without_ref) = model.seen[0]
+    # 差し込む間は参照音声を符号化しない（空の1パッチで経路だけ通す）
+    assert model.encoded == []
+    assert np.asarray(refs[0]).shape == (1, 4, 32)
+    # 長さは短い方にそろえ、重みは足して1に直して混ぜる: 0.25 * 1 + 0.75 * 3
+    np.testing.assert_allclose(np.asarray(with_ref[2]), np.full((1, 3, 2), 2.5))
+    assert np.asarray(with_ref[3]).shape == (1, 3)
+    # 参照なしの呼び出し（継続時間の予測の空の話者など）には差し込まない
+    assert without_ref[2] == "speaker"
+    call = model.calls[0]
+    assert call["ref_audio"] == str(a)
+    assert call["caption"] == "女性の声。"
+    # 合成が終わったら差し込みを外す。次のふつうの読み上げに混ざらない
+    assert backend._injected_speaker is None
+
+
+def test_resolve_audio_stays_inside_data_root(config, tmp_path):
+    backend = MlxAudioBackend(config, data_dir=tmp_path)
+    take = tmp_path / "generations" / "take.wav"
+    take.parent.mkdir(parents=True, exist_ok=True)
+    take.write_bytes(b"RIFF")
+    outside = tmp_path.parent / "outside.wav"
+    outside.write_bytes(b"RIFF")
+
+    assert backend.resolve_audio("generations/take.wav") == take.resolve()
+    for bad in ["../outside.wav", "generations/missing.wav", str(outside)]:
+        with pytest.raises(AudioNotFound):
+            backend.resolve_audio(bad)
+
+
+def test_speak_with_mix_refuses_when_model_cannot_take_injection(
+    no_ref_config, tmp_path, monkeypatch
+):
+    # 差し込む口が無いモデルで黙ってふつうの声を鳴らすと、2択の A と B が同じ声になる
+    model = FakeModel(FakeResult(np.zeros(480, dtype=np.float32)))
+    backend = make_backend(no_ref_config, model, tmp_path, monkeypatch)
+    monkeypatch.setattr(backend, "_mixed_speaker_state", lambda mix: "state")
+
+    with pytest.raises(RuntimeError):
+        backend.speak("テスト", mix=[(tmp_path / "a.wav", 1.0)])
+    assert model.calls == []
+
+
+def test_speak_with_negative_mix_weight_extrapolates(no_ref_config, tmp_path, monkeypatch):
+    import mlx.core as mx
+
+    model = MixModel(FakeResult(np.zeros(480, dtype=np.float32)))
+    backend = make_backend(no_ref_config, model, tmp_path, monkeypatch)
+    a, b = tmp_path / "a.wav", tmp_path / "b.wav"
+    states = {a: mx.full((1, 2, 2), 1.0), b: mx.full((1, 2, 2), 3.0)}
+    monkeypatch.setattr(backend, "_speaker_state", lambda path: states[path])
+
+    backend.speak("テスト", mix=[(a, 1.5), (b, -0.5)])
+
+    # 1.5 * 1 - 0.5 * 3 = 0。a から b と逆の向きへ伸ばした表現
+    (_, with_ref, _) = model.seen[0]
+    np.testing.assert_allclose(np.asarray(with_ref[2]), np.zeros((1, 2, 2)))

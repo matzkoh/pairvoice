@@ -1,3 +1,5 @@
+from pathlib import Path
+
 import pytest
 from fastapi.testclient import TestClient
 
@@ -412,3 +414,88 @@ def test_rejects_requests_from_foreign_pages():
 )
 def test_is_local_request(host, origin, expected):
     assert is_local_request(host, origin) is expected
+
+
+def test_speak_forwards_mix_as_resolved_paths_and_weights():
+    tts = FakeTTS()
+    _, client = build(tts=tts)
+
+    response = client.post(
+        "/speak",
+        json={
+            "text": "テスト",
+            "caption": "女性の声。",
+            "mix": [
+                {"audio": "generations/a.wav", "weight": 0.25},
+                {"audio": "generations/b.wav", "weight": 0.75},
+            ],
+        },
+    )
+
+    assert response.status_code == 200
+    assert tts.calls[0]["mix"] == [
+        (Path("/data/generations/a.wav"), 0.25),
+        (Path("/data/generations/b.wav"), 0.75),
+    ]
+
+
+def test_speak_reports_mix_outside_data_root_as_404():
+    _, client = build()
+
+    response = client.post(
+        "/speak", json={"text": "テスト", "mix": [{"audio": "../secret.wav", "weight": 1}]}
+    )
+
+    assert response.status_code == 404
+    assert response.json() == {"error": "audio_not_found"}
+
+
+def test_speak_accepts_negative_mix_weight_for_extrapolation():
+    tts = FakeTTS()
+    _, client = build(tts=tts)
+
+    response = client.post(
+        "/speak",
+        json={
+            "text": "テスト",
+            "mix": [
+                {"audio": "generations/a.wav", "weight": 1.4},
+                {"audio": "generations/b.wav", "weight": -0.4},
+            ],
+        },
+    )
+
+    assert response.status_code == 200
+    assert [w for _, w in tts.calls[0]["mix"]] == [1.4, -0.4]
+
+
+@pytest.mark.parametrize(
+    "mix",
+    [
+        # 和が 0 以下では声にならない
+        [
+            {"audio": "generations/a.wav", "weight": 0.5},
+            {"audio": "generations/b.wav", "weight": -0.5},
+        ],
+        # 伸ばしすぎ
+        [{"audio": "generations/a.wav", "weight": 3}, {"audio": "generations/b.wav", "weight": -2}],
+    ],
+)
+def test_speak_rejects_mix_that_cannot_be_a_voice(mix):
+    _, client = build()
+
+    response = client.post("/speak", json={"text": "テスト", "mix": mix})
+
+    assert response.status_code == 422
+
+
+def test_speaker_vector_returns_vector_without_mute():
+    tts = FakeTTS()
+    # 測るだけで音は出さないので、マイクが使われていても返す
+    _, client = build(tts=tts, probe=FakeProbe(microphone=True))
+
+    response = client.post("/speaker-vector", json={"audio": "generations/a.wav"})
+
+    assert response.status_code == 200
+    assert response.json() == {"vector": [0.5, -0.5]}
+    assert tts.calls == [{"speaker_vector": Path("/data/generations/a.wav")}]

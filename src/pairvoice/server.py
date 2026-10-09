@@ -7,7 +7,7 @@ from urllib.parse import urlsplit
 
 from fastapi import FastAPI, Request
 from fastapi.responses import JSONResponse
-from pydantic import BaseModel, ConfigDict, Field, StrictInt
+from pydantic import BaseModel, ConfigDict, Field, StrictInt, model_validator
 
 from .audio_state import AudioProbe
 from .config import Config
@@ -15,7 +15,7 @@ from .lifecycle import Engine, ModelUnavailable, MutedError, Superseded, limit_m
 from .llm import MlxLmBackend
 from .mute import InvalidMinutes, MuteController
 from .profiles import ProfileNotFound
-from .tts import MlxAudioBackend
+from .tts import AudioNotFound, MlxAudioBackend
 
 # studio（studio/server/app.ts）と同じ基準。ポートは問わない
 LOCAL_HOSTNAMES = frozenset({"127.0.0.1", "localhost", "[::1]"})
@@ -87,6 +87,14 @@ class SamplerOverrides(BaseModel):
     rescale_sigma: float | None = None
 
 
+class MixPart(BaseModel):
+    # データの置き場所からの相対パス（studio が試聴で作った wav）
+    audio: str
+    # 負の重みは外挿（その声から遠ざかる向きへ伸ばす）。伸ばしすぎると声が崩れるので、
+    # 2択が使う幅（負の重みの合計 0.5 まで）に余裕を持たせた範囲に絞る
+    weight: float = Field(ge=-1, le=2)
+
+
 class SpeakRequest(BaseModel):
     text: str
     bypass_mute: bool = False
@@ -102,6 +110,19 @@ class SpeakRequest(BaseModel):
     play: bool = False
     # SummaryRequest と同じ。フックが false で送る
     wait_download: bool = True
+    # studio の「2択で絞り込む」で使う。もとの声の話者の表現を重みで混ぜた声で鳴らす
+    mix: list[MixPart] | None = Field(default=None, min_length=1)
+
+    @model_validator(mode="after")
+    def _mix_weights_sum_positive(self):
+        # 重みは足して1に直して混ぜるので、和が 0 以下では声にならない
+        if self.mix is not None and sum(part.weight for part in self.mix) <= 0:
+            raise ValueError("mix weights must sum to a positive value")
+        return self
+
+
+class SpeakerVectorRequest(BaseModel):
+    audio: str
 
 
 class MuteRequest(BaseModel):
@@ -174,11 +195,18 @@ def create_app(engine: Engine) -> FastAPI:
                 profile_id=request.profile_id,
                 play=request.play,
                 wait_download=request.wait_download,
+                mix=(
+                    [(part.audio, part.weight) for part in request.mix]
+                    if request.mix is not None
+                    else None
+                ),
             )
         except MutedError as error:
             return {"muted": True, "reason": error.reason}
         except ProfileNotFound:
             return JSONResponse(status_code=404, content={"error": "profile_not_found"})
+        except AudioNotFound:
+            return JSONResponse(status_code=404, content={"error": "audio_not_found"})
         except ModelUnavailable as error:
             return JSONResponse(
                 status_code=503, content={"error": error.code, "detail": error.detail}
@@ -188,6 +216,18 @@ def create_app(engine: Engine) -> FastAPI:
             "relative_path": result.relative_path,
             "duration": result.duration,
         }
+
+    @app.post("/speaker-vector")
+    async def speaker_vector(request: SpeakerVectorRequest):
+        try:
+            vector = await engine.speaker_vector(request.audio)
+        except AudioNotFound:
+            return JSONResponse(status_code=404, content={"error": "audio_not_found"})
+        except ModelUnavailable as error:
+            return JSONResponse(
+                status_code=503, content={"error": error.code, "detail": error.detail}
+            )
+        return {"vector": vector}
 
     @app.get("/health")
     async def health():

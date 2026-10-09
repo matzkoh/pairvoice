@@ -384,6 +384,7 @@ class Engine:
         profile_id: str | None = None,
         play: bool = False,
         wait_download: bool = True,
+        mix: list[tuple[str, float]] | None = None,
     ):
         """play なら、合成した音声を Player の列に積んでから返す（鳴り終わるのは待たない）。"""
         # 合成を待っている間に「止める」が押されたら、出来上がっても鳴らさない
@@ -391,8 +392,13 @@ class Engine:
 
         async def work():
             await self._tts.ensure_loaded(wait_download=wait_download)
+            resolved_mix = (
+                [(self._tts_backend.resolve_audio(audio), weight) for audio, weight in mix]
+                if mix
+                else None
+            )
             result = await on_mlx_thread(
-                self._tts_backend.speak, text, caption, sampler, design, profile_id
+                self._tts_backend.speak, text, caption, sampler, design, profile_id, resolved_mix
             )
             self._tts.touch()
             return result
@@ -401,6 +407,19 @@ class Engine:
         if play:
             self.player.enqueue(result.path, bypass_mute=bypass_mute, epoch=epoch)
         return result
+
+    async def speaker_vector(self, audio: str) -> list[float]:
+        """データの置き場所の wav の話者ベクトル。2択でもとの声どうしの位置を測る。"""
+        path = self._tts_backend.resolve_audio(audio)
+
+        async def work():
+            await self._tts.ensure_loaded()
+            vector = await on_mlx_thread(self._tts_backend.speaker_vector, path)
+            self._tts.touch()
+            return vector
+
+        # 測るのは studio の操作で、音は出さないのでミュートは効かせない
+        return await self._run_unless_muted(work, bypass_mute=True, droppable=False)
 
     async def warmup(self) -> dict:
         # ロードも直列キューを通し、llm と tts を順に読み込む（並行だとピークメモリが両方の合計になる）

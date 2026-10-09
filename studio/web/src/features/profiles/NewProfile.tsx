@@ -3,6 +3,7 @@ import type { ComponentProps } from 'react'
 import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs'
 
 import { DesignProfile } from './DesignProfile'
+import { PickProfile } from './PickProfile'
 import { UploadProfile } from './UploadProfile'
 
 type Props = ComponentProps<typeof DesignProfile>
@@ -20,10 +21,20 @@ export function NewProfile({ onStatus, onCreated, ...design }: Props) {
       <Tabs defaultValue="design" className="mt-4 gap-5">
         <TabsList>
           <TabsTrigger value="design">caption から声を作る</TabsTrigger>
+          <TabsTrigger value="pick">2択で絞り込む</TabsTrigger>
           <TabsTrigger value="upload">wav を取り込む</TabsTrigger>
         </TabsList>
         <TabsContent value="design" keepMounted>
           <DesignProfile {...design} onStatus={onStatus} onCreated={onCreated} />
+        </TabsContent>
+        <TabsContent value="pick" keepMounted>
+          <PickProfile
+            anchorText={design.anchorText}
+            pairvoiceDown={design.pairvoiceDown}
+            onPlay={design.onPlay}
+            onStatus={onStatus}
+            onCreated={onCreated}
+          />
         </TabsContent>
         <TabsContent value="upload" keepMounted>
           <UploadProfile onStatus={onStatus} onCreated={onCreated} />

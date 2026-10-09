@@ -1,17 +1,17 @@
-import { useQueryClient } from '@tanstack/react-query'
 import { Play } from 'lucide-react'
-import { useState, useTransition } from 'react'
+import { useState } from 'react'
 
 import { Button } from '@/components/ui/button'
-import { Input } from '@/components/ui/input'
 import { Textarea } from '@/components/ui/textarea'
-import { apiSend, toErrorMessage } from '@/lib/api'
 import { audioFileUrl } from '@/lib/speak'
 
-import type { ProfileItem, SamplerOverrides } from '../../../../shared/api-types'
+import type { SamplerOverrides } from '../../../../shared/api-types'
 import { Field } from './Field'
-import { invalidateProfiles, type ProfileStatus } from './queries'
+import { MASTER_STEPS, recordTakes, REFERENCE_TEXTS, synth } from './mixSynth'
+import type { ProfileStatus } from './queries'
 import { initialValues, MAX_CANDIDATES } from './samplerKnobs'
+import { SaveAsProfile } from './SaveAsProfile'
+import { useAnchoredText } from './useAnchoredText'
 import { type Take, useTakes } from './useTakes'
 
 type Props = {
@@ -38,13 +38,7 @@ export function DesignProfile({
   onCreated,
 }: Props) {
   const [caption, setCaption] = useState(initialCaption)
-  const [text, setText] = useState(anchorText)
-  // pairvoice が後から起きて文が届いたとき、書き換えていない入力欄だけを追従させる
-  const [syncedAnchor, setSyncedAnchor] = useState(anchorText)
-  if (anchorText !== syncedAnchor) {
-    if (text === syncedAnchor) setText(anchorText)
-    setSyncedAnchor(anchorText)
-  }
+  const [text, setText] = useAnchoredText(anchorText)
   const [count, setCount] = useState(3)
   const { takes, running, start, stop } = useTakes({
     onReady: (relativePath) => onPlay(audioFileUrl(relativePath)),
@@ -153,30 +147,7 @@ type RowProps = {
 }
 
 function CandidateRow({ take, onPlay, onStatus, onCreated }: RowProps) {
-  const queryClient = useQueryClient()
-  const [name, setName] = useState('')
-  const [saving, startSave] = useTransition()
-  const [saved, setSaved] = useState(false)
   const relativePath = take.relativePath
-
-  function save() {
-    if (!relativePath || name.trim() === '') return
-    startSave(async () => {
-      try {
-        const created = await apiSend<ProfileItem>('/api/profiles', 'POST', {
-          name: name.trim(),
-          caption: take.input.caption,
-          take: relativePath,
-        })
-        await invalidateProfiles(queryClient)
-        setSaved(true)
-        onStatus({ message: `「${created.name}」を保存しました`, isError: false })
-        onCreated(created.id)
-      } catch (err: unknown) {
-        onStatus({ message: `保存に失敗しました: ${toErrorMessage(err)}`, isError: true })
-      }
-    })
-  }
 
   return (
     <li className="flex items-center gap-2">
@@ -194,25 +165,31 @@ function CandidateRow({ take, onPlay, onStatus, onCreated }: RowProps) {
       {take.status === 'waiting' && <span className="text-xs text-muted-foreground">待機中</span>}
       {take.status === 'running' && <span className="text-xs text-muted-foreground">生成中…</span>}
       {take.status === 'error' && <span className="text-xs text-destructive">{take.message}</span>}
-      {take.status === 'done' && (
-        <div className="ml-auto flex items-center gap-2">
-          {saved ? (
-            <span className="text-xs text-muted-foreground">保存済み</span>
-          ) : (
-            <>
-              <Input
-                aria-label={`候補 #${take.id} の名前`}
-                className="h-7 w-40"
-                placeholder="プロファイルの名前"
-                value={name}
-                onChange={(e) => setName(e.target.value)}
-                onKeyDown={(e) => e.key === 'Enter' && save()}
-              />
-              <Button size="sm" disabled={saving || name.trim() === ''} onClick={save}>
-                この声で作る
-              </Button>
-            </>
-          )}
+      {take.status === 'done' && relativePath && (
+        <div className="ml-auto">
+          <SaveAsProfile
+            label={`候補 #${take.id}`}
+            caption={take.input.caption}
+            // 選んだテイクを参照にして、同じ声で別の文も読ませる（テイクを複製した声なので、
+            // テイクそのものとはわずかに違う）
+            record={(progress) =>
+              recordTakes(
+                REFERENCE_TEXTS,
+                (text) =>
+                  synth(
+                    text,
+                    take.input.caption,
+                    take.seed,
+                    [{ audio: relativePath, weight: 1 }],
+                    MASTER_STEPS,
+                  ),
+                progress,
+                [relativePath],
+              )
+            }
+            onStatus={onStatus}
+            onCreated={onCreated}
+          />
         </div>
       )}
     </li>

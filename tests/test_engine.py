@@ -49,7 +49,20 @@ class FakeTTS(FakeBackend):
     def describe_profile(self):
         return self.profile
 
-    def speak(self, text, caption=None, sampler=None, design=False, profile_id=None):
+    def resolve_audio(self, relative):
+        from pathlib import Path
+
+        from pairvoice.tts import AudioNotFound
+
+        if ".." in relative:
+            raise AudioNotFound(relative)
+        return Path("/data") / relative
+
+    def speaker_vector(self, path):
+        self.calls.append({"speaker_vector": path})
+        return [0.5, -0.5]
+
+    def speak(self, text, caption=None, sampler=None, design=False, profile_id=None, mix=None):
         from pathlib import Path
 
         from pairvoice.tts import SpeechResult
@@ -61,6 +74,8 @@ class FakeTTS(FakeBackend):
                 "sampler": sampler,
                 "design": design,
                 "profile_id": profile_id,
+                # 2択で絞り込むときだけ載せる（ほかの試験の期待値を mix: None で埋めない）
+                **({"mix": mix} if mix is not None else {}),
             }
         )
         return SpeechResult(
@@ -498,9 +513,9 @@ class ThreadRecordingTTS(FakeTTS):
         self.threads["tts.load"] = threading.get_ident()
         super().load()
 
-    def speak(self, text, caption=None, sampler=None, design=False, profile_id=None):
+    def speak(self, text, caption=None, sampler=None, design=False, profile_id=None, mix=None):
         self.threads["tts.speak"] = threading.get_ident()
-        return super().speak(text, caption, sampler, design, profile_id)
+        return super().speak(text, caption, sampler, design, profile_id, mix)
 
 
 async def test_mlx_work_runs_on_one_dedicated_thread():

@@ -15,6 +15,11 @@ caption は speak() の引数 → プロファイル → caption.txt → 設定�
 caption と同じく sampler も3段で解決する（speak() の引数 → config.toml の
 [tts.sampler] → モデル既定）。None は「モデル既定に任せる」の意味で、キーごと
 渡さない。
+
+声の個体は、参照音声から作る話者の表現（speaker_state、約6トークン/秒 × 768次元）で
+決まる。studio の「2択で絞り込む」は、いくつかのもとの声の表現を重みで混ぜた声を合成し
+（mix）、もとの声どうしの位置関係を話者ベクトル（表現の時間平均）で測る。表現を差し込む
+公開の口は mlx-audio に無いので、encode_conditions_full を包んで差し替える。
 """
 
 from __future__ import annotations
@@ -23,7 +28,9 @@ import dataclasses
 import shutil
 import uuid
 import wave
-from collections.abc import Mapping
+from collections import OrderedDict
+from collections.abc import Mapping, Sequence
+from contextlib import contextmanager
 from dataclasses import dataclass
 from pathlib import Path
 
@@ -42,6 +49,12 @@ ANCHOR_TEXT = (
     "こんにちは。今日も一緒に作業を進めていきましょう。何かあったら、いつでも声をかけてくださいね。"
 )
 AUTO_PROFILE_NAME = "既定の声"
+# もとの声の話者の表現を取っておく数。2択の1セッションのもとの声（数人）と、その間の行き来で足りる
+SPEAKER_STATE_CACHE_SIZE = 32
+
+
+class AudioNotFound(Exception):
+    """指定された音声がデータの置き場所に無い（外を指している・消された）。"""
 
 
 @dataclass(frozen=True)
@@ -63,6 +76,10 @@ class MlxAudioBackend:
         self._data_dir = data_dir or config.output_dir.parent
         self._profiles = ProfileStore(self._data_dir / "profiles")
         self._loaded = None
+        # 次の合成で差し込む話者の表現。mix の合成の間だけ立てる（_speaking_as）
+        self._injected_speaker = None
+        self._speaker_injection_ready = False
+        self._speaker_states: OrderedDict[tuple[Path, int], mx.array] = OrderedDict()
 
     @property
     def caption_path(self) -> Path:
@@ -158,10 +175,109 @@ class MlxAudioBackend:
     def load(self) -> None:
         self._config.output_dir.mkdir(parents=True, exist_ok=True)
         self._loaded = self._load_model()
+        self._install_speaker_injection()
 
     def unload(self) -> None:
         self._loaded = None
+        self._speaker_states.clear()
         mx.clear_cache()
+
+    def _install_speaker_injection(self) -> None:
+        """混ぜた話者の表現を差し込む口を、読み込んだモデルに付ける（mlx-audio に公開の口が無い）。
+
+        encode_conditions_full は継続時間の予測と sampler の2か所から呼ばれる。どちらにも同じ
+        表現が入るよう、呼び出し元ではなくこの関数そのものを包む。差し込む間は参照音声の
+        符号化（DACVAE）も空の1パッチで済ませる。符号化した表現はどのみち捨てる。
+        """
+        model = self._loaded
+        dit = getattr(model, "model", None)
+        original = getattr(dit, "encode_conditions_full", None)
+        original_encode_refs = getattr(model, "_encode_ref_audios", None)
+        self._speaker_injection_ready = False
+        if model is None or dit is None or original is None or original_encode_refs is None:
+            return
+
+        def encode_conditions_full(*args, **kwargs):
+            out = original(*args, **kwargs)
+            state = self._injected_speaker
+            if state is None or kwargs.get("ref_latent") is None:
+                return out
+            # 戻り値の並びが変わったら、黙って別の値を差し込まずに止める
+            if len(out) != 6:
+                raise RuntimeError("encode_conditions_full の戻り値の形が想定と違う")
+            text_state, text_mask, _, _, caption_state, caption_mask = out
+            speaker_mask = mx.ones((1, state.shape[1]), dtype=mx.bool_)
+            return text_state, text_mask, state, speaker_mask, caption_state, caption_mask
+
+        def encode_ref_audios(audios, *args, **kwargs):
+            if self._injected_speaker is None:
+                return original_encode_refs(audios, *args, **kwargs)
+            cfg = model.config.dit
+            empty = mx.zeros((1, cfg.speaker_patch_size, cfg.latent_dim))
+            return empty, mx.ones((1, cfg.speaker_patch_size), dtype=mx.bool_)
+
+        dit.encode_conditions_full = encode_conditions_full
+        model._encode_ref_audios = encode_ref_audios
+        self._speaker_injection_ready = True
+
+    @contextmanager
+    def _speaking_as(self, state: mx.array):
+        """この中の合成だけ、話者の表現を state に差し替える。"""
+        if not self._speaker_injection_ready:
+            raise RuntimeError("この TTS モデルには話者の表現を差し込めない")
+        self._injected_speaker = state
+        try:
+            yield
+        finally:
+            self._injected_speaker = None
+
+    def _speaker_state(self, path: Path) -> mx.array:
+        """参照音声の話者の表現 (1, T, 768)。同じファイルは測り直さない。"""
+        key = (path, path.stat().st_mtime_ns)
+        cached = self._speaker_states.get(key)
+        if cached is not None:
+            self._speaker_states.move_to_end(key)
+            return cached
+        from mlx_audio.tts.models.irodori_tts.model import patch_sequence_with_mask
+
+        model = self._require_loaded()
+        latent, mask = model._encode_ref_audios([model._load_ref_waveform(str(path))])
+        dit = model.model
+        latent_p, mask_p = patch_sequence_with_mask(latent, mask, dit.cfg.speaker_patch_size)
+        state = dit.speaker_norm(dit.speaker_encoder(latent_p, mask_p))
+        mx.eval(state)
+        self._speaker_states[key] = state
+        while len(self._speaker_states) > SPEAKER_STATE_CACHE_SIZE:
+            self._speaker_states.popitem(last=False)
+        return state
+
+    def resolve_audio(self, relative: str) -> Path:
+        """studio が渡すデータの置き場所からの相対パスを、置き場所の中の wav に解決する。"""
+        root = self._data_dir.resolve()
+        path = (root / relative).resolve()
+        if not path.is_relative_to(root) or path.suffix != ".wav" or not path.is_file():
+            raise AudioNotFound(relative)
+        return path
+
+    def speaker_vector(self, path: Path) -> list[float]:
+        """話者の表現の時間平均。声どうしの近さを測る物差しにする。"""
+        self._require_loaded()
+        state = self._speaker_state(path)
+        return np.asarray(mx.mean(state, axis=1), dtype=np.float32).reshape(-1).tolist()
+
+    def _mixed_speaker_state(self, mix: Sequence[tuple[Path, float]]) -> mx.array:
+        # 表現は時間方向の列で長さがもとの声ごとに違うので、短い方にそろえてから重みで足す。
+        # 重みは足して1に直す（倍率を変えると声ではなく話者の効き具合が変わる）。負の重みは
+        # 外挿で、その声から遠ざかる向きへ伸ばす（studio の2択が片側に使う）
+        states = [self._speaker_state(path) for path, _ in mix]
+        length = min(int(s.shape[1]) for s in states)
+        total = sum(weight for _, weight in mix)
+        if length == 0 or total <= 0:
+            raise ValueError("mix weights must sum to a positive value and references be non-empty")
+        mixed = mx.zeros_like(states[0][:, :length])
+        for (_, weight), state in zip(mix, states, strict=True):
+            mixed = mixed + (weight / total) * state[:, :length]
+        return mixed
 
     def speak(
         self,
@@ -170,12 +286,23 @@ class MlxAudioBackend:
         sampler: Mapping[str, object] | None = None,
         design: bool = False,
         profile_id: str | None = None,
+        mix: Sequence[tuple[Path, float]] | None = None,
     ) -> SpeechResult:
         """合成する。design=True はプロファイルを使わず caption だけで声を作る（候補づくり用）。
 
         profile_id は studio の試聴用で、使用中でないプロファイルの声で鳴らす。
+        mix は (参照音声, 重み) の組で、その声たちの話者の表現を重みで混ぜた声で鳴らす
+        （2択で絞り込む）。プロファイルは使わない。
         """
         self._require_loaded()
+
+        if mix:
+            # 参照音声は合成を参照つきの経路に入れるためだけに渡す。表現は差し込んだ方が使われる
+            with self._speaking_as(self._mixed_speaker_state(mix)):
+                samples, sample_rate, peak = self._generate(
+                    text, mix[0][0], (caption or "").strip(), self.resolve_sampler(sampler)
+                )
+            return self._save(samples, sample_rate, peak)
 
         # 参照音声と caption は同じ1回の読みから取る。間で studio が切り替えても混ざらない
         profile = None if design else self._profile_for(profile_id)
@@ -184,7 +311,9 @@ class MlxAudioBackend:
         samples, sample_rate, peak = self._generate(
             text, ref_audio, resolved_caption, self.resolve_sampler(sampler)
         )
+        return self._save(samples, sample_rate, peak)
 
+    def _save(self, samples: np.ndarray, sample_rate: int, peak: float | None) -> SpeechResult:
         path = self._config.output_dir / f"{uuid.uuid4()}.wav"
         self._write_wav(path, samples, sample_rate)
 

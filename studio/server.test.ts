@@ -1107,7 +1107,7 @@ test('POST /api/profiles は試聴のテイクからプロファイルを作り�
   await clearProfiles()
   const take = path.join(DATA_ROOT, 'generations', 'take.wav')
   await fs.promises.mkdir(path.dirname(take), { recursive: true })
-  await writeFile(take, 'RIFF\0\0\0\0WAVEtake')
+  await writeFile(take, pcmWav(10, [1, 2, 3]))
   const server = await startServer(0)
   try {
     const port = portOf(server)
@@ -1115,16 +1115,16 @@ test('POST /api/profiles は試聴のテイクからプロファイルを作り�
       fetch(`http://127.0.0.1:${port}/api/profiles`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ name, caption: '作った声。', take: 'generations/take.wav' }),
+        body: JSON.stringify({ name, caption: '作った声。', takes: ['generations/take.wav'] }),
       })
     const first = await create('一つ目')
     assert.equal(first.status, 201)
     const created = await readJson(first)
     assert.equal(created.source, 'design')
     assert.equal(created.caption, '作った声。')
-    assert.equal(
-      await readFile(path.join(PROFILES_DIR, created.id, 'reference.wav'), 'utf8'),
-      'RIFF\0\0\0\0WAVEtake',
+    assert.deepEqual(
+      await readFile(path.join(PROFILES_DIR, created.id, 'reference.wav')),
+      pcmWav(10, [1, 2, 3]),
     )
     assert.equal(
       (await readJson(await fetch(`http://127.0.0.1:${port}/api/profiles`))).active,
@@ -1143,6 +1143,62 @@ test('POST /api/profiles は試聴のテイクからプロファイルを作り�
   }
 })
 
+// モノラル・16bit の PCM wav
+function pcmWav(sampleRate: number, samples: readonly number[]) {
+  const data = Buffer.alloc(samples.length * 2)
+  samples.forEach((v, i) => data.writeInt16LE(v, i * 2))
+  const header = Buffer.alloc(44)
+  header.write('RIFF', 0, 'latin1')
+  header.writeUInt32LE(36 + data.length, 4)
+  header.write('WAVEfmt ', 8, 'latin1')
+  header.writeUInt32LE(16, 16)
+  header.writeUInt16LE(1, 20)
+  header.writeUInt16LE(1, 22)
+  header.writeUInt32LE(sampleRate, 24)
+  header.writeUInt32LE(sampleRate * 2, 28)
+  header.writeUInt16LE(2, 32)
+  header.writeUInt16LE(16, 34)
+  header.write('data', 36, 'latin1')
+  header.writeUInt32LE(data.length, 40)
+  return Buffer.concat([header, data])
+}
+
+test('POST /api/profiles はテイクを複数渡すと、短い無音を挟んで1本の参照音声につなぐ', async () => {
+  const { DATA_ROOT, PROFILES_DIR } = await import('./server.ts')
+  await clearProfiles()
+  const dir = path.join(DATA_ROOT, 'generations')
+  await fs.promises.mkdir(dir, { recursive: true })
+  await writeFile(path.join(dir, 'one.wav'), pcmWav(10, [1, 2]))
+  await writeFile(path.join(dir, 'two.wav'), pcmWav(10, [3]))
+  await writeFile(path.join(dir, 'other-rate.wav'), pcmWav(20, [4]))
+  const server = await startServer(0)
+  try {
+    const port = portOf(server)
+    const create = (takes: string[]) =>
+      fetch(`http://127.0.0.1:${port}/api/profiles`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ name: 'つないだ声', caption: '', takes }),
+      })
+    const res = await create(['generations/one.wav', 'generations/two.wav'])
+    assert.equal(res.status, 201)
+    const created = await readJson(res)
+    const joined = await readFile(path.join(PROFILES_DIR, created.id, 'reference.wav'))
+    // 0.3 秒の無音（10Hz なら 3 サンプル）を挟む
+    assert.deepEqual(joined, pcmWav(10, [1, 2, 0, 0, 0, 3]))
+
+    // 形式の違う wav はつながない
+    const mismatch = await create(['generations/one.wav', 'generations/other-rate.wav'])
+    assert.equal(mismatch.status, 400)
+  } finally {
+    await new Promise((resolve) => server.close(resolve))
+    await clearProfiles()
+    for (const name of ['one.wav', 'two.wav', 'other-rate.wav']) {
+      await rm(path.join(dir, name), { force: true })
+    }
+  }
+})
+
 test('POST /api/profiles は参照音声やデータの置き場所の外の wav を取り込み元にさせない', async () => {
   await clearProfiles()
   await placeProfile('p-a', { name: 'a', caption: '声。', source: 'design' })
@@ -1157,7 +1213,7 @@ test('POST /api/profiles は参照音声やデータの置き場所の外の wav
       const res = await fetch(`http://127.0.0.1:${port}/api/profiles`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ name: 'x', caption: '声。', take }),
+        body: JSON.stringify({ name: 'x', caption: '声。', takes: [take] }),
       })
       assert.ok(res.status === 400 || res.status === 404, `${take}: ${res.status}`)
     }
@@ -1269,6 +1325,46 @@ test('POST /api/speak は design と profile_id を pairvoice へ中継する', 
     )
     assert.equal(bad.status, 400)
     assert.equal(fake.requests.length, 2)
+  } finally {
+    await new Promise((resolve) => server.close(resolve))
+    process.env.PAIRVOICE_URL = prevUrl
+    await fake.close()
+  }
+})
+
+test('POST /api/speak は mix を、POST /api/speaker-vector は audio を pairvoice へ中継する', async () => {
+  const fake = await startFakePairvoice()
+  const prevUrl = process.env.PAIRVOICE_URL
+  process.env.PAIRVOICE_URL = fake.url
+  const server = await startServer(0)
+  try {
+    const port = portOf(server)
+    const mix = [
+      { audio: 'generations/a.wav', weight: 0.25 },
+      { audio: 'generations/b.wav', weight: 0.75 },
+    ]
+    const ok = await fetch(
+      `http://127.0.0.1:${port}/api/speak`,
+      jsonInit('POST', { text: '候補', caption: '女性の声。', mix }),
+    )
+    assert.equal(ok.status, 200)
+    assert.deepEqual(fake.requests[0]!.body.mix, mix)
+    // 形の崩れた mix は一部だけ落として送らず、まとめて断る
+    for (const bad of [[], [{ audio: 'generations/a.wav' }], 'x']) {
+      const res = await fetch(
+        `http://127.0.0.1:${port}/api/speak`,
+        jsonInit('POST', { text: '候補', mix: bad }),
+      )
+      assert.equal(res.status, 400)
+    }
+    assert.equal(fake.requests.length, 1)
+
+    await fetch(
+      `http://127.0.0.1:${port}/api/speaker-vector`,
+      jsonInit('POST', { audio: 'generations/a.wav' }),
+    )
+    assert.equal(fake.requests[1]!.url, '/speaker-vector')
+    assert.deepEqual(fake.requests[1]!.body, { audio: 'generations/a.wav' })
   } finally {
     await new Promise((resolve) => server.close(resolve))
     process.env.PAIRVOICE_URL = prevUrl
@@ -1831,7 +1927,7 @@ test('参照音声を書けなければ、作りかけのプロファイルを�
     await withServer(async (base) => {
       const res = await fetch(
         `${base}/api/profiles`,
-        jsonInit('POST', { name: 'x', take: 'generations/unreadable.wav' }),
+        jsonInit('POST', { name: 'x', takes: ['generations/unreadable.wav'] }),
       )
       assert.equal(res.status, 500)
     })

@@ -33,6 +33,9 @@
   --sidebar-accent: #efeff1;
   --sidebar-accent-foreground: #18181b;
   --radius: 0.5rem;
+  /* 2択の A と B（データ可視化の既定パレットの1・2番。明暗それぞれで見分けやすさを検証済み） */
+  --pick-a: #2a78d6;
+  --pick-b: #eb6834;
 }
 
 @media (prefers-color-scheme: dark) {
@@ -64,6 +67,8 @@
     --sidebar-border: #27272a;
     --sidebar-accent: #232327;
     --sidebar-accent-foreground: #f4f4f5;
+    --pick-a: #3987e5;
+    --pick-b: #d95926;
   }
 }
 
