@@ -457,87 +457,36 @@ test('makeAudioPathResolver はディレクトリの外を指すパスを拒否�
 
 import { execFileSync } from 'node:child_process'
 
-// このテストだけは意図的に env override（tmpRoot）を使わず、リポジトリのフック
-// （plugin/hooks/speak-summary.sh）と本物の dict.tsv に対して読み取り専用で検証する。
-// そのため server.ts の DATA_ROOT ではなく、実データの場所を独立に組み立てる。
-const REAL_DATA_ROOT =
-  process.env.PAIRVOICE_REAL_DATA_ROOT ||
-  path.join(os.homedir(), 'Library', 'Application Support', 'pairvoice')
-const HOOK_SCRIPT =
-  process.env.PAIRVOICE_HOOK_SCRIPT ||
-  path.join(import.meta.dirname, '..', 'plugin', 'hooks', 'speak-summary.sh')
-
-test('bash normalize_reading and JS applyDict agree on known cases (real dict.tsv)', async (t) => {
-  // 辞書の置換が bash（フック）と JS（studio のプレビュー）に二重実装されているため、
-  // 両者が食い違うと studio のプレビューが嘘をつくことになる。それを検出する。
-  const { parseDictTsv, applyDict } = await import('./server.ts')
-  const realDictPath = path.join(REAL_DATA_ROOT, 'dict.tsv')
-  if (!fs.existsSync(realDictPath) || !fs.existsSync(HOOK_SCRIPT)) {
-    t.skip(`実データが無いため検証をとばす: ${realDictPath} / ${HOOK_SCRIPT}`)
-    return
-  }
-
-  const rows = parseDictTsv(await readFile(realDictPath, 'utf8'))
-  const cases = [
-    'PR #4688 が通った。console のログも確認',
-    'admin-console の修正が PR #234 で通ったよ。✕ボタンも直した',
-    '×ボタンを押したら通った',
-    '通れそうにない道だった',
-  ]
-
-  for (const c of cases) {
-    const jsResult = applyDict(c, rows)
-    const bashResult = execFileSync(
-      'bash',
-      [
-        '-c',
-        // normalize_reading は辞書の場所を DATA_DIR から解決する。その定義は
-        // 切り出し範囲の外にあるので、ここで明示的に与える。
-        'DATA_DIR="$3"; source <(sed -n "/^normalize_reading()/,/^}/p" "$1"); normalize_reading "$2"',
-        '--',
-        HOOK_SCRIPT,
-        c,
-        REAL_DATA_ROOT,
-      ],
-      { encoding: 'utf8' },
-    )
-    assert.equal(jsResult, bashResult, `mismatch for input: ${c}`)
-  }
-})
-
-// macOS の /bin/bash（3.2）と新しい bash（5.2 以降は置換の & が特別）の両方で、
-// 記号を含む辞書でも JS と同じ結果になるか。実データに頼らず必ず走らせる
-test('bash normalize_reading は /bin/bash でも新しい bash でも記号を字句どおりに置き換える', async () => {
+// 辞書の置換は Python（常駐サーバーが合成の直前にかける）と JS（studio のプレビュー）に
+// 二重実装されている。食い違うと studio のプレビューが嘘をつくので、記号・CRLF を含む辞書で
+// 両者が同じ結果になるかを見る
+test('Python の apply_dict と JS の applyDict は記号や CRLF を含む辞書で一致する', async () => {
   const { parseDictTsv, applyDict } = await import('./server.ts')
   const dir = await mkdtemp(path.join(os.tmpdir(), 'pairvoice-dict-'))
   try {
-    const lf = 'A\tエー\tメモ\n&\tアンド\n#\tシャープ\nq\t"引用"\nb\t\\&\n'
+    const lf = 'A\tエー\tメモ\n&\tアンド\n#\tシャープ\nq\t"引用"\nb\t\\&\nエー\tえー\n'
     // Windows のエディタで保存されると CRLF になる。行末の \r を置換先に混ぜない
     const crlf = lf.replaceAll('\n', '\r\n')
     assert.deepEqual(parseDictTsv(crlf), parseDictTsv(lf))
     const input = 'A & # q b A'
-    for (const [tsv, bash] of [
-      [lf, '/bin/bash'],
-      [lf, 'bash'],
-      [crlf, '/bin/bash'],
-      [crlf, 'bash'],
-    ] as const) {
-      await writeFile(path.join(dir, 'dict.tsv'), tsv)
-      const rows = parseDictTsv(lf)
+    for (const tsv of [lf, crlf]) {
+      const dictPath = path.join(dir, 'dict.tsv')
+      await writeFile(dictPath, tsv)
       const out = execFileSync(
-        bash,
+        'uv',
         [
+          'run',
+          '--quiet',
+          'python',
           '-c',
-          // bash 3.2 の source はプロセス置換を読めないので eval で取り込む
-          'DATA_DIR="$3"; eval "$(sed -n "/^normalize_reading()/,/^}/p" "$1")"; normalize_reading "$2"',
-          '--',
-          HOOK_SCRIPT,
+          'import sys; from pathlib import Path; from pairvoice.reading import apply_dict, load_dict; ' +
+            'sys.stdout.write(apply_dict(sys.argv[2], load_dict(Path(sys.argv[1]))))',
+          dictPath,
           input,
-          dir,
         ],
-        { encoding: 'utf8' },
+        { cwd: path.join(import.meta.dirname, '..'), encoding: 'utf8' },
       )
-      assert.equal(out, applyDict(input, rows), `${bash} ${tsv === crlf ? 'CRLF' : 'LF'}`)
+      assert.equal(out, applyDict(input, parseDictTsv(lf)), tsv === crlf ? 'CRLF' : 'LF')
     }
   } finally {
     await rm(dir, { recursive: true, force: true })

@@ -67,39 +67,6 @@ parse_input() {
   IFS=$'\t' read -r PARSED_FINAL PARSED_MESSAGE_ID <<<"$header"
 }
 
-# 音声合成が誤読しがちな語をひらがなに開く読み辞書。
-# エントリは $DATA_DIR/dict.tsv（タブ区切り: 置換元・置換先・メモ）で管理する
-# （例えば「通り」を足すと「予定通り（どおり）」まで「とおり」に化けるので、広げすぎない）。
-normalize_reading() {
-  local text="$1" dict_file="$DATA_DIR/dict.tsv" line from to rest
-  [ -f "$dict_file" ] || { printf '%s' "$text"; return 0; }
-  # bash 5.2 から置換文字列の & が一致した部分に化ける。辞書は字句どおりに置き換えたい
-  shopt -u patsub_replacement 2>/dev/null
-  # あえて `IFS=$'\t' read -r from to _memo` を使わない。tab は bash の
-  # 「IFS whitespace」扱いになり、連続する区切り文字が1つに畳み込まれて
-  # 空フィールド（置換先を空文字にしたいエントリ）が消える罠があるため、
-  # パラメータ展開で手動分割する。
-  while IFS= read -r line || [ -n "$line" ]; do
-    # CRLF で保存された辞書の行末の \r を落とす（studio の parseDictTsv と同じ扱い）
-    line="${line%$'\r'}"
-    # タブを含まない行（空行・見出しメモ等）はスキップ
-    case "$line" in *$'\t'*) ;; *) continue ;; esac
-    from="${line%%$'\t'*}"
-    rest="${line#*$'\t'}"
-    if [[ "$rest" == *$'\t'* ]]; then
-      to="${rest%%$'\t'*}"   # 3列目（メモ）は捨てる
-    else
-      to="$rest"             # メモ列なしの2列行
-    fi
-    [ -n "$from" ] || continue
-    # 置換元をクォートするのが必須。素の # は ${var//#...} の
-    # 先頭一致アンカーに化けて no-op になる既知の罠があるため。
-    # 置換先はクォートしない。macOS の /bin/bash（3.2）はクォートを字句として残す
-    text="${text//"$from"/$to}"
-  done < "$dict_file"
-  printf '%s' "$text"
-}
-
 # corpus.jsonlへの追記を一箇所に集約する。生成が失敗した場合はaudio_pathを
 # 空文字にして記録する（プロンプト改善の材料としては、音声化できなかった
 # ケースも「入力→要約」のペアとして価値があるため記録自体は続ける）。
@@ -272,19 +239,16 @@ main() {
     return 0
   }
 
-  local raw_summary="$SUMMARY_TEXT"
-  local summary
-  summary=$(normalize_reading "$raw_summary")
-
+  # 読み辞書（dict.tsv）は pairvoice が合成の直前にかけるので、ここでは要約のまま渡す
   local relative_path
-  relative_path=$(request_speech "$summary") || {
-    write_corpus "$PARSED_MESSAGE_ID" "$PARSED_TEXT" "$raw_summary" ""
+  relative_path=$(request_speech "$SUMMARY_TEXT") || {
+    write_corpus "$PARSED_MESSAGE_ID" "$PARSED_TEXT" "$SUMMARY_TEXT" ""
     return 0
   }
 
-  write_corpus "$PARSED_MESSAGE_ID" "$PARSED_TEXT" "$raw_summary" "$relative_path"
+  write_corpus "$PARSED_MESSAGE_ID" "$PARSED_TEXT" "$SUMMARY_TEXT" "$relative_path"
   # 鳴ったか（ミュートや「止める」で鳴らなかったか）は pairvoice のログに残る
-  log INFO "QUEUED (message_id=${PARSED_MESSAGE_ID}): $summary"
+  log INFO "QUEUED (message_id=${PARSED_MESSAGE_ID}): $SUMMARY_TEXT"
   return 0
 }
 

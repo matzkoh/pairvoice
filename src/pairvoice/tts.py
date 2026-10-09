@@ -16,6 +16,9 @@ caption と同じく sampler も3段で解決する（speak() の引数 → conf
 [tts.sampler] → モデル既定）。None は「モデル既定に任せる」の意味で、キーごと
 渡さない。
 
+読む文は合成のたびに読み辞書（reading.py）で読みに開く。フック・`pairvoice say`・studio の
+試聴のどこから来ても同じ読みになる。
+
 声の個体は、参照音声から作る話者の表現（speaker_state、約6トークン/秒 × 768次元）で
 決まる。studio の「2択で絞り込む」は、いくつかのもとの声の表現を重みで混ぜた声を合成し
 （mix）、もとの声どうしの位置関係を話者ベクトル（表現の時間平均）で測る。表現を差し込む
@@ -40,6 +43,7 @@ import numpy as np
 from .config import TTSConfig
 from .postprocess import normalize, trim
 from .profiles import Profile, ProfileNotFound, ProfileStore
+from .reading import DICT_FILENAME, apply_dict, load_dict
 
 DEFAULT_SAMPLE_RATE = 48000
 CAPTION_FILENAME = "caption.txt"
@@ -293,8 +297,10 @@ class MlxAudioBackend:
         profile_id は studio の試聴用で、使用中でないプロファイルの声で鳴らす。
         mix は (参照音声, 重み) の組で、その声たちの話者の表現を重みで混ぜた声で鳴らす
         （2択で絞り込む）。プロファイルは使わない。
+        text は読み辞書で読みに開いてから読む。
         """
         self._require_loaded()
+        text = apply_dict(text, load_dict(self._data_dir / DICT_FILENAME))
 
         if mix:
             # 参照音声は合成を参照つきの経路に入れるためだけに渡す。表現は差し込んだ方が使われる

@@ -33,7 +33,7 @@ LaunchAgent は tool 側の Python を指すので、リポジトリのコード
 | --- | --- |
 | `studio/` だけ | `pairvoice studio --restart`（studio だけ。モデルは載ったまま） |
 | `src/pairvoice/` | メニューの「再起動」（studio とサーバーの両方。`pairvoice restart` はサーバーだけで、studio は古いコードのまま残る） |
-| `prompt.txt`、辞書 | 要らない（フックが読み上げのたびに読む） |
+| `prompt.txt`、辞書 | 要らない（フックとサーバーが読み上げのたびに読む） |
 
 作業ツリーのコードをその場で動かしたいときは、メニューの「pairvoice を終了」で常駐を止めてから手で起動する（ポート `:17495` を取り合うので同時には動かせない）。
 
@@ -59,8 +59,8 @@ cd studio && node --test server.test.ts
 cd studio && pnpm test:web && pnpm typecheck && pnpm lint && pnpm format:check
 ```
 
-studio のテストのうち1本は、`plugin/hooks/speak-summary.sh` とデータの置き場所の `dict.tsv` を読んで、
-辞書置換の bash 実装と JS 実装が一致することを確かめる（`dict.tsv` が無ければ skip）。
+studio のテストのうち1本は、`uv run python` で `pairvoice.reading` を呼び、
+辞書置換の Python 実装と JS 実装が一致することを確かめる。
 
 ## 公開用のビルド
 

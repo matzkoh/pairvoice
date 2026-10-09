@@ -116,6 +116,18 @@ def test_speak_passes_ref_audio_caption_and_sampler_only(config, tmp_path, monke
     assert "stream" not in call
 
 
+def test_speak_reads_text_through_dict(config, tmp_path, monkeypatch):
+    model = FakeModel(FakeResult(np.zeros(480, dtype=np.float32)))
+    backend = make_backend(config, model, tmp_path, monkeypatch)
+
+    backend.speak("PR が通った")
+    (tmp_path / "dict.tsv").write_text("PR\tピーアール\t\n", encoding="utf-8")
+    # 合成のたびに読むので、studio で保存した辞書が再起動なしに効く
+    backend.speak("PR が通った")
+
+    assert [call["text"] for call in model.calls] == ["PR が通った", "ピーアール が通った"]
+
+
 def test_preflight_passes_without_reference_audio(no_ref_config, tmp_path):
     backend = MlxAudioBackend(no_ref_config, data_dir=tmp_path)
 

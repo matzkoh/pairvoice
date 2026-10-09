@@ -27,7 +27,7 @@ export function serializeDictTsv(rows: readonly DictRowData[]) {
   return rows.map((r) => [r.from, r.to, r.memo || ''].join('\t')).join('\n') + '\n'
 }
 
-// 空の from は全文字の間に to を差し込むので飛ばす（フックの normalize_reading も同じ）
+// 空の from は全文字の間に to を差し込むので飛ばす（常駐サーバーの reading.apply_dict も同じ）
 export function applyDict(text: string, rows: readonly Pick<DictRowData, 'from' | 'to'>[]) {
   let out = text
   for (const { from, to } of rows) {
@@ -37,7 +37,7 @@ export function applyDict(text: string, rows: readonly Pick<DictRowData, 'from' 
   return out
 }
 
-// dict.tsv はタブ区切り・改行区切りで、フック（bash）もそのまま読む。値にこれらが
+// dict.tsv はタブ区切り・改行区切りで、常駐サーバーもそのまま読む。値にこれらが
 // 混ざると列と行がずれ、その行から後ろの置換が壊れる
 const TSV_CONTROL = /[\t\n\r]/
 
