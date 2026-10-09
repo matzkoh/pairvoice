@@ -1,6 +1,6 @@
 {
   "name": "pairvoice",
-  "version": "0.3.1",
+  "version": "0.4.0",
   "description": "Claude Code の応答をローカルの pairvoice で要約・音声化して読み上げる",
   "author": {
     "name": "matzkoh"
