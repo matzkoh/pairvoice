@@ -4,6 +4,7 @@ import { useRef, useState, useTransition } from 'react'
 import { apiSend, toErrorMessage } from '@/lib/api'
 
 import type { CorpusItem, CorpusResponse } from '../../../../shared/api-types'
+import { CORPUS_COUNTS_KEY } from './queries'
 
 export const BULK_ERROR_ID = '__bulk__'
 
@@ -49,6 +50,7 @@ export function useReviewActions(): ReviewActions {
           }
         : prev,
     )
+    void queryClient.invalidateQueries({ queryKey: CORPUS_COUNTS_KEY })
   }
 
   function run(id: string, kind: Kind, label: string, work: () => Promise<void>) {

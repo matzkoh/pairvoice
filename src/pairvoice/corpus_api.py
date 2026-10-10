@@ -49,6 +49,14 @@ class CorpusResponse(BaseModel):
     )
 
 
+class CorpusCounts(BaseModel):
+    all: int = Field(description="アーカイブ済みと旧プロンプトの読み上げを除いた件数")
+    unreviewed: int = Field(description="all のうち、レビューしていない件数")
+    bad: int = Field(description="all のうち、👎 の件数")
+    archived: int = Field(description="アーカイブ済みの件数")
+    stale: int = Field(description="アーカイブしていない、旧プロンプトの読み上げの件数")
+
+
 class ReviewBody(BaseModel):
     message_id: MessageId = Field(description="読み上げの ID")
     verdict: Literal["good", "bad", "none"] = Field(description="none は取り消し")
@@ -86,6 +94,11 @@ def corpus_router(data_root: Path) -> APIRouter:
         """
         page = corpus.corpus_page(data_root, limit, offset, prompt.current_since())
         return CorpusResponse.model_validate(page)
+
+    @router.get("/corpus/counts", summary="読み上げの記録の件数", tags=["レビュー"])
+    def count_corpus() -> CorpusCounts:
+        """studio のレビューの絞り込みごとの件数。全件を読まずに未レビューの数を知るのに使う。"""
+        return CorpusCounts.model_validate(corpus.corpus_counts(data_root, prompt.current_since()))
 
     @router.get(
         "/corpus/{message_id}/audio",

@@ -99,6 +99,14 @@ def models_line(health: dict | None) -> str:
     return f"llm: {health['llm']['state']} / tts: {health['tts']['state']}"
 
 
+def plugin_mismatch_line(health: dict) -> str | None:
+    """プラグインと常駐サーバーの版が食い違うと、API の道筋が合わず読み上げが止まる。"""
+    plugin = health.get("plugin") or {}
+    if not plugin.get("mismatch"):
+        return None
+    return f"プラグイン {plugin['version']} と pairvoice {health['version']} の版が違う"
+
+
 @dataclass(frozen=True)
 class MenuItem:
     label: str
@@ -139,6 +147,8 @@ def menu_spec(health: dict | None, now: datetime) -> list[MenuItem]:
     rows = [MenuItem(describe_state(health, now), None, False)]
     if reachable:
         rows.append(MenuItem(models_line(health), None, False))
+        if (mismatch := plugin_mismatch_line(health)) is not None:
+            rows.append(MenuItem(mismatch, None, False))
     rows.append(SEPARATOR)
 
     playback = health.get("playback", {}) if reachable else {}

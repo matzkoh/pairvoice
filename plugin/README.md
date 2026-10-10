@@ -57,6 +57,7 @@ tail -30 ~/Library/Logs/speak-summary.log
 | `prompt.txt missing or empty` | データの置き場所に `prompt.txt` が無い |
 | `muted: <reason>` | ミュート中（`microphone` なら会議中の自動ミュート、`manual` なら手動） |
 | `server down` | pairvoice の常駐サーバーが応答しない |
+| `version mismatch: plugin <版>` | プラグインと常駐サーバーの版が食い違い、API の道筋が合わない。[README](../README.md#更新する) の手順で両方を上げる |
 | `model downloading` | 初回のモデルのダウンロード中（フックは待たない）。`pairvoice warmup` で先に済ませておく |
 | `model loading` | モデルの読み込みが長引き、待ちきれなかった |
 | `timeout` | サーバーは生きているが、要約か音声合成が時間内に終わらなかった |

@@ -13,7 +13,7 @@ import { afterEach, expect, it, vi } from 'vitest'
 
 import { apiGet, UnreachableServerError } from '@/lib/api'
 
-import type { CorpusItem, CorpusResponse } from '../../../shared/api-types'
+import type { CorpusCounts } from '../../../shared/api-types'
 import { AppSidebar } from './AppSidebar'
 
 vi.mock('@/lib/api', async (importOriginal) => {
@@ -26,26 +26,12 @@ afterEach(() => {
   vi.clearAllMocks()
 })
 
-function item(overrides: Partial<CorpusItem>): CorpusItem {
-  return {
-    ts: '2026-09-29 10:00:00',
-    message_id: 'm',
-    input: '入力',
-    summary: '要約',
-    verdict: null,
-    ideal: null,
-    archived: false,
-    stale: false,
-    ...overrides,
-  }
-}
-
-function mockApi(items: CorpusItem[]) {
+function mockApi(unreviewed = 0) {
   vi.mocked(apiGet).mockImplementation(async (path: string) => {
     if (path === '/health') throw new UnreachableServerError('/health', new Error('down'))
-    if (path.startsWith('/corpus')) {
-      const corpus: CorpusResponse = { total: items.length, items, prompt_changed_at: null }
-      return corpus
+    if (path === '/corpus/counts') {
+      const counts: CorpusCounts = { all: unreviewed, unreviewed, bad: 0, archived: 0, stale: 0 }
+      return counts
     }
     throw new Error(`unexpected path in test: ${path}`)
   })
@@ -78,7 +64,7 @@ function renderAt(path: string) {
 }
 
 it('用途別の3グループを出し、今いる画面の項目を active にする', async () => {
-  mockApi([])
+  mockApi()
   renderAt('/dict')
   const link = await screen.findByRole('link', { name: '辞書' })
   expect(link.getAttribute('data-status')).toBe('active')
@@ -87,17 +73,13 @@ it('用途別の3グループを出し、今いる画面の項目を active に�
 })
 
 it('レビューに未レビュー件数のバッジが付く', async () => {
-  mockApi([
-    item({ message_id: 'a' }),
-    item({ message_id: 'b' }),
-    item({ message_id: 'c', verdict: 'good' }),
-  ])
+  mockApi(2)
   renderAt('/review')
   expect(await screen.findByLabelText('未レビュー 2 件')).toBeTruthy()
 })
 
 it('pairvoice 停止中はそう出し、ミュートは押せない', async () => {
-  mockApi([])
+  mockApi()
   renderAt('/review')
   expect(await screen.findByText('pairvoice 停止')).toBeTruthy()
   expect(screen.getByRole('button', { name: /ミュート/ })).toHaveProperty('disabled', true)

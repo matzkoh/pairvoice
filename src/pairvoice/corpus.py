@@ -115,29 +115,56 @@ def corpus_page(data_root: Path, limit: int, offset: int, prompt_since: datetime
     archived = archived_ids(data_root)
     # 新しい順の [offset, offset + limit) を、追記順の列の後ろから取る
     end = max(len(corpus) - offset, 0)
-    items = []
     # 返すページの分だけ突き合わせる（クライアントは全件を数ページに分けて取りに来る）
-    for entry in reversed(corpus[max(end - limit, 0) : end]):
-        message_id = entry.get("message_id")
-        review = reviews.get(message_id) if isinstance(message_id, str) else None
-        # 取り消し（none）は未レビューと同じ扱いにし、理想の出力も出さない
-        verdict = review.get("verdict") if review is not None else None
-        if verdict not in ("good", "bad"):
-            verdict = None
-        ideal = review.get("ideal") if review is not None and verdict is not None else None
-        items.append(
-            entry
-            | {
-                "verdict": verdict,
-                "ideal": ideal,
-                "archived": message_id in archived,
-                "stale": _is_stale(entry, prompt_since),
-            }
-        )
+    items = [
+        entry | _status(entry, reviews, archived, prompt_since)
+        for entry in reversed(corpus[max(end - limit, 0) : end])
+    ]
     return {
         "total": len(corpus),
         "items": items,
         "prompt_changed_at": None if prompt_since is None else history.iso_millis(prompt_since),
+    }
+
+
+def corpus_counts(data_root: Path, prompt_since: datetime | None) -> dict[str, int]:
+    """studio のレビューの絞り込みごとの件数（studio の computeReviewCounts と同じ数え方）。
+
+    アーカイブ済みはアーカイブだけに、旧プロンプトの読み上げは stale だけに数える。
+    """
+    reviews = latest_reviews(data_root)
+    archived = archived_ids(data_root)
+    counts = dict.fromkeys(("all", "unreviewed", "bad", "archived", "stale"), 0)
+    for entry in read_jsonl(data_root / CORPUS_FILENAME):
+        status = _status(entry, reviews, archived, prompt_since)
+        if status["archived"]:
+            counts["archived"] += 1
+        elif status["stale"]:
+            counts["stale"] += 1
+        else:
+            counts["all"] += 1
+            if status["verdict"] is None:
+                counts["unreviewed"] += 1
+            elif status["verdict"] == "bad":
+                counts["bad"] += 1
+    return counts
+
+
+def _status(
+    entry: dict, reviews: dict[str, dict], archived: set[str], prompt_since: datetime | None
+) -> dict:
+    """読み上げの記録1件の、最新のレビュー・アーカイブ・旧プロンプトかどうか。"""
+    message_id = entry.get("message_id")
+    review = reviews.get(message_id) if isinstance(message_id, str) else None
+    # 取り消し（none）は未レビューと同じ扱いにし、理想の出力も出さない
+    verdict = review.get("verdict") if review is not None else None
+    if verdict not in ("good", "bad"):
+        verdict = None
+    return {
+        "verdict": verdict,
+        "ideal": review.get("ideal") if review is not None and verdict is not None else None,
+        "archived": message_id in archived,
+        "stale": _is_stale(entry, prompt_since),
     }
 
 

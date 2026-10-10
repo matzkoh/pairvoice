@@ -118,3 +118,12 @@ export type CorpusResponse = {
   items: CorpusItem[]
   prompt_changed_at: string | null
 }
+
+// GET /corpus/counts。レビューの絞り込みごとの件数
+export type CorpusCounts = {
+  all: number
+  unreviewed: number
+  bad: number
+  archived: number
+  stale: number
+}

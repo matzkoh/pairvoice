@@ -49,6 +49,38 @@ def test_corpus_is_newest_first_with_latest_review(client, tmp_path):
     assert (body["items"][1]["verdict"], body["items"][1]["ideal"]) == (None, None)
 
 
+def test_counts_match_the_review_filters(client, tmp_path):
+    write_jsonl(
+        tmp_path / "corpus.jsonl",
+        [
+            entry("old", ts="2099-01-01 00:00:00"),
+            entry("old-archived", ts="2099-01-01 00:00:00"),
+            *(entry(m, ts="2099-12-31 00:00:00") for m in ("new", "good", "bad", "undone")),
+        ],
+    )
+    (tmp_path / "prompt.txt").write_text("いまの版")
+    (tmp_path / "history").mkdir()
+    (tmp_path / "history" / "prompt-2099-06-01T00-00-00-000Z.txt").write_text("いまの版")
+    write_jsonl(
+        tmp_path / "reviews.jsonl",
+        [
+            {"ts": "t", "message_id": "good", "verdict": "good"},
+            {"ts": "t", "message_id": "bad", "verdict": "bad"},
+            {"ts": "t", "message_id": "undone", "verdict": "bad"},
+            {"ts": "t", "message_id": "undone", "verdict": "none"},
+        ],
+    )
+    write_jsonl(tmp_path / "archives.jsonl", [{"message_id": "old-archived", "archived": True}])
+
+    assert client.get("/corpus/counts").json() == {
+        "all": 4,
+        "unreviewed": 2,
+        "bad": 1,
+        "archived": 1,
+        "stale": 1,
+    }
+
+
 def test_corpus_pages_and_skips_broken_lines(client, tmp_path):
     (tmp_path / "corpus.jsonl").write_text(
         "\n".join([json.dumps(entry("a")), "{壊れた", json.dumps(entry("b"))]) + "\n"

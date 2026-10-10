@@ -128,6 +128,18 @@ def find(items, action):
     return next(item for item in items if item.action == action)
 
 
+def test_menu_warns_when_plugin_and_server_versions_differ():
+    def labels(plugin):
+        items = menubar.menu_spec({**health(), "version": "0.8.0", "plugin": plugin}, NOW)
+        return [item.label for item in items if item.action is None]
+
+    warning = "プラグイン 0.6.0 以前 と pairvoice 0.8.0 の版が違う"
+    assert warning in labels({"version": "0.6.0 以前", "mismatch": True})
+    assert warning not in labels({"version": "0.8.0", "mismatch": False})
+    # 古い常駐サーバーは plugin を返さない
+    assert len(labels(None)) == len(labels({"version": None, "mismatch": False}))
+
+
 def test_menu_lists_mute_presets():
     items = menubar.menu_spec(health(), NOW)
     assert [item.label for item in items if item.action and item.action.startswith("mute:")] == [

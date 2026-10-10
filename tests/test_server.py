@@ -9,7 +9,7 @@ from pairvoice.config import Config, LLMConfig, MuteConfig, TTSConfig
 from pairvoice.lifecycle import Engine, Superseded
 from pairvoice.mute import MuteController
 from pairvoice.profiles import ProfileNotFound
-from pairvoice.server import create_app, is_local_request
+from pairvoice.server import LEGACY_PLUGIN, PLUGIN_HEADER, create_app, is_local_request
 from tests.fakes import FakeProbe
 from tests.test_engine import FakeLLM, FakeTTS
 
@@ -304,8 +304,36 @@ def test_health_shape():
         "playback",
         "dropped_recent",
         "config_stale",
+        "version",
+        "plugin",
     }
     assert body["llm"]["state"] == "unloaded"
+
+
+def test_health_reports_the_plugin_version_the_hook_named():
+    _, client = build()
+    plugin = lambda: client.get("/health").json()["plugin"]  # noqa: E731
+
+    assert plugin() == {"version": None, "mismatch": False}
+    client.post("/llm", json={"system": "s", "prompt": "p"}, headers={PLUGIN_HEADER: "9.9.9"})
+    assert plugin() == {"version": "9.9.9", "mismatch": True}
+    current = client.get("/health").json()["version"]
+    client.post("/speak", json={"text": "あ"}, headers={PLUGIN_HEADER: current})
+    assert plugin() == {"version": current, "mismatch": False}
+    # 名乗らない呼び出し（studio や curl）では変えない
+    client.post("/speak", json={"text": "あ"})
+    assert plugin()["version"] == current
+    # /api の下へ移す前のフックは名乗らないので、古い道筋で見分ける
+    assert client.post("http://127.0.0.1:17495/llm", json={}).status_code == 404
+    assert plugin() == {"version": LEGACY_PLUGIN, "mismatch": True}
+
+
+def test_foreign_pages_cannot_change_the_plugin_version():
+    _, client = build()
+
+    client.post("http://127.0.0.1:17495/llm", headers={"origin": "https://evil.example"})
+
+    assert client.get("/health").json()["plugin"]["version"] is None
 
 
 def test_health_reports_current_caption_and_its_source():

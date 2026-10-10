@@ -6,6 +6,7 @@ import { afterEach, expect, it, vi } from 'vitest'
 import { apiSend } from '@/lib/api'
 
 import type { CorpusItem, CorpusResponse } from '../../../../shared/api-types'
+import { CORPUS_COUNTS_KEY } from './queries'
 import { useReviewActions } from './useReviewActions'
 
 vi.mock('@/lib/api', async (importOriginal) => {
@@ -62,8 +63,19 @@ function setup(target: CorpusItem) {
     </QueryClientProvider>,
   )
   const current = () => queryClient.getQueryData<CorpusResponse>(['corpus'])!.items[0]!
-  return { current }
+  return { current, queryClient }
 }
+
+it('投票とアーカイブのあとは、サイドバーの件数を取り直させる', async () => {
+  vi.mocked(apiSend).mockResolvedValue({ ok: true })
+  const { queryClient } = setup(item({}))
+  const counts = { all: 1, unreviewed: 1, bad: 0, archived: 0, stale: 0 }
+  for (const name of ['good', 'archive']) {
+    queryClient.setQueryData(CORPUS_COUNTS_KEY, counts)
+    await act(async () => screen.getByRole('button', { name }).click())
+    expect(queryClient.getQueryState(CORPUS_COUNTS_KEY)?.isInvalidated).toBe(true)
+  }
+})
 
 it('同じ判定をもう一度押すと取り消しになる', async () => {
   vi.mocked(apiSend).mockResolvedValue({ ok: true })

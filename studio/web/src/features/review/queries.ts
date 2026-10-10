@@ -2,8 +2,7 @@ import { queryOptions, useQuery } from '@tanstack/react-query'
 
 import { apiGet } from '@/lib/api'
 
-import type { CorpusResponse } from '../../../../shared/api-types'
-import { computeReviewCounts } from './reviewCounts'
+import type { CorpusCounts, CorpusResponse } from '../../../../shared/api-types'
 
 // 1リクエストで取得する件数。
 const REVIEW_FETCH_CHUNK = 500
@@ -35,7 +34,7 @@ async function fetchAllCorpus(): Promise<CorpusResponse> {
 
 // ウィンドウのフォーカスが戻るたびに全件（チャンク取得）を取り直さないよう
 // staleTime を置く。既定の 0 だと refetchOnWindowFocus と組み合わさり、サイドバーに
-// 常駐する useUnreviewedCount がフォーカスのたびに corpus 全件を取り直す。
+// レビュー画面がフォーカスのたびに corpus 全件を取り直す。
 // 1分は、画面を開きっぱなしにしている間にフックが読み上げを増やす頻度に対して
 // 許容できる遅れとして選んだ値。投票・アーカイブは setQueryData で即時に反映するので
 // この値に関係しない。
@@ -49,10 +48,16 @@ export function corpusQueryOptions() {
   })
 }
 
-// サイドバーの未レビュー件数バッジ。suspense にすると全件取得が終わるまで
-// サイドバーごと止まり、レビュー以外の画面の表示までブロックしてしまう。
-// 通常の useQuery で読み、読めるまでは null（呼び出し側は何も出さない）。
+export const CORPUS_COUNTS_KEY = ['corpus', 'counts'] as const
+
+// サイドバーの未レビュー件数バッジ。どの画面にも出るので、全件は読まずに件数だけを取る。
+// 投票・アーカイブのあとは useReviewActions が取り直させる。
+// suspense にするとサイドバーごと止まるので、読めるまでは null（呼び出し側は何も出さない）。
 export function useUnreviewedCount(): number | null {
-  const { data } = useQuery(corpusQueryOptions())
-  return data ? computeReviewCounts(data.items).unreviewed : null
+  const { data } = useQuery({
+    queryKey: CORPUS_COUNTS_KEY,
+    queryFn: () => apiGet<CorpusCounts>('/corpus/counts'),
+    staleTime: CORPUS_STALE_TIME_MS,
+  })
+  return data?.unreviewed ?? null
 }

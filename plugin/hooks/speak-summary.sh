@@ -20,6 +20,10 @@ LOG_FILE="${CLAUDE_SPEAK_LOG_FILE:-$HOME/Library/Logs/speak-summary.log}"
 PAIRVOICE_API="http://127.0.0.1:17495/api"
 LLM_URL="$PAIRVOICE_API/llm"
 SPEAK_URL="$PAIRVOICE_API/speak"
+# 常駐サーバーと別々に更新されるので、版を毎回名乗る。食い違うとメニューバーが知らせる
+PLUGIN_VERSION=$(jq -r '.version' "${0%/*}/../.claude-plugin/plugin.json" 2>/dev/null)
+PLUGIN_VERSION="${PLUGIN_VERSION:-unknown}"
+VERSION_HEADER="X-Pairvoice-Plugin: $PLUGIN_VERSION"
 # 実行時に読み書きするデータの置き場所。studio も同じディレクトリを見る。
 # git 作業ツリーに置くと、ブランチを切り替えたときに読み上げの挙動が変わってしまう。
 DATA_DIR="${PAIRVOICE_DATA_ROOT:-$HOME/Library/Application Support/pairvoice}"
@@ -154,7 +158,7 @@ get_summary() {
 
   for attempt in $(seq 1 "$SUMMARY_MAX_RETRIES"); do
     response=$(printf '%s' "$payload" | curl -s --max-time "$LLM_TIMEOUT_SECONDS" -w '\n%{http_code}' \
-      -X POST "$LLM_URL" -H 'Content-Type: application/json' --data-binary @- 2>&1)
+      -X POST "$LLM_URL" -H 'Content-Type: application/json' -H "$VERSION_HEADER" --data-binary @- 2>&1)
     local status="${response##*$'\n'}" body="${response%$'\n'*}"
 
     case "$status" in
@@ -177,6 +181,11 @@ get_summary() {
         return 1
         ;;
       000) SUMMARY_STATUS="$(unanswered_reason)"; return 1 ;;
+      # 道筋が無い。常駐サーバーとプラグインの版が食い違っている（何度試しても同じ）
+      404 | 405)
+        SUMMARY_STATUS="version mismatch: plugin ${PLUGIN_VERSION}"
+        return 1
+        ;;
     esac
 
     local candidate
@@ -200,7 +209,7 @@ request_speech() {
       + (if $voice == "" then {} else {voice: $voice} end)
       + (if $style == "" then {} else {style: $style} end)')
   response=$(curl -s --max-time "$SPEAK_TIMEOUT_SECONDS" -w '\n%{http_code}' \
-    -X POST "$SPEAK_URL" -H 'Content-Type: application/json' -d "$payload" 2>&1)
+    -X POST "$SPEAK_URL" -H 'Content-Type: application/json' -H "$VERSION_HEADER" -d "$payload" 2>&1)
   status="${response##*$'\n'}"
   body="${response%$'\n'*}"
 

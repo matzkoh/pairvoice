@@ -185,6 +185,20 @@ studio は常駐サーバーが `http://127.0.0.1:17495/` で配っている。�
 model = "mlx-community/gemma-4-e4b-it-4bit"
 ```
 
+## 更新する
+
+常駐サーバーとプラグインは別々に更新されるので、両方を上げる。
+版がずれると API の道筋が合わず、読み上げが止まる（メニューバーに「版が違う」と出る）。
+
+```bash
+uv tool upgrade pairvoice && pairvoice restart
+claude plugin marketplace update pairvoice
+claude plugin update pairvoice@pairvoice
+```
+
+プラグインの更新は、Claude Code を起動し直すと効く。
+プラグインを自動で上げるには、Claude Code の `/plugin` の Marketplaces で pairvoice を選び、「Enable auto-update」にする（Anthropic 以外のマーケットプレイスは、既定では自動で更新されない）。
+
 ## うまく鳴らないとき
 
 - **何も鳴らない**: `pairvoice status` を見る
@@ -196,6 +210,7 @@ model = "mlx-community/gemma-4-e4b-it-4bit"
 - **サーバーは元気なのに鳴らない**: `~/Library/Logs/speak-summary.log` を見る。
   何も書かれていなければプラグインが読まれていないので、Claude Code を起動し直す。
   書かれていれば理由が `SKIP (...)` に出る（一覧は [plugin/README.md](https://github.com/matzkoh/pairvoice/blob/main/plugin/README.md)）
+- **更新したら鳴らなくなった**: 常駐サーバーとプラグインの版がずれている。「更新する」の手順で両方を上げる
 - **設定を変えたのに効かない**: `pairvoice restart`
 - **辞書を直したのに効かない**: studio の「保存」を押すまでは書き換わらない
 

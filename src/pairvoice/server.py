@@ -10,7 +10,7 @@ from importlib.metadata import version
 from typing import Annotated, Literal
 from urllib.parse import urlsplit
 
-from fastapi import APIRouter, BackgroundTasks, Body, FastAPI, Request
+from fastapi import APIRouter, BackgroundTasks, Body, Depends, FastAPI, Header, Request
 from fastapi.openapi.models import Example
 from fastapi.responses import JSONResponse
 from pydantic import BaseModel, ConfigDict, Field, StrictInt, model_validator
@@ -272,8 +272,16 @@ def build_engine(config: Config) -> Engine:
     )
 
 
+# フック（プラグイン）が名乗る版。常駐サーバーとは別々に更新されるので、食い違いを知らせる
+PLUGIN_HEADER = "X-Pairvoice-Plugin"
+LEGACY_PLUGIN = "0.6.0 以前"
+
+
 def create_app(engine: Engine) -> FastAPI:
     data_root = engine.config.tts.data_root
+    server_version = version("pairvoice")
+    # 最後に来たフックの版。来るまでは None
+    plugin_version: str | None = None
 
     @asynccontextmanager
     async def lifespan(app: FastAPI):
@@ -285,7 +293,7 @@ def create_app(engine: Engine) -> FastAPI:
 
     app = FastAPI(
         title="pairvoice",
-        version=version("pairvoice"),
+        version=server_version,
         description=API_DESCRIPTION,
         lifespan=lifespan,
     )
@@ -307,10 +315,26 @@ def create_app(engine: Engine) -> FastAPI:
             return JSONResponse(status_code=403, content={"error": "forbidden_origin"})
         return await call_next(request)
 
+    def note_plugin_version(
+        x_pairvoice_plugin: Annotated[str | None, Header(include_in_schema=False)] = None,
+    ):
+        nonlocal plugin_version
+        if x_pairvoice_plugin:
+            plugin_version = x_pairvoice_plugin
+
+    # 0.6.0 までのフックは /api の付かない道筋を叩き、版を名乗らない
+    @app.post("/llm", include_in_schema=False)
+    @app.post("/speak", include_in_schema=False)
+    def legacy_hook():
+        nonlocal plugin_version
+        plugin_version = LEGACY_PLUGIN
+        return fail(404, "not_found", f"API は {API_PREFIX} の下に移った。プラグインを更新する")
+
     api = APIRouter()
 
     @api.post(
         "/llm",
+        dependencies=[Depends(note_plugin_version)],
         summary="要約する",
         tags=["読み上げ"],
         response_model=SummaryResponse,
@@ -357,6 +381,7 @@ def create_app(engine: Engine) -> FastAPI:
 
     @api.post(
         "/speak",
+        dependencies=[Depends(note_plugin_version)],
         summary="合成して鳴らす",
         tags=["読み上げ"],
         response_model=SynthesisResponse,
@@ -419,8 +444,15 @@ def create_app(engine: Engine) -> FastAPI:
 
     @api.get("/health", summary="状態", tags=["状態"])
     async def health():
-        """モデルの状態、使用中の声、ミュート、キューの混み具合。"""
-        return engine.health()
+        """モデルの状態、使用中の声、ミュート、キューの混み具合、常駐サーバーとプラグインの版。"""
+        return {
+            **engine.health(),
+            "version": server_version,
+            "plugin": {
+                "version": plugin_version,
+                "mismatch": plugin_version is not None and plugin_version != server_version,
+            },
+        }
 
     @api.post("/warmup", status_code=202, summary="モデルを読み込む", tags=["状態"])
     async def warmup():
