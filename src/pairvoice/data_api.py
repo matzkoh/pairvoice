@@ -366,8 +366,10 @@ def data_router(data_root: Path, synthesize: Synthesize) -> APIRouter:
         responses={503: _error("`model_load_failed` など（モデルを使えない）")},
     )
     async def design_profile(body: DesignProfileBody):
-        """caption だけで `text` を読ませて声を決め、`extend` と同じく決まった文も読ませて
-        つなぐ。1分ほどかかる。使用中の声がまだ無ければ、作った声を使用中にする。"""
+        """caption だけで `text` を読ませて声を決め、`POST /profiles` の `extend` と同じく決まった文も読ませてつなぐ。
+
+        合成を4回するので 40 秒ほどかかる。使用中の声がまだ無ければ、作った声を使用中にする。
+        """
         sampler = master_sampler(body.rng_seed)
         first = await synthesize(body.text, caption=body.caption, sampler=sampler, design=True)
         takes = [await asyncio.to_thread(first.path.read_bytes)]

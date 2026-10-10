@@ -216,7 +216,8 @@ class SynthesizeRequest(SynthesisRequest):
     )
     design: bool = Field(
         default=False,
-        description="studio のプロファイル作成用。参照音声を使わず caption だけで声を作る",
+        description="参照音声を使わず caption だけで声を作る（studio の候補づくり用）。"
+        "作るたびに違う声になるので、同じ声で読ませ続けるなら `POST /profiles/design` でプロファイルにする",
     )
     mix: list[MixPart] | None = Field(
         default=None,
