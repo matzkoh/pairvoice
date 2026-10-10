@@ -11,7 +11,8 @@ import dataclasses
 from pathlib import Path
 from typing import Annotated, Literal, Protocol
 
-from fastapi import APIRouter, Query, Request
+from fastapi import APIRouter, Body, Query, Request
+from fastapi.openapi.models import Example
 from fastapi.responses import FileResponse
 from pydantic import (
     BaseModel,
@@ -71,6 +72,36 @@ _VERSION_ERRORS: dict[int | str, dict] = {
     404: _error("`version_not_found`"),
 }
 _PROFILE_NOT_FOUND: dict[int | str, dict] = {404: _error("`profile_not_found`")}
+_DESIGN_CAPTION = "落ち着いた低めの男性の声。ゆっくり穏やかに話す。"
+_CREATE_EXAMPLES: dict[str, Example] = {
+    "takes": {
+        "summary": "テイクをつなぐ",
+        "value": {
+            "name": "落ち着いた声",
+            "caption": _DESIGN_CAPTION,
+            "takes": ["generations/xxxx.wav", "generations/yyyy.wav"],
+        },
+    },
+    "extend": {
+        "summary": "短いテイク1本を伸ばす",
+        "value": {
+            "name": "落ち着いた声",
+            "caption": _DESIGN_CAPTION,
+            "takes": ["generations/xxxx.wav"],
+            "extend": True,
+        },
+    },
+}
+_DESIGN_EXAMPLES: dict[str, Example] = {
+    "basic": {
+        "summary": "caption だけで作る",
+        "value": {"name": "落ち着いた声", "caption": _DESIGN_CAPTION},
+    },
+    "seed": {
+        "summary": "種を固定して作り直せるようにする",
+        "value": {"name": "落ち着いた声", "caption": _DESIGN_CAPTION, "rng_seed": 123},
+    },
+}
 
 # 声の名前と caption は前後の空白を落として保存する。名前は空にさせない
 NonBlank = Annotated[str, StringConstraints(strip_whitespace=True, min_length=1)]
@@ -350,7 +381,9 @@ def data_router(data_root: Path, synthesize: Synthesize) -> APIRouter:
             503: _error("`model_load_failed`（`extend` の合成でモデルを読み込めない）"),
         },
     )
-    async def create_profile(body: CreateProfileBody):
+    async def create_profile(
+        body: Annotated[CreateProfileBody, Body(openapi_examples=_CREATE_EXAMPLES)],
+    ):
         """使用中の声がまだ無ければ、作った声を使用中にする。"""
         takes = await asyncio.to_thread(read_takes, body.takes)
         if body.extend:
@@ -365,7 +398,9 @@ def data_router(data_root: Path, synthesize: Synthesize) -> APIRouter:
         tags=["声"],
         responses={503: _error("`model_load_failed` など（モデルを使えない）")},
     )
-    async def design_profile(body: DesignProfileBody):
+    async def design_profile(
+        body: Annotated[DesignProfileBody, Body(openapi_examples=_DESIGN_EXAMPLES)],
+    ):
         """caption だけで `text` を読ませて声を決め、`POST /profiles` の `extend` と同じく決まった文も読ませてつなぐ。
 
         合成を4回するので 40 秒ほどかかる。使用中の声がまだ無ければ、作った声を使用中にする。
