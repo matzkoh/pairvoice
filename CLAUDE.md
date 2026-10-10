@@ -15,6 +15,6 @@
 
 - 画面は常駐サーバーが根（`/`）で配り（`studio_web.py`）、API は `/api` の下に置く。画面の道筋は `/api` の下を取らない（無い API が 404 でなく画面や 405 になり、studio が「サーバーが古い」と見分けられなくなる）
 - 依存はすべて `devDependencies` に入れる（実行時に Node は要らない。`shadcn add` は `dependencies` に入れるので移す）
-- 公開用の wheel はビルド済みの `web/dist` を同梱するので、`(cd studio && pnpm build) && uv build` の順で作る
-- 画面の項目は `web/src/components/nav.ts`、キーボード操作は `useHotkeys`（`web/src/lib/hotkeys.ts`）を通す
-- `web/src/components/ui/` は shadcn/ui の生成物で、`studio/` で `pnpm exec shadcn add <name>` して足す
+- 公開用の wheel はビルド済みの `dist` を同梱するので、`(cd studio && pnpm build) && uv build` の順で作る
+- 画面の項目は `src/components/nav.ts`、キーボード操作は `useHotkeys`（`src/lib/hotkeys.ts`）を通す
+- `src/components/ui/` は shadcn/ui の生成物で、`studio/` で `pnpm exec shadcn add <name>` して足す

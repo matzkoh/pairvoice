@@ -3,15 +3,15 @@
   "private": true,
   "type": "module",
   "scripts": {
-    "build": "vite build --config web/vite.config.ts",
-    "dev": "vite --config web/vite.config.ts",
+    "build": "vite build",
+    "dev": "vite",
     "format": "oxfmt",
     "format:check": "oxfmt --check",
     "lint": "oxlint --type-aware",
-    "preview": "vite preview --config web/vite.config.ts",
-    "test:web": "vitest run --root web",
-    "test:web:watch": "vitest --root web",
-    "typecheck": "tsc --noEmit -p web/tsconfig.json"
+    "preview": "vite preview",
+    "test": "vitest run",
+    "test:watch": "vitest",
+    "typecheck": "tsc --noEmit"
   },
   "devDependencies": {
     "@babel/core": "^8.0.6",

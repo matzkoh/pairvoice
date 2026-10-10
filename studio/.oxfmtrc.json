@@ -3,6 +3,6 @@
   "semi": false,
   "sortImports": true,
   "sortPackageJson": { "sortScripts": true },
-  "sortTailwindcss": { "stylesheet": "web/src/index.css" },
-  "ignorePatterns": ["node_modules", "web/dist", ".test-state"]
+  "sortTailwindcss": { "stylesheet": "src/index.css" },
+  "ignorePatterns": ["node_modules", "dist", ".test-state"]
 }

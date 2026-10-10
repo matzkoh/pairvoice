@@ -1,9 +1,19 @@
 {
-  // shadcn CLI が @ を解決するためだけの写し。型検査は web/tsconfig.json が受け持つ
   "compilerOptions": {
-    "paths": {
-      "@/*": ["./web/src/*"]
-    }
+    "target": "es2024",
+    "lib": ["es2024", "dom", "dom.iterable"],
+    "module": "preserve",
+    "moduleResolution": "bundler",
+    "jsx": "react-jsx",
+    "strict": true,
+    "noUncheckedIndexedAccess": true,
+    "noEmit": true,
+    "allowImportingTsExtensions": true,
+    "verbatimModuleSyntax": true,
+    "erasableSyntaxOnly": true,
+    "skipLibCheck": true,
+    "types": ["vite/client", "node"],
+    "paths": { "@/*": ["./src/*"] }
   },
-  "files": []
+  "include": ["src", "vite.config.ts"]
 }

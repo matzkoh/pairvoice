@@ -54,16 +54,16 @@ build-backend = "hatchling.build"
 [tool.hatch.build.targets.wheel]
 packages = ["src/pairvoice"]
 
-# 利用者はビルドしない。studio の画面はビルド済みの web/dist を、雛形と一緒にパッケージの中へ
-# 入れ、常駐サーバーが根（/）で配る。web/dist は git で追跡しないので、公開前に
+# 利用者はビルドしない。studio の画面はビルド済みの dist を、雛形と一緒にパッケージの中へ
+# 入れ、常駐サーバーが根（/）で配る。dist は git で追跡しないので、公開前に
 # `cd studio && pnpm build` が要る。無ければビルド自体が失敗する
 [tool.hatch.build.targets.wheel.force-include]
-"studio/web/dist" = "pairvoice/studio/web/dist"
+"studio/dist" = "pairvoice/studio/dist"
 "examples" = "pairvoice/examples"
 
 # sdist からも同じ wheel が作れるよう、追跡していないビルド成果物を入れる
 [tool.hatch.build.targets.sdist]
-artifacts = ["studio/web/dist"]
+artifacts = ["studio/dist"]
 
 [tool.pytest.ini_options]
 testpaths = ["tests"]

@@ -15,9 +15,9 @@ jobs:
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
       - uses: astral-sh/setup-uv@c18668ad3cf93ea998bef934396af7bb5c839dc7 # v10.2.0
-      # editable install でも pyproject の force-include が studio/web/dist を要求する。
+      # editable install でも pyproject の force-include が studio/dist を要求する。
       # このジョブは studio をビルドしないので、空のディレクトリで足りる
-      - run: mkdir -p studio/web/dist
+      - run: mkdir -p studio/dist
       - run: uv sync --locked
       - run: uv run pytest
       - run: uv run ruff check
@@ -40,7 +40,7 @@ jobs:
           cache: pnpm
           cache-dependency-path: studio/pnpm-lock.yaml
       - run: pnpm install --frozen-lockfile
-      - run: pnpm test:web
+      - run: pnpm test
       - run: pnpm typecheck
       - run: pnpm lint
       - run: pnpm format:check

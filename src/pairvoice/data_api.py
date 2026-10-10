@@ -42,7 +42,7 @@ TAKE_GAP_SECONDS = 0.3
 MASTER_STEPS = 80
 # 伸ばすときにテイクの声で読ませる文。Irodori-TTS は同じ話者の短い発話を合わせて 30 秒ほどの
 # 参照音声を勧めるので、テイクにこの3つ（各 6〜7 秒）を足してつなぐ。studio の
-# REFERENCE_TEXTS（web/src/features/profiles/mixSynth.ts）と同じ文にしておく
+# REFERENCE_TEXTS（studio/src/features/profiles/mixSynth.ts）と同じ文にしておく
 # - 読み上げるのはエージェントの作業の要約なので、落ち着いた説明調を軸にし、問いかけと
 #   軽い相づちで抑揚に幅を持たせる。参照音声の話し方は複製した声に移るので、強い感情は入れない
 # - 拗音（しゅ・ちょ・じゅ）、促音、撥音、長音、濁音・半濁音、カタカナ語と数を一通り含める

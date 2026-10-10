@@ -16,4 +16,4 @@ def test_bundle_root_falls_back_to_the_repository(tmp_path):
 
 
 def test_bundle_root_of_this_checkout_has_studio():
-    assert (bundle.BUNDLE_ROOT / "studio" / "web").is_dir()
+    assert (bundle.BUNDLE_ROOT / "studio" / "src").is_dir()

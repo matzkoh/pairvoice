@@ -342,7 +342,7 @@ def test_create_with_extend_rejects_other_profiles_before_synthesizing(tmp_path)
 def test_reference_texts_and_steps_match_studio():
     # studio は進み具合を出すため、同じ文を自分で1本ずつ合成している。文がずれると、
     # 同じ声から作っても API と studio で参照音声が変わる
-    source = (Path(__file__).parents[1] / "studio/web/src/features/profiles/mixSynth.ts").read_text(
+    source = (Path(__file__).parents[1] / "studio/src/features/profiles/mixSynth.ts").read_text(
         encoding="utf-8"
     )
     assert all(f"'{text}'" in source for text in REFERENCE_TEXTS)

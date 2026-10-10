@@ -21,15 +21,11 @@ const PAIRVOICE_ORIGIN = 'http://127.0.0.1:17495'
 const proxy = { '/api': { target: PAIRVOICE_ORIGIN, changeOrigin: true } }
 
 export default defineConfig({
-  // root の既定は設定ファイルの場所ではなく process.cwd()。scripts は studio/ から
-  // `vite --config web/vite.config.ts` を呼ぶので、明示しないと root が studio/ になり
-  // index.html を studio/ に探しにいき、outDir も studio/dist に解決される。
-  root: import.meta.dirname,
   plugins: [react(), babel({ presets: [reactCompilerPreset()] }), tailwindcss()],
   resolve: { alias: { '@': path.resolve(import.meta.dirname, 'src') } },
   server: { host: DEV_HOST, port: DEV_PORT, strictPort: true, proxy },
   preview: { host: DEV_HOST, port: DEV_PORT, strictPort: true, proxy },
-  // どちらも Vite の既定と同値だが、pairvoice（studio_web.py）が web/dist を静的配信する
+  // どちらも Vite の既定と同値だが、pairvoice（studio_web.py）が dist を静的配信する
   // 契約なので明示しておく（既定に頼ると出力先が動いたときに気づけない）。
   build: { outDir: 'dist', emptyOutDir: true },
 })

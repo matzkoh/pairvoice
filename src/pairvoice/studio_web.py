@@ -1,4 +1,4 @@
-"""studio の画面（ビルド済みの studio/web/dist）を根（/）で配る。
+"""studio の画面（ビルド済みの studio/dist）を根（/）で配る。
 
 画面と API を同じ常駐サーバーが配るので、画面は同じオリジンで /api の下を呼ぶ。
 """
@@ -16,7 +16,7 @@ from .bundle import BUNDLE_ROOT
 from .config import API_PREFIX
 
 _IMMUTABLE = "public, max-age=31536000, immutable"
-DIST_DIR = BUNDLE_ROOT / "studio" / "web" / "dist"
+DIST_DIR = BUNDLE_ROOT / "studio" / "dist"
 
 # 開発中に dist を作らずに開くと必ずここを通る。無言で壊れると「読み込み中…」で固まるのと
 # 同じ迷い方をするので、次にやることを書く

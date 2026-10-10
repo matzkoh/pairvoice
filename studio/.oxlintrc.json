@@ -36,8 +36,8 @@
   },
   "overrides": [
     {
-      // web は Vite が解決するので拡張子を付けない（shadcn add の出力に合わせる）。
-      "files": ["web/**"],
+      // 画面は Vite が解決するので拡張子を付けない（shadcn add の出力に合わせる）。
+      "files": ["src/**", "vite.config.ts"],
       "rules": {
         "import/extensions": ["error", "never", { "ignorePackages": true, "css": "always" }]
       }
@@ -54,5 +54,5 @@
       }
     }
   ],
-  "ignorePatterns": ["node_modules", "web/dist"]
+  "ignorePatterns": ["node_modules", "dist"]
 }

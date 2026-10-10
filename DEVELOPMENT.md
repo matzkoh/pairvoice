@@ -7,7 +7,7 @@
 | 部分 | 場所 | 中身 |
 | --- | --- | --- |
 | 常駐サーバー | `src/pairvoice/` | Python / FastAPI。`127.0.0.1:17495`。要約（mlx-lm）と音声合成（mlx-audio / Irodori-TTS）、プロンプト・辞書・スタイル・声の読み書き |
-| studio | `studio/` | React 19 + Vite の画面（`web/`）。ビルドした `web/dist` を常駐サーバーが根（`/`）で配り、画面は同じオリジンで `/api` の下を呼ぶ |
+| studio | `studio/` | React 19 + Vite の画面。ビルドした `dist` を常駐サーバーが根（`/`）で配り、画面は同じオリジンで `/api` の下を呼ぶ |
 | 読み上げフック | `plugin/` | Claude Code プラグイン（フックと、要約を改善する `tune` スキル）。マーケットプレイスはリポジトリ直下の `.claude-plugin/marketplace.json` |
 | メニューバー | `src/pairvoice/menubar.py` | 常駐サーバーの子として起きる |
 
@@ -17,7 +17,7 @@
 wheel でしか起きない壊れ方（同梱物の漏れ、依存の抜け）に、ふだん使いの中で気づけるようにするためである。
 
 ```bash
-(cd studio && pnpm install && pnpm build)   # uv sync より先に。studio/web/dist が無いと uv sync が失敗する
+(cd studio && pnpm install && pnpm build)   # uv sync より先に。studio/dist が無いと uv sync が失敗する
 uv sync
 rm -rf dist && (cd studio && pnpm build) && uv build --wheel
 uv tool install --reinstall dist/pairvoice-*.whl
@@ -31,7 +31,7 @@ LaunchAgent は tool 側の Python を指すので、リポジトリのコード
 
 | 変えた場所 | 立て直すもの |
 | --- | --- |
-| `studio/` だけ | 要らない（入れ直した wheel の `web/dist` を次の読み込みから配る。開いているタブは再読み込みする） |
+| `studio/` だけ | 要らない（入れ直した wheel の `dist` を次の読み込みから配る。開いているタブは再読み込みする） |
 | `src/pairvoice/` | `pairvoice restart`（モデルを読み込み直す） |
 | `prompt.txt`・口調、辞書 | 要らない（サーバーが読み上げのたびに読む） |
 
@@ -54,7 +54,7 @@ launchctl kickstart gui/$(id -u)/local.pairvoice   # 常駐に戻す
 ```bash
 uv run pytest                                   # 実モデルは載らない
 uv run ruff check && uv run ruff format --check && uv run ty check
-cd studio && pnpm test:web && pnpm typecheck && pnpm lint && pnpm format:check
+cd studio && pnpm test && pnpm typecheck && pnpm lint && pnpm format:check
 ```
 
 ## 公開用のビルド
@@ -63,8 +63,8 @@ cd studio && pnpm test:web && pnpm typecheck && pnpm lint && pnpm format:check
 (cd studio && pnpm build) && uv build
 ```
 
-wheel には studio（ビルド済みの `web/dist` を含む）・`examples/` を同梱する（`pyproject.toml` の
-`force-include`）。`web/dist` は git で追跡しないので、ビルドを忘れると wheel のビルドが失敗する。
+wheel には studio（ビルド済みの `dist` を含む）・`examples/` を同梱する（`pyproject.toml` の
+`force-include`）。`dist` は git で追跡しないので、ビルドを忘れると wheel のビルドが失敗する。
 
 ## 要約の評価（`pairvoice eval`）
 

@@ -1,4 +1,4 @@
-// pairvoice の API が返す形を、画面（web/src）が使う分だけ写したもの。正本は pairvoice の /docs。
+// pairvoice の API が返す形を、画面が使う分だけ写したもの。正本は pairvoice の /docs。
 // ここに置く型は「HTTP を越える形」だけに限る。サーバー内部の都合は入れない。
 
 // pairvoice の /health が申告するモデルの状態。
