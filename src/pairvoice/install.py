@@ -17,11 +17,17 @@ from pathlib import Path
 from . import launchd, logs
 from .bundle import BUNDLE_ROOT
 from .config import Config, default_data_root
+from .profiles import TONE_FILENAME
+from .prompt import PROMPT_FILENAME
 
 EXAMPLES_DIR = BUNDLE_ROOT / "examples"
 DEFAULT_AGENTS_DIR = Path.home() / "Library" / "LaunchAgents"
-# 雛形 → データの置き場所での名前。フックと studio が読む
-TEMPLATES = (("prompt.example.txt", "prompt.txt"), ("dict.example.tsv", "dict.tsv"))
+# 雛形 → データの置き場所での名前。常駐サーバーが読む
+TEMPLATES = (
+    ("prompt.example.txt", PROMPT_FILENAME),
+    ("tone.example.txt", TONE_FILENAME),
+    ("dict.example.tsv", "dict.tsv"),
+)
 
 
 def seed_data_root(data_root: Path, examples_dir: Path) -> list[Path]:
@@ -30,10 +36,13 @@ def seed_data_root(data_root: Path, examples_dir: Path) -> list[Path]:
     すでにあるものは触らない（育てたプロンプトと辞書を雛形で潰さない）。
     """
     data_root.mkdir(parents=True, exist_ok=True)
+    # 口調は prompt.txt の後ろに足される。口調を分ける前から育てた prompt.txt は
+    # 口調と例を中に持っているので、雛形の口調を足すと口調が二重になる
+    grown_prompt = (data_root / PROMPT_FILENAME).exists()
     created = []
     for template, name in TEMPLATES:
         target = data_root / name
-        if target.exists():
+        if target.exists() or (name == TONE_FILENAME and grown_prompt):
             continue
         shutil.copyfile(examples_dir / template, target)
         created.append(target)

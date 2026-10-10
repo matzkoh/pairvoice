@@ -41,7 +41,7 @@ def test_llm_returns_text():
     response = client.post("/llm", json={"system": "ルール", "prompt": "作業ログ"})
 
     assert response.status_code == 200
-    assert response.json() == {"text": "やった、テスト全部通ったよ。"}
+    assert response.json() == {"text": "やった、テスト全部通ったよ。", "voice": None}
 
 
 def test_llm_reports_mute_with_reason():
@@ -53,10 +53,10 @@ def test_llm_reports_mute_with_reason():
     assert response.json() == {"error": "muted", "reason": "microphone"}
 
 
-def test_llm_requires_system_and_prompt():
+def test_llm_requires_prompt():
     _, client = build()
 
-    assert client.post("/llm", json={"prompt": "p"}).status_code == 422
+    assert client.post("/llm", json={"system": "s"}).status_code == 422
 
 
 @pytest.mark.parametrize("max_tokens", [0, -1, 1025, 1.5, True])

@@ -7,8 +7,8 @@ import { useHotkeys } from '@/lib/hotkeys'
 import { audioFileUrl } from '@/lib/speak'
 
 import type { CorpusResponse, SamplerOverrides } from '../../../../shared/api-types'
-import { CaptionHistorySheet } from './CaptionHistorySheet'
 import { ConditionsPanel } from './ConditionsPanel'
+import { ProfileHistorySheet } from './ProfileHistorySheet'
 import type { ProfileStatus } from './queries'
 import { type KnobValue, type SamplerKey, initialValues, toSamplerPayload } from './samplerKnobs'
 import { TakeCard } from './TakeCard'
@@ -92,7 +92,7 @@ export function VoiceWorkbench({
       <div className="mb-3 flex items-center gap-3">
         <h2 className="text-sm font-medium">試聴して caption を直す</h2>
         <div className="ml-auto">
-          <CaptionHistorySheet profileId={profileId} />
+          <ProfileHistorySheet profileId={profileId} field="caption" />
         </div>
       </div>
       {pairvoiceDown && (

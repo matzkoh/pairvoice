@@ -91,15 +91,16 @@ def test_summary_lists_violations_only_when_some_fail():
 
 def test_eval_command_reads_prompt_and_cases(tmp_path, monkeypatch, capsys):
     monkeypatch.setenv("PAIRVOICE_DATA_ROOT", str(tmp_path))
-    (tmp_path / "prompt.txt").write_text("ルール", encoding="utf-8")
+    candidate = tmp_path / "候補.txt"
+    candidate.write_text("ルール", encoding="utf-8")
     cases = tmp_path / "cases.tsv"
     cases.write_text("id\tinput\nc1\tテストが通った\n", encoding="utf-8")
     seen = []
 
-    def fake_run_on_daemon(base, system, cases, reviews):
-        seen.append((system, [(c.id, c.input) for c in cases], reviews))
+    def fake_run_on_daemon(base, cases, reviews, **candidate):
+        seen.append((candidate, [(c.id, c.input) for c in cases], reviews))
         summarize = lambda system, prompt: "テストが全部通ったから次に進めるよ。"  # noqa: E731
-        return evaluation.run_cases(cases, summarize, system, "casual")
+        return evaluation.run_cases(cases, summarize, "", "casual")
 
     monkeypatch.setattr(evaluation, "run_on_daemon", fake_run_on_daemon)
     out = tmp_path / "out.jsonl"
@@ -109,6 +110,10 @@ def test_eval_command_reads_prompt_and_cases(tmp_path, monkeypatch, capsys):
             "--config",
             str(tmp_path / "missing.toml"),
             "eval",
+            "--prompt",
+            str(candidate),
+            "--voice",
+            "落ち着いた声",
             "--cases",
             str(cases),
             "--out",
@@ -117,16 +122,18 @@ def test_eval_command_reads_prompt_and_cases(tmp_path, monkeypatch, capsys):
     )
 
     assert code == 0
-    # 要約と判定は常駐サーバーの /eval に任せる
-    assert seen == [("ルール", [("c1", "テストが通った")], False)]
+    # 要約と判定、声の口調を足すのは常駐サーバーの /eval に任せる
+    candidate_seen = {"prompt": "ルール", "tone": None, "voice": "落ち着いた声"}
+    assert seen == [(candidate_seen, [("c1", "テストが通った")], False)]
     assert json.loads(out.read_text(encoding="utf-8"))["all_pass"] is True
     assert "ALL_PASS      : 100.0%  (1/1)" in capsys.readouterr().out
 
 
 def test_eval_command_reports_a_missing_prompt(tmp_path, monkeypatch, capsys):
     monkeypatch.setenv("PAIRVOICE_DATA_ROOT", str(tmp_path))
+    missing = str(tmp_path / "無い.txt")
 
-    assert main(["--config", str(tmp_path / "missing.toml"), "eval"]) == 2
+    assert main(["--config", str(tmp_path / "missing.toml"), "eval", "--prompt", missing]) == 2
     assert "読めません" in capsys.readouterr().err
 
 
@@ -190,7 +197,7 @@ def test_eval_command_leaves_no_out_file_when_the_run_fails(tmp_path, monkeypatc
     monkeypatch.setenv("PAIRVOICE_DATA_ROOT", str(tmp_path))
     (tmp_path / "prompt.txt").write_text("ルール", encoding="utf-8")
 
-    def fake_run_on_daemon(*args):
+    def fake_run_on_daemon(*args, **kwargs):
         raise RuntimeError("down")
 
     monkeypatch.setattr(evaluation, "run_on_daemon", fake_run_on_daemon)

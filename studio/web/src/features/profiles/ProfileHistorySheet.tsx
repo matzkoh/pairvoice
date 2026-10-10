@@ -13,30 +13,48 @@ import {
 } from '@/components/ui/sheet'
 import { HistoryList } from '@/features/history/HistoryList'
 
-import { captionHistorySource, invalidateProfiles } from './queries'
+import { invalidateProfiles, profileHistorySource } from './queries'
 
-// 履歴はプロファイルごとに持つ
-export function CaptionHistorySheet({ profileId }: { profileId: string }) {
+const LABELS = {
+  caption: {
+    title: 'caption の履歴',
+    description:
+      'このプロファイルで保存した caption の版です。復元すると次の読み上げから効きます。',
+  },
+  tone: {
+    title: '口調の履歴',
+    description:
+      'このプロファイルで保存した要約の口調の版です。復元すると次の読み上げから効きます。',
+  },
+}
+
+// プロファイルごとに版を持つもの（caption と、要約の口調）の履歴
+export function ProfileHistorySheet({
+  profileId,
+  field,
+}: {
+  profileId: string
+  field: 'caption' | 'tone'
+}) {
+  const label = LABELS[field]
   const queryClient = useQueryClient()
   const [error, setError] = useState('')
   return (
     <Sheet>
       <SheetTrigger render={<Button variant="outline" size="sm" />}>
         <History className="size-3.5" aria-hidden="true" />
-        caption の履歴
+        {label.title}
       </SheetTrigger>
       <SheetContent side="right" className="w-96">
         <SheetHeader>
-          <SheetTitle>caption の履歴</SheetTitle>
-          <SheetDescription>
-            このプロファイルで採用した caption の版です。復元すると次の読み上げから効きます。
-          </SheetDescription>
+          <SheetTitle>{label.title}</SheetTitle>
+          <SheetDescription>{label.description}</SheetDescription>
         </SheetHeader>
         <div className="px-4">
           {error && <p className="mb-2 text-xs text-destructive">復元に失敗しました: {error}</p>}
           <Suspense fallback={<p className="text-sm text-muted-foreground">読み込み中…</p>}>
             <HistoryList
-              source={captionHistorySource(profileId)}
+              source={profileHistorySource(profileId, field)}
               onRestored={() => invalidateProfiles(queryClient)}
               onError={setError}
             />

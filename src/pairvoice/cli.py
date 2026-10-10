@@ -152,7 +152,16 @@ def main(argv: list[str] | None = None) -> int:
 
     evaluate = sub.add_parser("eval", help="要約プロンプト・要約モデルを規則で評価する")
     evaluate.add_argument(
-        "--prompt", type=Path, default=None, help="評価するプロンプト（既定は使用中の prompt.txt）"
+        "--prompt",
+        type=Path,
+        default=None,
+        help="評価する共通のプロンプト（既定は使用中の prompt.txt）。声の口調を足して評価する",
+    )
+    evaluate.add_argument(
+        "--tone", type=Path, default=None, help="評価する口調（既定は声のいまの口調）"
+    )
+    evaluate.add_argument(
+        "--voice", default=None, help="口調を使う声の名前か ID（既定は使用中の声）"
     )
     evaluate.add_argument(
         "--cases",
@@ -267,12 +276,14 @@ def _http_error_message(failed: error.HTTPError) -> str:
 def _eval(config, base: str, args: argparse.Namespace) -> int:
     from . import evaluation
     from .config import default_data_root
-    from .prompt import PROMPT_FILENAME
 
     data_root = default_data_root()
-    prompt_path = args.prompt or data_root / PROMPT_FILENAME
     try:
-        system = prompt_path.read_text(encoding="utf-8")
+        candidate = {
+            "prompt": args.prompt.read_text(encoding="utf-8") if args.prompt else None,
+            "tone": args.tone.read_text(encoding="utf-8") if args.tone else None,
+            "voice": args.voice,
+        }
         cases = evaluation.load_tsv_cases(args.cases or evaluation.DEFAULT_CASES)
     except (OSError, ValueError) as missing:
         # ValueError は UTF-8 でないファイル
@@ -295,10 +306,11 @@ def _eval(config, base: str, args: argparse.Namespace) -> int:
             # 別のモデルは常駐サーバーに載せられないので、このプロセスに読み込んで評価する
             if args.reviews:
                 cases += evaluation.load_review_cases(data_root)
+            system = evaluation.compose_locally(data_root, **candidate)
             summarize = evaluation.local_summarizer(args.model, config.llm.max_tokens)
             results = evaluation.run_cases(cases, summarize, system, config.eval.style)
         else:
-            results = evaluation.run_on_daemon(base, system, cases, args.reviews)
+            results = evaluation.run_on_daemon(base, cases, args.reviews, **candidate)
     except error.HTTPError as failed:
         print(_http_error_message(failed), file=sys.stderr)
         return 1

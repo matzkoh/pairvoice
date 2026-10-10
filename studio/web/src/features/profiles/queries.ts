@@ -15,11 +15,11 @@ export function profilesQueryOptions() {
   })
 }
 
-// caption の履歴はプロファイルの下のキーに置く。採用・復元で ['profiles'] を取り直せば含まれる
-export function captionHistorySource(profileId: string): HistorySource {
+// caption と口調の履歴はプロファイルの下のキーに置く。採用・復元で ['profiles'] を取り直せば含まれる
+export function profileHistorySource(profileId: string, field: 'caption' | 'tone'): HistorySource {
   return {
-    path: `/profiles/${encodeURIComponent(profileId)}/caption`,
-    key: ['profiles', profileId, 'caption'],
+    path: `/profiles/${encodeURIComponent(profileId)}/${field}`,
+    key: ['profiles', profileId, field],
   }
 }
 

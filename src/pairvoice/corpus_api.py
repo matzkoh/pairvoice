@@ -5,6 +5,7 @@ studio のレビュー画面が使う。書くのは常駐サーバーだけで�
 
 from __future__ import annotations
 
+import functools
 from datetime import UTC, datetime
 from pathlib import Path
 from typing import Annotated, Literal
@@ -16,7 +17,7 @@ from pydantic import BaseModel, Field, StrictBool, StringConstraints
 from . import corpus, history
 from .api_errors import error_doc as _error
 from .data_api import Ok
-from .prompt import PromptStore
+from .prompt import SummaryPrompt
 from .tts import AudioNotFound, resolve_data_audio
 
 MessageId = Annotated[str, StringConstraints(min_length=1)]
@@ -35,17 +36,23 @@ class CorpusItem(BaseModel):
     audio_path: str | None = Field(
         default=None, description="合成した音声（データの置き場所からの相対パス）"
     )
+    voice: str | None = Field(
+        default=None, description="口調を使った声の ID（0.8.0 より前の読み上げには無い）"
+    )
     verdict: Literal["good", "bad"] | None = Field(description="レビュー。未レビューは null")
     ideal: str | None = Field(description="👎 に添えた理想の出力")
     archived: bool = Field(description="アーカイブ済みか")
-    stale: bool = Field(description="いまのプロンプトより前の版で作った要約か")
+    stale: bool = Field(
+        description="その声のいまのプロンプト（共通の部分と口調）より前の版で作った要約か"
+    )
 
 
 class CorpusResponse(BaseModel):
     total: int = Field(description="全件の数")
     items: list[CorpusItem] = Field(description="新しい順の1ページ")
     prompt_changed_at: str | None = Field(
-        description="いまのプロンプトが動き出した時刻（ISO 8601、UTC）。分からなければ null"
+        description="使用中の声のプロンプト（共通の部分と口調）が、いまの中身で動き出した時刻"
+        "（ISO 8601、UTC）。分からなければ null。旧プロンプトかどうか（stale）は読み上げの声ごとに決める"
     )
 
 
@@ -79,7 +86,18 @@ class BulkResult(Ok):
 
 def corpus_router(data_root: Path) -> APIRouter:
     router = APIRouter()
-    prompt = PromptStore(data_root)
+    summary_prompt = SummaryPrompt(data_root)
+    profiles = summary_prompt.profiles
+
+    def since_for() -> corpus.SinceFor:
+        """声ごとのプロンプトが動き出した時刻。1回の要求の中では声ごとに1度だけ調べる。"""
+
+        @functools.cache
+        def since(voice: str | None) -> datetime | None:
+            return summary_prompt.current_since(None if voice is None else profiles.get(voice))
+
+        return since
+
     reviews_path = data_root / corpus.REVIEWS_FILENAME
     archives_path = data_root / corpus.ARCHIVES_FILENAME
 
@@ -92,13 +110,17 @@ def corpus_router(data_root: Path) -> APIRouter:
 
         絞り込みと検索は受けない（studio は全件をページに分けて読み、手元で絞る）。
         """
-        page = corpus.corpus_page(data_root, limit, offset, prompt.current_since())
+        since = since_for()
+        active = profiles.active()
+        page = corpus.corpus_page(
+            data_root, limit, offset, since, since(None if active is None else active.id)
+        )
         return CorpusResponse.model_validate(page)
 
     @router.get("/corpus/counts", summary="読み上げの記録の件数", tags=["レビュー"])
     def count_corpus() -> CorpusCounts:
         """studio のレビューの絞り込みごとの件数。全件を読まずに未レビューの数を知るのに使う。"""
-        return CorpusCounts.model_validate(corpus.corpus_counts(data_root, prompt.current_since()))
+        return CorpusCounts.model_validate(corpus.corpus_counts(data_root, since_for()))
 
     @router.get(
         "/corpus/{message_id}/audio",

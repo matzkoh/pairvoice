@@ -33,7 +33,7 @@ LaunchAgent は tool 側の Python を指すので、リポジトリのコード
 | --- | --- |
 | `studio/` だけ | 要らない（入れ直した wheel の `web/dist` を次の読み込みから配る。開いているタブは再読み込みする） |
 | `src/pairvoice/` | `pairvoice restart`（モデルを読み込み直す） |
-| `prompt.txt`、辞書 | 要らない（フックとサーバーが読み上げのたびに読む） |
+| `prompt.txt`・口調、辞書 | 要らない（サーバーが読み上げのたびに読む） |
 
 作業ツリーのコードをその場で動かしたいときは、メニューの「pairvoice を終了」で常駐を止めてから手で起動する（ポート `:17495` を取り合うので同時には動かせない）。
 
@@ -69,7 +69,8 @@ wheel には studio（ビルド済みの `web/dist` を含む）・`examples/` �
 ## 要約の評価（`pairvoice eval`）
 
 ```bash
-pairvoice eval                                      # 使用中の prompt.txt を同梱のケースで評価
+pairvoice eval                                      # 使用中の prompt.txt に使用中の声の口調を足して、同梱のケースで評価
+pairvoice eval --voice 元気な声 --tone 候補.txt     # 別の声で、口調の候補を評価
 pairvoice eval --prompt 候補.txt --reviews --out 結果.jsonl
 pairvoice eval --model mlx-community/<モデル>       # 別のモデルをこのプロセスに読み込んで評価
 ```

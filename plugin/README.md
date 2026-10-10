@@ -38,7 +38,7 @@ Claude Code の `MessageDisplay` フック。アシスタントの出力を pair
 
 | | 場所 |
 |---|---|
-| 要約プロンプト・読み辞書・コーパス（`prompt.txt` `dict.tsv` `corpus.jsonl`） | `~/Library/Application Support/pairvoice`（`PAIRVOICE_DATA_ROOT`） |
+| 要約プロンプト・口調・読み辞書・コーパス（`prompt.txt` `tone.txt` `dict.tsv` `corpus.jsonl`） | `~/Library/Application Support/pairvoice`（`PAIRVOICE_DATA_ROOT`） |
 | ログ | `~/Library/Logs/speak-summary.log` |
 | 重複排除マーカー | `$TMPDIR/claude-speak-state` |
 

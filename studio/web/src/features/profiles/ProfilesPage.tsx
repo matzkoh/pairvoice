@@ -12,6 +12,7 @@ import { pairvoiceOutdated } from './pairvoiceOutdated'
 import { ProfileCard } from './ProfileCard'
 import { ProfileList } from './ProfileList'
 import { type ProfileStatus, profilesQueryOptions } from './queries'
+import { ToneEditor } from './ToneEditor'
 import { VoiceWorkbench } from './VoiceWorkbench'
 
 // URL の ?id= で開くプロファイルを選ぶ。'new' は作成フォーム。省くと使用中のものを開く
@@ -49,7 +50,7 @@ export function ProfilesPage() {
     <div>
       <PageHeader
         title="プロファイル"
-        description="プロファイルは参照音声（声そのもの）と caption（話し方の指示）の組です。試聴しながら caption を直せます。切り替えは次の読み上げから効き、再起動は要りません。"
+        description="プロファイルは参照音声（声そのもの）と caption（話し方の指示）、要約の口調の組です。試聴しながら caption を直せます。切り替えは次の読み上げから効き、再起動は要りません。"
       />
       {/* 知らせが消えても下がずれないよう、行の高さを先に取っておく。ずれると
           押そうとしたボタンの隣を押してしまう */}
@@ -84,6 +85,7 @@ export function ProfilesPage() {
               onStatus={setStatus}
               onDeleted={() => select(undefined)}
             />
+            <ToneEditor item={selected} onStatus={setStatus} />
             <VoiceWorkbench
               profileId={selected.id}
               adoptedCaption={selected.caption}

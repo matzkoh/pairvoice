@@ -25,6 +25,8 @@ ACTIVE_FILENAME = "active"
 META_FILENAME = "profile.json"
 REFERENCE_FILENAME = "reference.wav"
 PROFILES_DIRNAME = "profiles"
+# 要約の口調（声ごとのものは声のディレクトリに、既定のものはデータの置き場所に置く）
+TONE_FILENAME = "tone.txt"
 # active や URL の ID でディレクトリの外へ出ないよう、読むときもこの形だけを受ける
 _ID_PATTERN = re.compile(r"p-[0-9A-Za-z-]+")
 # design = caption や合成した声から作った、upload = 手持ちの wav を取り込んだ、
@@ -44,6 +46,8 @@ class Profile:
     source: str
     reference: Path
     created_at: str = ""
+    # 要約の口調。空なら既定の口調で読む
+    tone: str = ""
 
     def describe(self) -> dict[str, str]:
         """API が返す形。参照音声のパスは見せない。"""
@@ -53,6 +57,7 @@ class Profile:
             "caption": self.caption,
             "source": self.source,
             "created_at": self.created_at,
+            "tone": self.tone,
         }
 
 
@@ -103,6 +108,7 @@ class ProfileStore:
             source=source if source in SOURCES else "upload",
             reference=reference,
             created_at=str(meta.get("created_at", "")),
+            tone=self.tone(profile_id).read(),
         )
 
     def require(self, profile_id: str) -> Profile:
@@ -117,6 +123,19 @@ class ProfileStore:
             return []
         found = (self.get(child.name) for child in sorted(self.root.iterdir()) if child.is_dir())
         return [profile for profile in found if profile is not None]
+
+    def resolve(self, key: str | None) -> Profile | None:
+        """API で選ばれた声。省けば使用中の声（まだ無ければ None）、名前か ID が無ければ ProfileNotFound。"""
+        if key is None:
+            return self.active()
+        profile = self.find(key)
+        if profile is None:
+            raise ProfileNotFound(key)
+        return profile
+
+    def tone(self, profile_id: str) -> history.VersionedText:
+        """その声の要約の口調（版つき）。空なら既定の口調で読む。"""
+        return history.VersionedText(self.root / profile_id / TONE_FILENAME, "tone")
 
     def find(self, key: str) -> Profile | None:
         """ID か名前でプロファイルを引く。同じ名前が複数あれば、いちばん新しく作ったもの。
@@ -178,9 +197,14 @@ class ProfileStore:
         return profile
 
     def update(
-        self, profile_id: str, *, name: str | None = None, caption: str | None = None
+        self,
+        profile_id: str,
+        *,
+        name: str | None = None,
+        caption: str | None = None,
+        tone: str | None = None,
     ) -> Profile:
-        """名前と caption を書き換える。caption は次の読み上げから効き、版を残す。"""
+        """名前・caption・口調を書き換える。caption と口調は次の読み上げから効き、版を残す。"""
         with _write_lock:
             profile = self.require(profile_id)
             directory = self.root / profile.id
@@ -192,10 +216,13 @@ class ProfileStore:
             _write_meta(directory, meta)
             if caption is not None:
                 history.snapshot("caption", directory / history.HISTORY_DIRNAME, caption)
+            if tone is not None:
+                self.tone(profile.id).write(tone)
         return dataclasses.replace(
             profile,
             name=profile.name if name is None else name,
             caption=profile.caption if caption is None else caption,
+            tone=profile.tone if tone is None else tone,
         )
 
     def delete(self, profile_id: str) -> None:
@@ -215,6 +242,15 @@ class ProfileStore:
         content = history.read_version("caption", self._history_dir(profile), version)
         # 復元も履歴に1件増える。「その版が再び動き出した」記録として正しい
         return self.update(profile.id, caption=content)
+
+    def tone_versions(self, profile_id: str) -> list[dict[str, str]]:
+        return self.tone(self.require(profile_id).id).versions()
+
+    def restore_tone(self, profile_id: str, version: str) -> Profile:
+        profile = self.require(profile_id)
+        content = history.read_version("tone", self._history_dir(profile), version)
+        # 復元も履歴に1件増える
+        return self.update(profile.id, tone=content)
 
     def _history_dir(self, profile: Profile) -> Path:
         return self.root / profile.id / history.HISTORY_DIRNAME

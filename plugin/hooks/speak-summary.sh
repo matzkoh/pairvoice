@@ -79,7 +79,7 @@ parse_input() {
 # 空文字にして記録する（プロンプト改善の材料としては、音声化できなかった
 # ケースも「入力→要約」のペアとして価値があるため記録自体は続ける）。
 write_corpus() {
-  local message_id="$1" input="$2" summary="$3" audio_path="$4"
+  local message_id="$1" input="$2" summary="$3" audio_path="$4" voice="$5"
   # データの置き場所はスクリプトのディレクトリの外にあるので、新規マシンや
   # PAIRVOICE_DATA_ROOT を新しい場所に向けた直後には存在しない。作らずに追記すると
   # リダイレクトが失敗し、レビュー資産であるコーパスが黙って失われる（ログには
@@ -91,7 +91,9 @@ write_corpus() {
   # input は要約と同じく長くなりうるので、標準入力で渡す
   if ! printf '%s' "$input" | jq -cRs --arg ts "$(date '+%Y-%m-%d %H:%M:%S')" \
     --arg message_id "$message_id" --arg summary "$summary" --arg audio_path "$audio_path" \
-    '{ts: $ts, message_id: $message_id, input: ., summary: $summary, audio_path: $audio_path}' \
+    --arg voice "$voice" \
+    '{ts: $ts, message_id: $message_id, input: ., summary: $summary, audio_path: $audio_path}
+      + (if $voice == "" then {} else {voice: $voice} end)' \
     >>"$CORPUS_FILE" 2>/dev/null; then
     log WARN "corpus not recorded (append failed): $CORPUS_FILE"
     return 1
@@ -140,21 +142,20 @@ unanswered_reason() {
 }
 
 # ローカルLLMで読み上げ用の短い日本語要約を取得する。
-# 戻り値は SUMMARY_TEXT / SUMMARY_STATUS のグローバル変数で渡す（stdoutではない）。
+# 戻り値は SUMMARY_TEXT / SUMMARY_VOICE / SUMMARY_STATUS のグローバル変数で渡す（stdoutではない）。
 # `summary=$(get_summary ...)` のようにコマンド置換で呼ぶとサブシェルに閉じ込められ、
 # ここで代入したグローバル変数が呼び出し元から見えなくなるため、あえて素の関数呼び出し
 # （`get_summary ...; ` のように $() を使わない形）で呼ぶ前提にしている。
 get_summary() {
   local text="$1" payload response attempt
   SUMMARY_TEXT=""
+  SUMMARY_VOICE=""
   SUMMARY_STATUS=""
-  if [ ! -s "$DATA_DIR/prompt.txt" ]; then
-    SUMMARY_STATUS="prompt.txt missing or empty"
-    return 1
-  fi
+  # プロンプトは常駐サーバーが組む（共通の部分に、読み上げる声の口調を足す）。
   # 本文は標準入力で渡す。引数に載せると長い出力で ARG_MAX を超えて jq も curl も動かない
-  payload=$(printf '%s' "$text" | jq -Rs --rawfile system "$DATA_DIR/prompt.txt" \
-    '{prompt: ., system: $system, respect_mute: true, wait_download: false}')
+  payload=$(printf '%s' "$text" | jq -Rs --arg voice "$VOICE" \
+    '{prompt: ., respect_mute: true, wait_download: false}
+      + (if $voice == "" then {} else {voice: $voice} end)')
 
   for attempt in $(seq 1 "$SUMMARY_MAX_RETRIES"); do
     response=$(printf '%s' "$payload" | curl -s --max-time "$LLM_TIMEOUT_SECONDS" -w '\n%{http_code}' \
@@ -176,6 +177,7 @@ get_summary() {
           model_downloading) SUMMARY_STATUS="model downloading" ;;
           generation_failed) SUMMARY_STATUS="generation failed" ;;
           profile_missing) SUMMARY_STATUS="profile missing" ;;
+          prompt_missing) SUMMARY_STATUS="prompt.txt missing or empty" ;;
           *) SUMMARY_STATUS="unavailable" ;;
         esac
         return 1
@@ -183,7 +185,11 @@ get_summary() {
       000) SUMMARY_STATUS="$(unanswered_reason)"; return 1 ;;
       # 道筋が無い。常駐サーバーとプラグインの版が食い違っている（何度試しても同じ）
       404 | 405)
-        SUMMARY_STATUS="version mismatch: plugin ${PLUGIN_VERSION}"
+        if [ "$(printf '%s' "$body" | jq -r '.error // ""' 2>/dev/null)" = "profile_not_found" ]; then
+          SUMMARY_STATUS="voice not found: PAIRVOICE_VOICE=$VOICE"
+        else
+          SUMMARY_STATUS="version mismatch: plugin ${PLUGIN_VERSION}"
+        fi
         return 1
         ;;
     esac
@@ -192,6 +198,7 @@ get_summary() {
     candidate=$(printf '%s' "$body" | jq -r '.text // empty' 2>/dev/null)
     if [ -n "$candidate" ] && contains_japanese "$candidate"; then
       SUMMARY_TEXT="$candidate"
+      SUMMARY_VOICE=$(printf '%s' "$body" | jq -r '.voice // empty' 2>/dev/null)
       return 0
     fi
     log WARN "summary retry ${attempt}/${SUMMARY_MAX_RETRIES} (non-Japanese or failed): $body"
@@ -258,11 +265,11 @@ main() {
   # 読み辞書（dict.tsv）は pairvoice が合成の直前にかけるので、ここでは要約のまま渡す
   local relative_path
   relative_path=$(request_speech "$SUMMARY_TEXT") || {
-    write_corpus "$PARSED_MESSAGE_ID" "$PARSED_TEXT" "$SUMMARY_TEXT" ""
+    write_corpus "$PARSED_MESSAGE_ID" "$PARSED_TEXT" "$SUMMARY_TEXT" "" "$SUMMARY_VOICE"
     return 0
   }
 
-  write_corpus "$PARSED_MESSAGE_ID" "$PARSED_TEXT" "$SUMMARY_TEXT" "$relative_path"
+  write_corpus "$PARSED_MESSAGE_ID" "$PARSED_TEXT" "$SUMMARY_TEXT" "$relative_path" "$SUMMARY_VOICE"
   # 鳴ったか（ミュートや「止める」で鳴らなかったか）は pairvoice のログに残る
   log INFO "QUEUED (message_id=${PARSED_MESSAGE_ID}): $SUMMARY_TEXT"
   return 0

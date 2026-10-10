@@ -12,7 +12,7 @@ from __future__ import annotations
 
 import json
 import threading
-from collections.abc import Iterable
+from collections.abc import Callable, Iterable
 from datetime import datetime
 from pathlib import Path
 
@@ -108,8 +108,17 @@ def corpus_time(ts: object) -> datetime | None:
         return None
 
 
-def corpus_page(data_root: Path, limit: int, offset: int, prompt_since: datetime | None) -> dict:
-    """新しい順の1ページに、レビュー・アーカイブ・旧プロンプトかどうかを突き合わせる。"""
+# 読み上げに使った声の ID（無い行は None）から、その声のプロンプトが動き出した時刻を引く
+SinceFor = Callable[[str | None], datetime | None]
+
+
+def corpus_page(
+    data_root: Path, limit: int, offset: int, since_for: SinceFor, prompt_since: datetime | None
+) -> dict:
+    """新しい順の1ページに、レビュー・アーカイブ・旧プロンプトかどうかを突き合わせる。
+
+    prompt_since は、いま使っている声のプロンプトが動き出した時刻（画面に出す境界）。
+    """
     corpus = read_jsonl(data_root / CORPUS_FILENAME)
     reviews = latest_reviews(data_root)
     archived = archived_ids(data_root)
@@ -117,7 +126,7 @@ def corpus_page(data_root: Path, limit: int, offset: int, prompt_since: datetime
     end = max(len(corpus) - offset, 0)
     # 返すページの分だけ突き合わせる（クライアントは全件を数ページに分けて取りに来る）
     items = [
-        entry | _status(entry, reviews, archived, prompt_since)
+        entry | _status(entry, reviews, archived, since_for)
         for entry in reversed(corpus[max(end - limit, 0) : end])
     ]
     return {
@@ -127,7 +136,7 @@ def corpus_page(data_root: Path, limit: int, offset: int, prompt_since: datetime
     }
 
 
-def corpus_counts(data_root: Path, prompt_since: datetime | None) -> dict[str, int]:
+def corpus_counts(data_root: Path, since_for: SinceFor) -> dict[str, int]:
     """studio のレビューの絞り込みごとの件数（studio の computeReviewCounts と同じ数え方）。
 
     アーカイブ済みはアーカイブだけに、旧プロンプトの読み上げは stale だけに数える。
@@ -136,7 +145,7 @@ def corpus_counts(data_root: Path, prompt_since: datetime | None) -> dict[str, i
     archived = archived_ids(data_root)
     counts = dict.fromkeys(("all", "unreviewed", "bad", "archived", "stale"), 0)
     for entry in read_jsonl(data_root / CORPUS_FILENAME):
-        status = _status(entry, reviews, archived, prompt_since)
+        status = _status(entry, reviews, archived, since_for)
         if status["archived"]:
             counts["archived"] += 1
         elif status["stale"]:
@@ -150,9 +159,7 @@ def corpus_counts(data_root: Path, prompt_since: datetime | None) -> dict[str, i
     return counts
 
 
-def _status(
-    entry: dict, reviews: dict[str, dict], archived: set[str], prompt_since: datetime | None
-) -> dict:
+def _status(entry: dict, reviews: dict[str, dict], archived: set[str], since_for: SinceFor) -> dict:
     """読み上げの記録1件の、最新のレビュー・アーカイブ・旧プロンプトかどうか。"""
     message_id = entry.get("message_id")
     review = reviews.get(message_id) if isinstance(message_id, str) else None
@@ -164,7 +171,7 @@ def _status(
         "verdict": verdict,
         "ideal": review.get("ideal") if review is not None and verdict is not None else None,
         "archived": message_id in archived,
-        "stale": _is_stale(entry, prompt_since),
+        "stale": _is_stale(entry, since_for),
     }
 
 
@@ -177,7 +184,10 @@ def find_audio_path(data_root: Path, message_id: str) -> str | None:
     return None
 
 
-def _is_stale(entry: dict, prompt_since: datetime | None) -> bool:
+def _is_stale(entry: dict, since_for: SinceFor) -> bool:
+    voice = entry.get("voice")
+    # 声ごとに口調が違うので、境界はその読み上げの声で引く
+    prompt_since = since_for(voice if isinstance(voice, str) and voice else None)
     # 「古い」と言うには時刻の証拠が要る。境界が引けないときと ts が読めないときは、
     # 古い側に落とさない（記録を勝手に隠すより、見えたまま人が判断できる方に倒す）
     if prompt_since is None:

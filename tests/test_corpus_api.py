@@ -5,8 +5,7 @@ from datetime import datetime
 import pytest
 
 from pairvoice.corpus import corpus_time
-from pairvoice.history import version_time
-from pairvoice.prompt import PromptStore
+from pairvoice.history import VersionedText, version_time
 from tests.test_server import build
 
 
@@ -217,7 +216,7 @@ def test_corpus_marks_readings_before_current_prompt_as_stale(client, tmp_path):
 
 
 def test_current_since_moves_only_when_content_changes(tmp_path):
-    store = PromptStore(tmp_path)
+    store = VersionedText(tmp_path / "prompt.txt", "prompt")
     history = tmp_path / "history"
     history.mkdir()
     at = iter(range(10))

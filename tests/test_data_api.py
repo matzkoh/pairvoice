@@ -228,6 +228,7 @@ def test_patch_updates_name_and_snapshots_caption(client):
         "caption": "早口",
         "source": "upload",
         "created_at": "",
+        "tone": "",
     }
     (version,) = client.get(f"/profiles/{profile_id}/caption/history").json()["items"]
     assert version["name"].startswith("caption-")

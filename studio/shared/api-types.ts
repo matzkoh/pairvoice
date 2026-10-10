@@ -89,6 +89,8 @@ export type ProfileItem = {
   caption: string
   source: ProfileSource
   created_at: string
+  // 要約の口調（口調の指示と入出力の例）。空なら既定の口調で読む
+  tone: string
 }
 export type ProfilesResponse = { items: ProfileItem[]; active: string | null }
 
@@ -108,6 +110,8 @@ export type CorpusItem = {
   input: string
   summary: string
   audio_path?: string
+  // 口調を使った声の ID（声ごとの口調より前の読み上げには無い）
+  voice?: string | null
   verdict: Exclude<Verdict, 'none'> | null
   ideal: string | null
   archived: boolean

@@ -26,8 +26,8 @@ from pydantic import (
 from . import reading
 from .api_errors import error_doc as _error
 from .api_errors import fail as _fail
-from .profiles import PROFILES_DIRNAME, ProfileStore, TakeRejected
-from .prompt import PromptStore
+from .profiles import TakeRejected
+from .prompt import SummaryPrompt
 from .styles import STYLES_FILENAME, StyleStore
 from .tts import ANCHOR_TEXT, SpeechResult, resolve_data_audio
 from .wav import concat_wavs, has_wav_header
@@ -109,6 +109,17 @@ ProfileName = NonBlank
 Caption = Annotated[str, StringConstraints(strip_whitespace=True)]
 
 
+class ToneBody(BaseModel):
+    text: str = Field(
+        description="要約の口調（口調の指示と入出力の例）。口調を持たない声で、共通のプロンプトの後ろに足す"
+    )
+
+
+class ComposedPrompt(BaseModel):
+    text: str = Field(description="要約に渡すシステムプロンプト（共通の部分＋口調）")
+    voice: str | None = Field(description="口調を足した声の ID。声がまだ無ければ null")
+
+
 class Ok(BaseModel):
     ok: bool = Field(default=True, description="常に true")
 
@@ -118,7 +129,9 @@ class PromptResponse(BaseModel):
 
 
 class PromptBody(BaseModel):
-    text: str = Field(description="要約のシステムプロンプト。フックが読み上げのたびに読む")
+    text: str = Field(
+        description="要約のプロンプトの共通の部分（削り方・言葉選び）。読み上げのたびに声の口調を足して使う"
+    )
 
     @field_validator("text")
     @classmethod
@@ -204,6 +217,7 @@ class ProfileItem(BaseModel):
     caption: str = Field(description="話し方の指示。合成のたびに読む")
     source: Literal["design", "upload", "auto", "import"] = Field(description="作り方")
     created_at: str = Field(description="作った日時（ISO 8601）")
+    tone: str = Field(description="要約の口調。空なら既定の口調（`GET /tone`）で読む")
 
 
 class ProfilesResponse(BaseModel):
@@ -256,20 +270,26 @@ class PatchProfileBody(BaseModel):
     caption: Caption | None = Field(
         default=None, description="空文字は caption なしで読む。書くたびに版を残す"
     )
+    tone: str | None = Field(
+        default=None,
+        description="要約の口調（口調の指示と入出力の例）。共通のプロンプトの後ろに足す。"
+        "空文字は既定の口調で読む。書くたびに版を残す",
+    )
 
     @model_validator(mode="after")
     def _something_to_change(self):
-        if self.name is None and self.caption is None:
-            raise ValueError("name or caption is required")
+        if self.name is None and self.caption is None and self.tone is None:
+            raise ValueError("name, caption or tone is required")
         return self
 
 
 def data_router(data_root: Path, synthesize: Synthesize) -> APIRouter:
     router = APIRouter()
-    prompt = PromptStore(data_root)
     dict_path = data_root / reading.DICT_FILENAME
     styles = StyleStore(data_root / STYLES_FILENAME)
-    profiles = ProfileStore(data_root / PROFILES_DIRNAME)
+    summary_prompt = SummaryPrompt(data_root)
+    profiles = summary_prompt.profiles
+    prompt = summary_prompt.common
 
     # ---- プロンプト ----
 
@@ -295,6 +315,50 @@ def data_router(data_root: Path, synthesize: Synthesize) -> APIRouter:
     )
     def restore_prompt(body: RestoreBody) -> Ok:
         prompt.restore(body.name)
+        return Ok()
+
+    @router.get(
+        "/prompt/composed",
+        summary="声ごとに組んだ要約のプロンプト",
+        tags=["プロンプト"],
+        responses=_PROFILE_NOT_FOUND,
+    )
+    def composed_prompt(
+        voice: Annotated[
+            str | None, Query(description="声の名前か ID。省くと使用中のプロファイル")
+        ] = None,
+    ) -> ComposedPrompt:
+        """読み上げの要約に渡すものと同じ、共通の部分にその声の口調を足したもの。"""
+        text, profile = summary_prompt.compose_for(voice)
+        return ComposedPrompt(text=text, voice=None if profile is None else profile.id)
+
+    # ---- 口調（既定と、声ごと） ----
+
+    tone = summary_prompt.default_tone
+
+    @router.get("/tone", summary="既定の口調", tags=["プロンプト"])
+    def get_tone() -> PromptResponse:
+        """口調を持たない声が使う。声の口調はプロファイルの `tone`。"""
+        return PromptResponse(text=tone.read())
+
+    @router.put("/tone", summary="既定の口調を書き換える", tags=["プロンプト"])
+    def put_tone(body: ToneBody) -> Ok:
+        """書いた内容を履歴の最新版として残す。次の読み上げから効く。"""
+        tone.write(body.text)
+        return Ok()
+
+    @router.get("/tone/history", summary="既定の口調の履歴", tags=["プロンプト"])
+    def tone_history() -> HistoryResponse:
+        return HistoryResponse.model_validate({"items": tone.versions()})
+
+    @router.post(
+        "/tone/restore",
+        summary="既定の口調を履歴の版に戻す",
+        tags=["プロンプト"],
+        responses=_VERSION_ERRORS,
+    )
+    def restore_tone(body: RestoreBody) -> Ok:
+        tone.restore(body.name)
         return Ok()
 
     # ---- 読み辞書 ----
@@ -491,14 +555,14 @@ def data_router(data_root: Path, synthesize: Synthesize) -> APIRouter:
 
     @router.patch(
         "/profiles/{profile_id}",
-        summary="声の名前と caption を書き換える",
+        summary="声の名前・caption・口調を書き換える",
         response_model=ProfileItem,
         tags=["声"],
         responses=_PROFILE_NOT_FOUND,
     )
     def patch_profile(profile_id: str, body: PatchProfileBody):
-        """caption は次の読み上げから効き、書くたびに版を残す。"""
-        updated = profiles.update(profile_id, name=body.name, caption=body.caption)
+        """caption と口調は次の読み上げから効き、書くたびに版を残す。"""
+        updated = profiles.update(profile_id, name=body.name, caption=body.caption, tone=body.tone)
         return ProfileItem.model_validate(updated.describe())
 
     @router.delete(
@@ -538,6 +602,25 @@ def data_router(data_root: Path, synthesize: Synthesize) -> APIRouter:
     )
     def restore_caption(profile_id: str, body: RestoreBody) -> Ok:
         profiles.restore_caption(profile_id, body.name)
+        return Ok()
+
+    @router.get(
+        "/profiles/{profile_id}/tone/history",
+        summary="声の口調の履歴",
+        tags=["声"],
+        responses=_PROFILE_NOT_FOUND,
+    )
+    def tone_history_of(profile_id: str) -> HistoryResponse:
+        return HistoryResponse.model_validate({"items": profiles.tone_versions(profile_id)})
+
+    @router.post(
+        "/profiles/{profile_id}/tone/restore",
+        summary="声の口調を履歴の版に戻す",
+        tags=["声"],
+        responses={**_PROFILE_NOT_FOUND, **_VERSION_ERRORS},
+    )
+    def restore_tone_of(profile_id: str, body: RestoreBody) -> Ok:
+        profiles.restore_tone(profile_id, body.name)
         return Ok()
 
     return router

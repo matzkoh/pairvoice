@@ -25,7 +25,7 @@ from .data_api import data_router
 from .lifecycle import Engine, ModelUnavailable, MutedError, Superseded, limit_mlx_cache
 from .llm import MlxLmBackend
 from .mute import MAX_MINUTES, MIN_MINUTES, InvalidMinutes, MuteController
-from .prompt import PromptStore
+from .prompt import SummaryPrompt
 from .studio_web import mount_studio, open_studio
 from .tts import MlxAudioBackend
 
@@ -106,6 +106,10 @@ class MutedResponse(BaseModel):
 
 class SummaryResponse(BaseModel):
     text: str = Field(description="要約した文")
+    voice: str | None = Field(
+        description="口調を足した声（プロファイル）の ID。`system` を渡したときと、"
+        "声がまだ無いときは null"
+    )
 
 
 class SynthesisResponse(BaseModel):
@@ -115,7 +119,15 @@ class SynthesisResponse(BaseModel):
 
 
 class SummaryRequest(BaseModel):
-    system: str = Field(description="システムプロンプト（要約の指示）")
+    system: str | None = Field(
+        default=None,
+        description="システムプロンプト（要約の指示）。省くと共通のプロンプトに `voice` の声の口調を足して組む",
+    )
+    voice: str | None = Field(
+        default=None,
+        description="口調を使う声（プロファイル）の名前か ID。`system` を省いたときだけ見る。"
+        "省くと使用中のプロファイル",
+    )
     prompt: str = Field(description="要約する文")
     # mlx_lm は負の値を無制限とみなす。上限は読み上げ要約の既定（128）に十分な余裕を
     # 持たせた値で、これを超える生成は Runner を塞いでフックの読み上げを待たせるだけ
@@ -247,7 +259,15 @@ class EvalCase(BaseModel):
 
 class EvalRequest(BaseModel):
     prompt: str | None = Field(
-        default=None, description="評価するシステムプロンプト。省くと使用中の prompt.txt"
+        default=None,
+        description="評価する共通のプロンプト（prompt.txt の候補）。省くといまの prompt.txt。"
+        "どちらにも `voice` の声の口調を足す",
+    )
+    voice: str | None = Field(
+        default=None, description="口調を使う声の名前か ID。省くと使用中のプロファイル"
+    )
+    tone: str | None = Field(
+        default=None, description="評価する口調の候補。省くと `voice` の声のいまの口調"
     )
     cases: list[EvalCase] | None = Field(default=None, description="省くと同梱のケース")
     reviews: bool = Field(default=False, description="studio のレビュー（👍 / 👎）もケースに加える")
@@ -330,6 +350,8 @@ def create_app(engine: Engine) -> FastAPI:
         plugin_version = LEGACY_PLUGIN
         return fail(404, "not_found", f"API は {API_PREFIX} の下に移った。プラグインを更新する")
 
+    summary_prompt = SummaryPrompt(data_root)
+
     api = APIRouter()
 
     @api.post(
@@ -344,15 +366,24 @@ def create_app(engine: Engine) -> FastAPI:
                 "description": "ミュート中（`respect_mute` のとき）か、"
                 "後発の要約に追い越されて捨てた（`droppable` のとき、`error` は `dropped`）",
             },
-            503: _MODEL_UNAVAILABLE,
+            404: _error("`profile_not_found`（`voice` の声が無い）"),
+            503: _error(
+                f"{_MODEL_UNAVAILABLE['description']}。`system` を省いて組んだプロンプトが空なら `prompt_missing`"
+            ),
         },
     )
     async def summarize(
         request: Annotated[SummaryRequest, Body(openapi_examples=_SUMMARY_EXAMPLES)],
     ):
+        if request.system is not None:
+            system, profile = request.system, None
+        else:
+            system, profile = summary_prompt.compose_for(request.voice)
+            if not system.strip():
+                return fail(503, "prompt_missing", "prompt.txt が無いか空")
         try:
             text = await engine.summarize(
-                system=request.system,
+                system=system,
                 prompt=request.prompt,
                 max_tokens=request.max_tokens,
                 respect_mute=request.respect_mute,
@@ -361,7 +392,7 @@ def create_app(engine: Engine) -> FastAPI:
             )
         except Superseded:
             return JSONResponse(status_code=409, content={"error": "dropped"})
-        return {"text": text}
+        return {"text": text, "voice": None if profile is None else profile.id}
 
     _VOICE_NOT_FOUND = (
         "`profile_not_found`（`voice` の声が無い）、`style_not_found`（`style` が無い）"
@@ -505,7 +536,7 @@ def create_app(engine: Engine) -> FastAPI:
         return {"url": open_studio(f"http://127.0.0.1:{engine.config.port}")}
 
     def load_eval_inputs(request: EvalRequest) -> tuple[str, list[evaluation.Case]]:
-        system = request.prompt if request.prompt is not None else PromptStore(data_root).read()
+        system, _ = summary_prompt.compose_for(request.voice, request.prompt, request.tone)
         if request.cases is not None:
             cases = [evaluation.Case(id=c.id, input=c.input) for c in request.cases]
         else:
@@ -518,7 +549,10 @@ def create_app(engine: Engine) -> FastAPI:
         "/eval",
         summary="要約プロンプトを評価する",
         tags=["運用"],
-        responses={503: _MODEL_UNAVAILABLE},
+        responses={
+            404: _error("`profile_not_found`（`voice` の声が無い）"),
+            503: _MODEL_UNAVAILABLE,
+        },
     )
     async def evaluate(request: EvalRequest):
         """ケースを常駐サーバーのモデルで要約し、規則で判定する（`pairvoice eval` と同じ）。
@@ -527,6 +561,8 @@ def create_app(engine: Engine) -> FastAPI:
         """
         # corpus.jsonl は伸び続けるので、ファイルを読むのはイベントループの外で行う
         system, cases = await asyncio.to_thread(load_eval_inputs, request)
+        if not system.strip():
+            return fail(503, "prompt_missing", "prompt.txt が無いか空")
         results = []
         for case in cases:
             output = await engine.summarize(system, case.input, droppable=False)

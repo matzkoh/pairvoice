@@ -24,6 +24,7 @@ const ITEM: ProfileItem = {
   caption: 'B の声。',
   source: 'design',
   created_at: '1',
+  tone: '',
 }
 
 function renderCard(isActive = false) {

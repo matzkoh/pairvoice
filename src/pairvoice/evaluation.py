@@ -123,9 +123,18 @@ def write_results(results: list[dict], path: Path) -> None:
     )
 
 
-def run_on_daemon(base: str, system: str, cases: list[Case], reviews: bool) -> list[dict]:
+def run_on_daemon(
+    base: str,
+    cases: list[Case],
+    reviews: bool,
+    *,
+    prompt: str | None,
+    tone: str | None,
+    voice: str | None,
+) -> list[dict]:
     """常駐サーバーの /eval で評価する。読み込み済みのモデルを使うので、メモリを余分に使わない。
 
+    prompt は共通の部分の候補、tone は口調の候補、voice は口調を使う声で、None ならいまのもの。
     reviews のケースは常駐サーバーがデータの置き場所から読む。
     """
     from . import client
@@ -134,7 +143,9 @@ def run_on_daemon(base: str, system: str, cases: list[Case], reviews: bool) -> l
         base,
         "/eval",
         body={
-            "prompt": system,
+            "prompt": prompt,
+            "tone": tone,
+            "voice": voice,
             "cases": [{"id": case.id, "input": case.input} for case in cases],
             "reviews": reviews,
         },
@@ -144,6 +155,20 @@ def run_on_daemon(base: str, system: str, cases: list[Case], reviews: bool) -> l
     if "results" not in result:
         raise RuntimeError(f"評価できませんでした: {result}")
     return result["results"]
+
+
+def compose_locally(
+    data_root: Path, *, prompt: str | None, tone: str | None, voice: str | None
+) -> str:
+    """常駐サーバーを通さずに評価するときの、声ごとのプロンプト（/eval と同じ組み方）。"""
+    from .profiles import ProfileNotFound
+    from .prompt import SummaryPrompt
+
+    try:
+        system, _ = SummaryPrompt(data_root).compose_for(voice, prompt, tone)
+    except ProfileNotFound as missing:
+        raise RuntimeError(f"声が見つかりません: {missing}") from missing
+    return system
 
 
 def local_summarizer(model: str, max_tokens: int) -> Summarize:

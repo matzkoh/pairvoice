@@ -8,8 +8,8 @@ import { ProfileList } from './ProfileList'
 afterEach(cleanup)
 
 const ITEMS: ProfileItem[] = [
-  { id: 'p-a', name: '使用中の声', caption: 'A の声。', source: 'auto', created_at: '2' },
-  { id: 'p-b', name: '別の声', caption: 'B の声。', source: 'design', created_at: '1' },
+  { id: 'p-a', name: '使用中の声', caption: 'A の声。', source: 'auto', created_at: '2', tone: '' },
+  { id: 'p-b', name: '別の声', caption: 'B の声。', source: 'design', created_at: '1', tone: '' },
 ]
 
 function renderList(selected: string | null) {

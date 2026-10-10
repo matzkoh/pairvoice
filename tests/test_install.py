@@ -11,6 +11,7 @@ def make_examples(tmp_path):
     examples = tmp_path / "examples"
     examples.mkdir()
     (examples / "prompt.example.txt").write_text("雛形のプロンプト", encoding="utf-8")
+    (examples / "tone.example.txt").write_text("雛形の口調", encoding="utf-8")
     (examples / "dict.example.tsv").write_text("A\tえー\n", encoding="utf-8")
     return examples
 
@@ -22,7 +23,8 @@ def test_seed_data_root_copies_templates(tmp_path):
 
     assert (data / "prompt.txt").read_text(encoding="utf-8") == "雛形のプロンプト"
     assert (data / "dict.tsv").read_text(encoding="utf-8") == "A\tえー\n"
-    assert created == [data / "prompt.txt", data / "dict.tsv"]
+    assert (data / "tone.txt").read_text(encoding="utf-8") == "雛形の口調"
+    assert created == [data / "prompt.txt", data / "tone.txt", data / "dict.tsv"]
 
 
 def test_seed_data_root_never_overwrites(tmp_path):
@@ -34,6 +36,7 @@ def test_seed_data_root_never_overwrites(tmp_path):
     created = install.seed_data_root(data, make_examples(tmp_path))
 
     assert (data / "prompt.txt").read_text(encoding="utf-8") == "育てたプロンプト"
+    # 口調を分ける前の prompt.txt は口調を中に持つので、雛形の口調を足さない
     assert created == [data / "dict.tsv"]
 
 

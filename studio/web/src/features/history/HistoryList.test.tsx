@@ -7,7 +7,6 @@ import { afterEach, expect, it, vi } from 'vitest'
 import { apiGet, apiSend } from '@/lib/api'
 
 import { HistoryList } from './HistoryList'
-import { PROMPT_HISTORY } from './queries'
 
 // apiGet / apiSend をモックして、復元の失敗が画面ごと消える壊れ方をしないことを
 // 確かめる。startTransition 内の throw は素通しにすると
@@ -28,7 +27,7 @@ function renderHistoryList(onError: (message: string) => void) {
   return render(
     <QueryClientProvider client={queryClient}>
       <Suspense fallback="読み込み中">
-        <HistoryList source={PROMPT_HISTORY} onError={onError} />
+        <HistoryList source={{ path: '/prompt', key: ['prompt'] }} onError={onError} />
       </Suspense>
     </QueryClientProvider>,
   )
