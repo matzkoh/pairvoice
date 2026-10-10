@@ -277,7 +277,7 @@ def test_perform_studio_opens_the_page_the_server_serves(monkeypatch):
         "pairvoice.studio_web.subprocess.Popen", lambda command, **kwargs: opened.append(command)
     )
     menubar.perform("studio", "http://127.0.0.1:17495")
-    assert opened == [["open", "http://127.0.0.1:17495/studio/"]]
+    assert opened == [["open", "http://127.0.0.1:17495/"]]
 
 
 def test_perform_swallows_http_failure_but_logs_it(monkeypatch, caplog):

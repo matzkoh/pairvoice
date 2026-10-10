@@ -1,6 +1,6 @@
 import { useRef, useState } from 'react'
 
-import { ApiError, apiGetBlob, toErrorMessage } from '@/lib/api'
+import { ApiError, apiGetBlob, apiUrl, toErrorMessage } from '@/lib/api'
 
 export type PlayerState = {
   audioRef: React.RefObject<HTMLAudioElement | null>
@@ -25,7 +25,7 @@ export function usePlayer(): PlayerState {
     playingIdRef.current = messageId
     const player = audioRef.current
     if (!player) return
-    player.src = `/corpus/${encodeURIComponent(messageId)}/audio`
+    player.src = apiUrl(`/corpus/${encodeURIComponent(messageId)}/audio`)
     void player.play().catch(() => {
       // autoplay 拒否等。実際のロード失敗（404 等）は <audio> の onError
       // （handleAudioError）側で拾う。

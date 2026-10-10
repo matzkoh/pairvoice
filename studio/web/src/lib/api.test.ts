@@ -20,9 +20,10 @@ afterEach(() => {
 })
 
 describe('apiGet', () => {
-  it('JSON を返す', async () => {
-    mockFetch(200, '{"ok":true}')
+  it('/api の下を呼び、JSON を返す', async () => {
+    const spy = mockFetch(200, '{"ok":true}')
     await expect(apiGet<{ ok: boolean }>('/health')).resolves.toEqual({ ok: true })
+    expect(spy.mock.calls[0]![0]).toBe('/api/health')
   })
 
   it('404 は StaleServerError になる', async () => {

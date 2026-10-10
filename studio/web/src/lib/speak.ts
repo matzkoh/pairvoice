@@ -3,7 +3,7 @@
 // api.ts ではなく別ファイルに置くのは、テストが apiSend をモジュール境界で差し替える
 // ため。api.ts の中から apiSend を呼ぶとその差し替えを素通りしてしまう。
 
-import { apiSend, speakErrorMessage } from '@/lib/api'
+import { apiSend, apiUrl, speakErrorMessage } from '@/lib/api'
 
 import type { SamplerOverrides, SpeakResponse } from '../../../shared/api-types'
 
@@ -20,7 +20,7 @@ export type SpeakBody = {
 }
 // 合成した音声（データの置き場所からの相対パス）を鳴らす URL
 export function audioFileUrl(relativePath: string) {
-  return `/audio?path=${encodeURIComponent(relativePath)}`
+  return apiUrl(`/audio?path=${encodeURIComponent(relativePath)}`)
 }
 
 // 音が返らなかった場合は必ず例外にして、成功の形だけを返す。見分け方を呼び出し側に

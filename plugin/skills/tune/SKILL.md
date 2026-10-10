@@ -23,22 +23,22 @@ description: pairvoice の読み上げ要約を改善するときに使う。要
 
    ```bash
    jq -n --rawfile text <tmp>/candidate.txt '{text: $text}' |
-     curl -sf -X PUT http://127.0.0.1:17495/prompt -H 'Content-Type: application/json' -d @-
+     curl -sf -X PUT http://127.0.0.1:17495/api/prompt -H 'Content-Type: application/json' -d @-
    ```
 
-   pairvoice が履歴を撮るので、利用者は studio のプロンプト画面（または `POST /prompt/restore`）から戻せる。フックは読み上げのたびに `prompt.txt` を読むので、再起動は要らない。
+   pairvoice が履歴を撮るので、利用者は studio のプロンプト画面（または `POST /api/prompt/restore`）から戻せる。フックは読み上げのたびに `prompt.txt` を読むので、再起動は要らない。
 
 ## 読み辞書を直す
 
 pairvoice が合成の直前に `dict.tsv` で表記を読みに置き換える（要約の評価には効かない）。書き込みは全置換なので、取り直した辞書に足してから `PUT` する。
 
 ```bash
-curl -sf http://127.0.0.1:17495/dict |
+curl -sf http://127.0.0.1:17495/api/dict |
   jq '.rows += [{from: "README", to: "リードミー", memo: ""}]' |
-  curl -sf -X PUT http://127.0.0.1:17495/dict -H 'Content-Type: application/json' -d @-
+  curl -sf -X PUT http://127.0.0.1:17495/api/dict -H 'Content-Type: application/json' -d @-
 ```
 
-`from` が同じ行が既にあれば、足さずにその行を書き換える。置き換えは上の行から順に部分一致で当てるので、長い表記を先に置き、短すぎる表記は避ける（「通り」は「予定通り」まで化ける）。結果は `POST http://127.0.0.1:17495/dict/test`（`{text, rows}`）で確かめられる。
+`from` が同じ行が既にあれば、足さずにその行を書き換える。置き換えは上の行から順に部分一致で当てるので、長い表記を先に置き、短すぎる表記は避ける（「通り」は「予定通り」まで化ける）。結果は `POST http://127.0.0.1:17495/api/dict/test`（`{text, rows}`）で確かめられる。
 
 ## モデルを比べる
 

@@ -31,7 +31,8 @@ def build(*, probe=None, llm=None, tts=None, mute_config=None, data_root=None):
         tts_backend=tts or FakeTTS(),
         mute=MuteController(config.mute, probe or FakeProbe()),
     )
-    return engine, TestClient(create_app(engine), base_url="http://127.0.0.1:17495")
+    # API はすべて /api の下にあるので、テストの道筋は /api を省いて書く
+    return engine, TestClient(create_app(engine), base_url="http://127.0.0.1:17495/api")
 
 
 def test_llm_returns_text():
@@ -564,7 +565,7 @@ def test_speak_reports_broken_styles_file():
 def test_openapi_documents_version_and_every_field():
     _, client = build()
 
-    spec = client.get("/openapi.json").json()
+    spec = client.get("http://127.0.0.1:17495/openapi.json").json()
 
     assert spec["info"]["version"] == version("pairvoice")
     # 説明の無い項目を作らない（/docs が API の説明の正本）。FastAPI 自身の検証エラーの形は除く
@@ -576,7 +577,7 @@ def test_openapi_documents_version_and_every_field():
         if not field.get("description")
     ]
     assert undocumented == []
-    assert {"404", "500", "503"} <= spec["paths"]["/speak"]["post"]["responses"].keys()
+    assert {"404", "500", "503"} <= spec["paths"]["/api/speak"]["post"]["responses"].keys()
 
 
 def test_restart_answers_before_asking_launchd(monkeypatch):
@@ -614,8 +615,8 @@ def test_studio_open_opens_the_page_this_server_serves(monkeypatch):
 
     response = client.post("/studio/open")
 
-    assert response.json() == {"url": "http://127.0.0.1:17495/studio/"}
-    assert opened == [["open", "http://127.0.0.1:17495/studio/"]]
+    assert response.json() == {"url": "http://127.0.0.1:17495/"}
+    assert opened == [["open", "http://127.0.0.1:17495/"]]
 
 
 def test_eval_summarizes_given_cases_with_given_prompt(tmp_path):

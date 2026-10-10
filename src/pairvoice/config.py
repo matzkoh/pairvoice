@@ -130,6 +130,10 @@ class EvalConfig:
     style: str = "any"
 
 
+# 常駐サーバーの API はすべてこの下にある。根は studio の画面が使う
+API_PREFIX = "/api"
+
+
 @dataclass(frozen=True)
 class Config:
     port: int = 17495

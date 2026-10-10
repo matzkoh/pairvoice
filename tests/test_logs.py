@@ -20,10 +20,10 @@ def access(path, status):
 
 def test_health_access_filter_drops_only_successful_health():
     health_filter = logs.HealthAccessFilter()
-    assert health_filter.filter(access("/health", 200)) is False
+    assert health_filter.filter(access("/api/health", 200)) is False
     # 失敗した /health と、ほかの経路は残す
-    assert health_filter.filter(access("/health", 500)) is True
-    assert health_filter.filter(access("/speak", 200)) is True
+    assert health_filter.filter(access("/api/health", 500)) is True
+    assert health_filter.filter(access("/api/speak", 200)) is True
 
 
 def test_terminal_config_keeps_uvicorn_handlers_and_quiets_health():
@@ -55,15 +55,15 @@ def test_file_config_writes_uvicorn_access_and_our_warnings_to_one_file(tmp_path
     applied()
     logging.getLogger("uvicorn.error").info("Started server process")
     access_log = logging.getLogger("uvicorn.access")
-    access_log.info('%s - "%s %s HTTP/%s" %d', "127.0.0.1:5000", "POST", "/speak", "1.1", 200)
-    access_log.info('%s - "%s %s HTTP/%s" %d', "127.0.0.1:5000", "GET", "/health", "1.1", 200)
+    access_log.info('%s - "%s %s HTTP/%s" %d', "127.0.0.1:5000", "POST", "/api/speak", "1.1", 200)
+    access_log.info('%s - "%s %s HTTP/%s" %d', "127.0.0.1:5000", "GET", "/api/health", "1.1", 200)
     logging.getLogger("pairvoice.lifecycle").warning("maintain に失敗しました")
     logging.getLogger("pairvoice.player").info("止めました（stop）: x.wav")
     logging.getLogger("httpx").info("ほかのライブラリの INFO")
 
     text = (tmp_path / "pairvoice.log").read_text(encoding="utf-8")
     assert "Started server process" in text
-    assert '"POST /speak HTTP/1.1" 200' in text
+    assert '"POST /api/speak HTTP/1.1" 200' in text
     assert "/health" not in text
     assert "maintain に失敗しました" in text
     assert "止めました（stop）" in text

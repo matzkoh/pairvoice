@@ -6,7 +6,7 @@ import { ConfirmButton } from '@/components/ConfirmButton'
 import { Badge } from '@/components/ui/badge'
 import { Button } from '@/components/ui/button'
 import { Input } from '@/components/ui/input'
-import { apiSend, toErrorMessage } from '@/lib/api'
+import { apiSend, apiUrl, toErrorMessage } from '@/lib/api'
 import { isImeConfirm } from '@/lib/hotkeys'
 
 import type { ProfileItem } from '../../../../shared/api-types'
@@ -128,7 +128,7 @@ export function ProfileCard({ item, isActive, onPlay, onStatus, onDeleted }: Pro
             variant="outline"
             size="xs"
             aria-label={`${item.name} の参照音声を再生`}
-            onClick={() => onPlay(`${path}/audio`)}
+            onClick={() => onPlay(apiUrl(`${path}/audio`))}
           >
             <Play />
             再生

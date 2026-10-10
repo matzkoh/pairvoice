@@ -71,7 +71,7 @@ def test_parse_duration_rejects_invalid(text):
 def test_mute_posts_minutes(calls, config_path):
     assert cli.main(["--config", config_path, "mute", "30m"]) == 0
 
-    assert calls[0]["url"] == "http://127.0.0.1:17495/mute"
+    assert calls[0]["url"] == "http://127.0.0.1:17495/api/mute"
     assert calls[0]["method"] == "POST"
     assert calls[0]["body"] == {"minutes": 30}
 
@@ -79,20 +79,20 @@ def test_mute_posts_minutes(calls, config_path):
 def test_unmute_posts_without_body(calls, config_path):
     assert cli.main(["--config", config_path, "unmute"]) == 0
 
-    assert calls[0]["url"] == "http://127.0.0.1:17495/unmute"
+    assert calls[0]["url"] == "http://127.0.0.1:17495/api/unmute"
     assert calls[0]["body"] == {}
 
 
 def test_stop_posts(calls, config_path):
     assert cli.main(["--config", config_path, "stop"]) == 0
 
-    assert calls[0]["url"] == "http://127.0.0.1:17495/stop"
+    assert calls[0]["url"] == "http://127.0.0.1:17495/api/stop"
 
 
 def test_warmup_posts(calls, config_path):
     assert cli.main(["--config", config_path, "warmup"]) == 0
 
-    assert calls[0]["url"] == "http://127.0.0.1:17495/warmup"
+    assert calls[0]["url"] == "http://127.0.0.1:17495/api/warmup"
     # 初回はダウンロードを含むので、既定の 30 秒で打ち切らない
     assert calls[0]["timeout"] == cli.WARMUP_TIMEOUT_SECONDS
 
@@ -100,7 +100,7 @@ def test_warmup_posts(calls, config_path):
 def test_status_gets_health(calls, config_path):
     assert cli.main(["--config", config_path, "status"]) == 0
 
-    assert calls[0]["url"] == "http://127.0.0.1:17495/health"
+    assert calls[0]["url"] == "http://127.0.0.1:17495/api/health"
     assert calls[0]["method"] == "GET"
 
 
@@ -121,7 +121,7 @@ def test_say_bypasses_mute(calls, config_path, monkeypatch):
     monkeypatch.setattr(client.request, "urlopen", fake_urlopen)
 
     assert cli.main(["--config", config_path, "say", "テスト"]) == 0
-    assert calls[0]["url"] == "http://127.0.0.1:17495/speak"
+    assert calls[0]["url"] == "http://127.0.0.1:17495/api/speak"
     # 鳴らすのは常駐サーバー
     assert calls[0]["body"] == {"text": "テスト", "bypass_mute": True}
 
@@ -257,7 +257,7 @@ def test_studio_subcommand_opens_the_page_the_server_serves(monkeypatch, config_
     )
 
     assert cli.main(["--config", str(config_path), "studio"]) == 0
-    assert opened == [["open", "http://127.0.0.1:17495/studio/"]]
+    assert opened == [["open", "http://127.0.0.1:17495/"]]
 
 
 def test_studio_subcommand_reports_a_stopped_server(monkeypatch, capsys, config_path):

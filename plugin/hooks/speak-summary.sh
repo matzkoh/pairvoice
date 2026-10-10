@@ -17,9 +17,9 @@ set -u
 TMP_ROOT="${TMPDIR:-/tmp}"
 STATE_DIR="${CLAUDE_SPEAK_STATE_DIR:-${TMP_ROOT%/}/claude-speak-state}"
 LOG_FILE="${CLAUDE_SPEAK_LOG_FILE:-$HOME/Library/Logs/speak-summary.log}"
-PAIRVOICE_BASE="http://127.0.0.1:17495"
-LLM_URL="$PAIRVOICE_BASE/llm"
-SPEAK_URL="$PAIRVOICE_BASE/speak"
+PAIRVOICE_API="http://127.0.0.1:17495/api"
+LLM_URL="$PAIRVOICE_API/llm"
+SPEAK_URL="$PAIRVOICE_API/speak"
 # 実行時に読み書きするデータの置き場所。studio も同じディレクトリを見る。
 # git 作業ツリーに置くと、ブランチを切り替えたときに読み上げの挙動が変わってしまう。
 DATA_DIR="${PAIRVOICE_DATA_ROOT:-$HOME/Library/Application Support/pairvoice}"
@@ -121,7 +121,7 @@ has_speakable_content() {
 # /health はキューを通らないので、その間も答える
 unanswered_reason() {
   local states
-  states=$(curl -s --max-time 3 "$PAIRVOICE_BASE/health" 2>/dev/null \
+  states=$(curl -s --max-time 3 "$PAIRVOICE_API/health" 2>/dev/null \
     | jq -r '"\(.llm.state) \(.tts.state)"' 2>/dev/null)
   if [ -z "$states" ]; then
     echo "server down"

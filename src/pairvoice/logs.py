@@ -13,11 +13,14 @@ import logging
 import logging.handlers
 from pathlib import Path
 
+from .config import API_PREFIX
+
 _LOG_DIR = Path.home() / "Library" / "Logs"
 LOG_PATH = _LOG_DIR / "pairvoice.log"
 STDERR_LOG_PATH = _LOG_DIR / "pairvoice.stderr.log"
 MAX_BYTES = 10 * 1024 * 1024
 BACKUP_COUNT = 3
+_HEALTH_PATH = f"{API_PREFIX}/health"
 
 
 class HealthAccessFilter(logging.Filter):
@@ -27,7 +30,7 @@ class HealthAccessFilter(logging.Filter):
         args = record.args
         if isinstance(args, tuple) and len(args) == 5:
             _client, _method, path, _version, status = args
-            return not (path == "/health" and isinstance(status, int) and status < 400)
+            return not (path == _HEALTH_PATH and isinstance(status, int) and status < 400)
         return True
 
 

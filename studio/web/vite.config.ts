@@ -15,22 +15,16 @@ const DEV_PORT = 17493
 // 番号だけでなく待ち受けるアドレスもそちらに揃える。
 const DEV_HOST = '127.0.0.1'
 const PAIRVOICE_ORIGIN = 'http://127.0.0.1:17495'
-// 画面は pairvoice の /studio/ の下に置く。API（/prompt や /profiles）と画面の道筋が
-// 同じ名前なので、根を分ける
-const BASE = '/studio/'
 
 // dev と preview に同じ proxy を渡す。片方だけ直すと、ビルド確認のときだけ
-// 挙動が違うという厄介な差が生まれる。/studio/ の外はすべて pairvoice の API
-const proxy = {
-  '^/(?!studio(/|$))': { target: PAIRVOICE_ORIGIN, changeOrigin: true },
-}
+// 挙動が違うという厄介な差が生まれる
+const proxy = { '/api': { target: PAIRVOICE_ORIGIN, changeOrigin: true } }
 
 export default defineConfig({
   // root の既定は設定ファイルの場所ではなく process.cwd()。scripts は studio/ から
   // `vite --config web/vite.config.ts` を呼ぶので、明示しないと root が studio/ になり
   // index.html を studio/ に探しにいき、outDir も studio/dist に解決される。
   root: import.meta.dirname,
-  base: BASE,
   plugins: [react(), babel({ presets: [reactCompilerPreset()] }), tailwindcss()],
   resolve: { alias: { '@': path.resolve(import.meta.dirname, 'src') } },
   server: { host: DEV_HOST, port: DEV_PORT, strictPort: true, proxy },

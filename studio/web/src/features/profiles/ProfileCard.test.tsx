@@ -85,7 +85,7 @@ it('削除したら知らせる', async () => {
 it('参照音声を再生できる', () => {
   const { onPlay } = renderCard()
   fireEvent.click(screen.getByRole('button', { name: '別の声 の参照音声を再生' }))
-  expect(onPlay).toHaveBeenCalledWith('/profiles/p-b/audio')
+  expect(onPlay).toHaveBeenCalledWith('/api/profiles/p-b/audio')
 })
 
 it('名前をクリックすると変更でき、Enter で保存する', async () => {

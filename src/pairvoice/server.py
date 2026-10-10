@@ -10,7 +10,7 @@ from importlib.metadata import version
 from typing import Annotated, Literal
 from urllib.parse import urlsplit
 
-from fastapi import BackgroundTasks, Body, FastAPI, Request
+from fastapi import APIRouter, BackgroundTasks, Body, FastAPI, Request
 from fastapi.openapi.models import Example
 from fastapi.responses import JSONResponse
 from pydantic import BaseModel, ConfigDict, Field, StrictInt, model_validator
@@ -19,7 +19,7 @@ from . import evaluation, launchd
 from .api_errors import ErrorResponse, fail, install_error_handlers
 from .api_errors import error_doc as _error
 from .audio_state import AudioProbe
-from .config import Config
+from .config import API_PREFIX, Config
 from .corpus_api import corpus_router
 from .data_api import data_router
 from .lifecycle import Engine, ModelUnavailable, MutedError, Superseded, limit_mlx_cache
@@ -56,6 +56,7 @@ MAX_TOKENS_LIMIT = 1024
 API_DESCRIPTION = """\
 pairvoice の常駐サーバーの API。要約（mlx-lm）と音声合成（Irodori-TTS）を1本のキューで順に処理する。
 
+- API はすべて `/api` の下にある（根の `/` は studio の画面）。この説明と各項目の説明では `/api` を省いて書く
 - 待ち受けは 127.0.0.1 だけ。ブラウザで開いた外部のページ（Host か Origin がループバックでない要求）は 403 で断る
 - ミュート中は `/speak`（鳴らす）と `respect_mute` 付きの `/llm` を 409 `{"error": "muted", "reason": ...}` で断る。`/speak` は `bypass_mute` で鳴らせる。`/synthesize` は wav を作るだけなのでミュートを見ない
 - 声は `voice`（プロファイルの名前か ID）、話し方は `style`（studio の「スタイル」画面で作る名前）で選ぶ。選べる名前は `GET /profiles` と `GET /styles` で引ける
@@ -306,7 +307,9 @@ def create_app(engine: Engine) -> FastAPI:
             return JSONResponse(status_code=403, content={"error": "forbidden_origin"})
         return await call_next(request)
 
-    @app.post(
+    api = APIRouter()
+
+    @api.post(
         "/llm",
         summary="要約する",
         tags=["読み上げ"],
@@ -352,7 +355,7 @@ def create_app(engine: Engine) -> FastAPI:
             "duration": result.duration,
         }
 
-    @app.post(
+    @api.post(
         "/speak",
         summary="合成して鳴らす",
         tags=["読み上げ"],
@@ -371,7 +374,7 @@ def create_app(engine: Engine) -> FastAPI:
         )
         return speech_response(result)
 
-    @app.post(
+    @api.post(
         "/synthesize",
         summary="合成する（鳴らさない）",
         tags=["読み上げ"],
@@ -405,7 +408,7 @@ def create_app(engine: Engine) -> FastAPI:
         )
         return speech_response(result)
 
-    @app.post(
+    @api.post(
         "/speaker-vector",
         summary="話者ベクトルを測る（studio 用）",
         tags=["声"],
@@ -414,26 +417,26 @@ def create_app(engine: Engine) -> FastAPI:
     async def speaker_vector(request: SpeakerVectorRequest):
         return {"vector": await engine.speaker_vector(request.audio)}
 
-    @app.get("/health", summary="状態", tags=["状態"])
+    @api.get("/health", summary="状態", tags=["状態"])
     async def health():
         """モデルの状態、使用中の声、ミュート、キューの混み具合。"""
         return engine.health()
 
-    @app.post("/warmup", status_code=202, summary="モデルを読み込む", tags=["状態"])
+    @api.post("/warmup", status_code=202, summary="モデルを読み込む", tags=["状態"])
     async def warmup():
         """要約と合成のモデルを読み込み、終わるまで待つ（初回はダウンロードも）。"""
         return await engine.warmup()
 
-    @app.get("/mute", summary="ミュートの状態", tags=["ミュート"])
+    @api.get("/mute", summary="ミュートの状態", tags=["ミュート"])
     async def mute_state():
         return engine.mute.state().describe()
 
-    @app.post("/stop", summary="読み上げを止める", tags=["読み上げ"])
+    @api.post("/stop", summary="読み上げを止める", tags=["読み上げ"])
     async def stop():
         """鳴っている読み上げと、順番待ちの読み上げをすべて捨てる。"""
         return {"stopped": engine.player.stop()}
 
-    @app.post(
+    @api.post(
         "/mute",
         summary="ミュートする",
         tags=["ミュート"],
@@ -446,27 +449,27 @@ def create_app(engine: Engine) -> FastAPI:
             return fail(400, "invalid_minutes", str(error))
         return state.describe()
 
-    @app.post("/unmute", summary="ミュートを解く", tags=["ミュート"])
+    @api.post("/unmute", summary="ミュートを解く", tags=["ミュート"])
     async def unmute():
         state = engine.mute.unmute()
         return {"active": state.active}
 
-    @app.post("/restart", status_code=202, summary="常駐サーバーを再起動する", tags=["運用"])
+    @api.post("/restart", status_code=202, summary="常駐サーバーを再起動する", tags=["運用"])
     async def restart(background: BackgroundTasks):
         """応答を返してから LaunchAgent に再起動させる。config.toml の変更を反映するのに使う。"""
         background.add_task(launchd.restart)
         return {"restarting": True}
 
-    @app.post("/shutdown", status_code=202, summary="常駐サーバーを終了する", tags=["運用"])
+    @api.post("/shutdown", status_code=202, summary="常駐サーバーを終了する", tags=["運用"])
     async def shutdown(background: BackgroundTasks):
         """応答を返してから終了する。メニューの「pairvoice を終了」と同じく、LaunchAgent は復活させない。"""
         # serve の signal ハンドラがメニューバーを片付けて終了コード 0 で降りる
         background.add_task(os.kill, os.getpid(), signal.SIGTERM)
         return {"stopping": True}
 
-    @app.post("/studio/open", summary="studio をブラウザで開く", tags=["運用"])
+    @api.post("/studio/open", summary="studio をブラウザで開く", tags=["運用"])
     def open_studio_page():
-        """studio の画面はこの常駐サーバーが `/studio/` で配っている。"""
+        """studio の画面はこの常駐サーバーが根（`/`）で配っている。"""
         return {"url": open_studio(f"http://127.0.0.1:{engine.config.port}")}
 
     def load_eval_inputs(request: EvalRequest) -> tuple[str, list[evaluation.Case]]:
@@ -479,7 +482,7 @@ def create_app(engine: Engine) -> FastAPI:
             cases += evaluation.load_review_cases(data_root)
         return system, cases
 
-    @app.post(
+    @api.post(
         "/eval",
         summary="要約プロンプトを評価する",
         tags=["運用"],
@@ -498,8 +501,9 @@ def create_app(engine: Engine) -> FastAPI:
             results.append(evaluation.judge(case, output, engine.config.eval.style))
         return {"summary": evaluation.format_summary(results), "results": results}
 
-    app.include_router(data_router(data_root, engine.synthesize))
-    app.include_router(corpus_router(data_root))
-    # 画面の道筋は API のあとに足す（API と同じ名前を画面に取られない）
+    api.include_router(data_router(data_root, engine.synthesize))
+    api.include_router(corpus_router(data_root))
+    app.include_router(api, prefix=API_PREFIX)
+    # 画面はどの道筋にも index.html を返すので、API のあとに足す
     mount_studio(app)
     return app

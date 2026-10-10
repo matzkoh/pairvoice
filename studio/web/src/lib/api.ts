@@ -1,6 +1,11 @@
 // pairvoice の API を叩く唯一の入口。画面も同じ pairvoice が配るので、同じオリジンで呼ぶ。
 // 失敗を必ず例外にし、本文を捨てない。画面はこの例外を見てエラーを出す。
 
+// API は /api の下にあり、画面は根に置かれる。呼び出し側は /api を付けずに道筋を渡す
+export function apiUrl(path: string): string {
+  return `/api${path}`
+}
+
 export class ApiError extends Error {
   readonly status: number
   readonly body: string
@@ -70,7 +75,7 @@ export function speakErrorMessage(result: unknown): string {
 
 async function send(path: string, init?: RequestInit): Promise<Response> {
   try {
-    return await fetch(path, init)
+    return await fetch(apiUrl(path), init)
   } catch (cause) {
     // 呼び出し側が打ち切ったのは、サーバーに届かなかったのとは別の出来事
     if (init?.signal?.aborted) throw cause

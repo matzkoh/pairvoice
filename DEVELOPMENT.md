@@ -7,7 +7,7 @@
 | 部分 | 場所 | 中身 |
 | --- | --- | --- |
 | 常駐サーバー | `src/pairvoice/` | Python / FastAPI。`127.0.0.1:17495`。要約（mlx-lm）と音声合成（mlx-audio / Irodori-TTS）、プロンプト・辞書・スタイル・声の読み書き |
-| studio | `studio/` | React 19 + Vite の画面（`web/`）。ビルドした `web/dist` を常駐サーバーが `/studio/` で配り、画面は同じオリジンで API を呼ぶ |
+| studio | `studio/` | React 19 + Vite の画面（`web/`）。ビルドした `web/dist` を常駐サーバーが根（`/`）で配り、画面は同じオリジンで `/api` の下を呼ぶ |
 | 読み上げフック | `plugin/` | Claude Code プラグイン（フックと、要約を改善する `tune` スキル）。マーケットプレイスはリポジトリ直下の `.claude-plugin/marketplace.json` |
 | メニューバー | `src/pairvoice/menubar.py` | 常駐サーバーの子として起きる |
 
@@ -41,7 +41,7 @@ LaunchAgent は tool 側の Python を指すので、リポジトリのコード
 uv run pairvoice serve            # Ctrl-C でメニューバーごと降りる
 launchctl kickstart gui/$(id -u)/local.pairvoice   # 常駐に戻す
 
-# studio の画面を開発する（http://127.0.0.1:17493/studio/。API は :17495 へ proxy する）
+# studio の画面を開発する（http://127.0.0.1:17493/。`/api` は :17495 へ proxy する）
 (cd studio && pnpm dev)
 ```
 
@@ -96,7 +96,7 @@ pairvoice eval --model mlx-community/<モデル>       # 別のモデルをこ�
 
 ## 詳しい状態の見方
 
-`pairvoice status` は常駐サーバーの `/health` をそのまま表示する。
+`pairvoice status` は常駐サーバーの `/api/health` をそのまま表示する。
 
 | 項目 | 意味 |
 | --- | --- |
@@ -108,7 +108,7 @@ pairvoice eval --model mlx-community/<モデル>       # 別のモデルをこ�
 | `config_stale` | 設定ファイルが起動後に変わった（`pairvoice restart` が要る） |
 
 ログは、常駐サーバーが `~/Library/Logs/pairvoice.log`、フックが `~/Library/Logs/speak-summary.log`。
-常駐サーバーのログは `serve --log-file` が 10MB × 3世代で回しながら書き、成功した `/health` は書かない。
+常駐サーバーのログは `serve --log-file` が 10MB × 3世代で回しながら書き、成功した `/api/health` は書かない。
 メニューバーの警告は `~/Library/Logs/pairvoice-menubar.log` に同じく回しながら書く。
 logging を通らない出力（落ちたときの Traceback、ネイティブ層の出力）は、launchd が `~/Library/Logs/pairvoice.stderr.log` に書く。
 フックのログの `SKIP (...)` の理由は [plugin/README.md](plugin/README.md) にまとめてある。

@@ -5,6 +5,8 @@ from __future__ import annotations
 import json
 from urllib import request
 
+from .config import API_PREFIX
+
 
 def call(
     base: str,
@@ -14,10 +16,13 @@ def call(
     body: dict | None = None,
     timeout: float = 30,
 ) -> dict:
-    """pairvoice を叩いて応答を返す。timeout は呼ぶ側が選ぶ（menubar は短くする）。"""
+    """pairvoice の API（path は API_PREFIX を除いた道筋）を叩いて応答を返す。
+
+    timeout は呼ぶ側が選ぶ（menubar は短くする）。
+    """
     payload = json.dumps(body or {}).encode() if method == "POST" else None
     req = request.Request(
-        f"{base}{path}",
+        f"{base}{API_PREFIX}{path}",
         data=payload,
         method=method,
         headers={"Content-Type": "application/json"},

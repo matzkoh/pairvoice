@@ -94,7 +94,7 @@ studio の「プロファイル」画面で、
 - 手持ちの wav（数秒〜十数秒）を取り込む
 
 のどれかで作り、「使う」で切り替える。
-API なら、声の描写を渡すだけで1回でプロファイルにできる（`POST /profiles/design`）。
+API なら、声の描写を渡すだけで1回でプロファイルにできる（`POST /api/profiles/design`）。
 何も作らなくても、最初の読み上げのときに既定の声が1つ作られる。
 切り替えは次の読み上げから効き、再起動は要らない。
 
@@ -106,14 +106,14 @@ API なら、声の描写を渡すだけで1回でプロファイルにできる
 - **スタイル**（`style`）: studio の「スタイル」画面で作る、caption とサンプラーの組の名前。プロファイルの caption の代わりに使う。変えられるのは速さ・テンション・抑揚の傾きまでで、声質（ささやき声など）は参照音声で決まるので、声質を変えたいときは `voice` で別のプロファイルを選ぶ
 
 ```bash
-curl -s http://127.0.0.1:17495/speak -H 'Content-Type: application/json' \
+curl -s http://127.0.0.1:17495/api/speak -H 'Content-Type: application/json' \
   -d '{"text": "テスト", "voice": "落ち着いた声", "style": "ささやき"}'
 pairvoice say --voice 落ち着いた声 --style ささやき "テスト"
 ```
 
-`caption` はスタイルより優先する。鳴らさずに wav だけ作る `/synthesize` は、ミュートを見ず、`sampler` も受け付ける。
-選べる名前は `GET /profiles` と `GET /styles` で引ける。
-API のすべてのエンドポイントと項目は、常駐サーバーが動いている間 http://127.0.0.1:17495/docs で引ける。
+`caption` はスタイルより優先する。鳴らさずに wav だけ作る `/api/synthesize` は、ミュートを見ず、`sampler` も受け付ける。
+選べる名前は `GET /api/profiles` と `GET /api/styles` で引ける。
+API はすべて `/api` の下にあり、エンドポイントと項目は、常駐サーバーが動いている間 http://127.0.0.1:17495/docs で引ける。
 studio の画面でできること（プロンプト・辞書・スタイル・声の編集、読み上げのレビュー）と、CLI でできること（再起動・終了・studio の起動・`eval`）も、同じ API で行える。
 Claude Code の読み上げでは、環境変数 `PAIRVOICE_VOICE` と `PAIRVOICE_STYLE` で選ぶ（プロジェクトの `.claude/settings.json` の `env` に書けば、プロジェクトごとに変えられる）。
 
@@ -123,7 +123,7 @@ Claude Code の読み上げでは、環境変数 `PAIRVOICE_VOICE` と `PAIRVOIC
 識別子を読み上げてしまったり、知りたかった結果を落としたりすることがある。
 読み上げの履歴に印を付けておくと、それを材料に要約の指示と辞書を直せる。
 
-studio は常駐サーバーが `http://127.0.0.1:17495/studio/` で配っている。メニューの「studio を開く」か `pairvoice studio` で開く。
+studio は常駐サーバーが `http://127.0.0.1:17495/` で配っている。メニューの「studio を開く」か `pairvoice studio` で開く。
 
 | 画面 | できること |
 | --- | --- |

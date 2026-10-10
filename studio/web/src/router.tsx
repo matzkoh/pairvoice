@@ -39,8 +39,6 @@ export const routeTree = rootRoute.addChildren([
 
 export const router = createRouter({
   routeTree,
-  // pairvoice が画面を /studio/ の下に配る（vite.config.ts の base と同じ）
-  basepath: import.meta.env.BASE_URL,
   // ローディング表示は main.tsx の <Suspense fallback> ではなくここに渡さないと出ない。
   // Router は Matches の内側でマッチツリー全体を自前の
   // <Suspense fallback={pendingElement}> で包んでおり（@tanstack/react-router の
