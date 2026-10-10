@@ -28,7 +28,7 @@ from .api_errors import fail as _fail
 from .profiles import PROFILES_DIRNAME, ProfileStore, TakeRejected
 from .prompt import PromptStore
 from .styles import STYLES_FILENAME, StyleStore
-from .tts import SpeechResult, resolve_data_audio
+from .tts import ANCHOR_TEXT, SpeechResult, resolve_data_audio
 from .wav import concat_wavs, has_wav_header
 
 # 手持ちの wav を取り込むときの上限。数十秒の参照音声で足りる
@@ -53,13 +53,14 @@ REFERENCE_TEXTS = (
 
 
 class Synthesize(Protocol):
-    """Engine.synthesize のうち、声を伸ばすのに使う引数。"""
+    """Engine.synthesize のうち、声を作る・伸ばすのに使う引数。"""
 
     async def __call__(
         self,
         text: str,
         caption: str | None = None,
         sampler: dict | None = None,
+        design: bool = False,
         *,
         mix: list[tuple[str, float]] | None = None,
     ) -> SpeechResult: ...
@@ -72,7 +73,8 @@ _VERSION_ERRORS: dict[int | str, dict] = {
 _PROFILE_NOT_FOUND: dict[int | str, dict] = {404: _error("`profile_not_found`")}
 
 # 声の名前と caption は前後の空白を落として保存する。名前は空にさせない
-ProfileName = Annotated[str, StringConstraints(strip_whitespace=True, min_length=1)]
+NonBlank = Annotated[str, StringConstraints(strip_whitespace=True, min_length=1)]
+ProfileName = NonBlank
 Caption = Annotated[str, StringConstraints(strip_whitespace=True)]
 
 
@@ -180,6 +182,21 @@ class CreateProfileBody(BaseModel):
     rng_seed: int | None = Field(
         default=None,
         description="`extend` で読ませるときの乱数の種。省くと config.toml の値",
+    )
+
+
+class DesignProfileBody(BaseModel):
+    name: ProfileName = Field(description="声の名前")
+    caption: NonBlank = Field(
+        description="声と話し方の描写。声を作るのに使い、プロファイルにもそのまま入れる"
+    )
+    text: NonBlank = Field(
+        default=ANCHOR_TEXT, description="最初に caption だけで読ませる文。声はこの1本で決まる"
+    )
+    rng_seed: int | None = Field(
+        default=None,
+        description="乱数の種。同じ caption・文・種なら同じ声になる。"
+        "省くと config.toml の値（無ければ毎回違う声）",
     )
 
 
@@ -294,6 +311,33 @@ def data_router(data_root: Path, synthesize: Synthesize) -> APIRouter:
             takes.append(take.read_bytes())
         return takes
 
+    def master_sampler(rng_seed: int | None) -> dict[str, object]:
+        sampler: dict[str, object] = {"num_steps": MASTER_STEPS}
+        if rng_seed is not None:
+            sampler["rng_seed"] = rng_seed
+        return sampler
+
+    async def extend(relatives: list[str], caption: str, sampler: dict) -> list[bytes]:
+        """テイクを等分に混ぜた声で REFERENCE_TEXTS を読ませる。"""
+        mix = [(relative, 1.0) for relative in relatives]
+        made = []
+        # 1文ずつ頼む（まとめると Runner を塞ぎ、フックの読み上げが待たされる）
+        for text in REFERENCE_TEXTS:
+            result = await synthesize(text, caption=caption, sampler=sampler, mix=mix)
+            made.append(await asyncio.to_thread(result.path.read_bytes))
+        return made
+
+    async def save_design(name: str, caption: str, takes: list[bytes]) -> ProfileItem:
+        joined = concat_wavs(takes, TAKE_GAP_SECONDS)
+        created = await asyncio.to_thread(
+            profiles.create,
+            name=name,
+            caption=caption,
+            source="design",
+            write_reference=lambda path: path.write_bytes(joined),
+        )
+        return ProfileItem.model_validate(created.describe())
+
     @router.post(
         "/profiles",
         status_code=201,
@@ -310,23 +354,25 @@ def data_router(data_root: Path, synthesize: Synthesize) -> APIRouter:
         """使用中の声がまだ無ければ、作った声を使用中にする。"""
         takes = await asyncio.to_thread(read_takes, body.takes)
         if body.extend:
-            sampler: dict[str, object] = {"num_steps": MASTER_STEPS}
-            if body.rng_seed is not None:
-                sampler["rng_seed"] = body.rng_seed
-            mix = [(relative, 1.0) for relative in body.takes]
-            # 1文ずつ頼む（まとめると Runner を塞ぎ、フックの読み上げが待たされる）
-            for text in REFERENCE_TEXTS:
-                made = await synthesize(text, caption=body.caption, sampler=sampler, mix=mix)
-                takes.append(await asyncio.to_thread(made.path.read_bytes))
-        joined = concat_wavs(takes, TAKE_GAP_SECONDS)
-        created = await asyncio.to_thread(
-            profiles.create,
-            name=body.name,
-            caption=body.caption,
-            source="design",
-            write_reference=lambda path: path.write_bytes(joined),
-        )
-        return ProfileItem.model_validate(created.describe())
+            takes += await extend(body.takes, body.caption, master_sampler(body.rng_seed))
+        return await save_design(body.name, body.caption, takes)
+
+    @router.post(
+        "/profiles/design",
+        status_code=201,
+        response_model=ProfileItem,
+        summary="caption だけから声を作る",
+        tags=["声"],
+        responses={503: _error("`model_load_failed` など（モデルを使えない）")},
+    )
+    async def design_profile(body: DesignProfileBody):
+        """caption だけで `text` を読ませて声を決め、`extend` と同じく決まった文も読ませて
+        つなぐ。1分ほどかかる。使用中の声がまだ無ければ、作った声を使用中にする。"""
+        sampler = master_sampler(body.rng_seed)
+        first = await synthesize(body.text, caption=body.caption, sampler=sampler, design=True)
+        takes = [await asyncio.to_thread(first.path.read_bytes)]
+        takes += await extend([first.relative_path], body.caption, sampler)
+        return await save_design(body.name, body.caption, takes)
 
     @router.post(
         "/profiles/upload",

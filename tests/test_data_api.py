@@ -4,7 +4,7 @@ from pathlib import Path
 import pytest
 
 from pairvoice.data_api import MASTER_STEPS, REFERENCE_TEXTS, TAKE_GAP_SECONDS
-from pairvoice.tts import SpeechResult, resolve_data_audio
+from pairvoice.tts import ANCHOR_TEXT, SpeechResult, resolve_data_audio
 from tests.test_engine import FakeTTS
 from tests.test_server import build
 
@@ -346,3 +346,32 @@ def test_reference_texts_and_steps_match_studio():
     )
     assert all(f"'{text}'" in source for text in REFERENCE_TEXTS)
     assert f"export const MASTER_STEPS = {MASTER_STEPS}\n" in source
+
+
+def test_design_makes_voice_from_caption_then_extends_it(tmp_path):
+    tts = TakeWritingTTS(tmp_path)
+    _, client = build(tts=tts, data_root=tmp_path)
+    (tmp_path / "generations").mkdir()
+
+    response = client.post(
+        "/profiles/design", json={"name": "描いた声", "caption": " 低め ", "rng_seed": 3}
+    )
+
+    assert response.status_code == 201
+    assert response.json()["caption"] == "低め"
+    first, *rest = tts.calls
+    # 最初の1本は caption だけで作り、残りはその声で決まった文を読む
+    assert (first["text"], first["design"], "mix" in first) == (ANCHOR_TEXT, True, False)
+    assert [call["text"] for call in rest] == list(REFERENCE_TEXTS)
+    made = (tmp_path / "generations" / "made-1.wav").resolve()
+    assert all(call["mix"] == [(made, 1.0)] and not call["design"] for call in rest)
+    assert {
+        (c["caption"], c["sampler"]["rng_seed"], c["sampler"]["num_steps"]) for c in tts.calls
+    } == {("低め", 3, MASTER_STEPS)}
+    audio = client.get(f"/profiles/{response.json()['id']}/audio").content
+    gap = bytes(round(TAKE_GAP_SECONDS * 24000) * 2)
+    assert audio[44:] == gap.join(bytes([n, 0]) * 2 for n in (1, 2, 3, 4))
+
+
+def test_design_requires_caption(client):
+    assert client.post("/profiles/design", json={"name": "a", "caption": " "}).status_code == 422
