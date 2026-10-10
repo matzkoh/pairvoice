@@ -1,7 +1,11 @@
 import struct
+from pathlib import Path
 
 import pytest
 
+from pairvoice.data_api import MASTER_STEPS, REFERENCE_TEXTS, TAKE_GAP_SECONDS
+from pairvoice.tts import SpeechResult, resolve_data_audio
+from tests.test_engine import FakeTTS
 from tests.test_server import build
 
 
@@ -267,3 +271,78 @@ def test_activate_and_delete(client, tmp_path):
     assert listed["active"] == second
     assert [p["id"] for p in listed["items"]] == [second]
     assert client.put("/profiles/active", json={"id": first}).status_code == 404
+
+
+class TakeWritingTTS(FakeTTS):
+    """読んだ文ごとに中身の違う wav を書く（つないだ順を確かめるため）。"""
+
+    def __init__(self, data_root):
+        super().__init__()
+        self.data_root = data_root
+
+    def resolve_audio(self, relative):
+        return resolve_data_audio(self.data_root, relative)
+
+    def speak(self, text, *args, **kwargs):
+        super().speak(text, *args, **kwargs)
+        relative = f"generations/made-{len(self.calls)}.wav"
+        path = self.data_root / relative
+        path.write_bytes(make_wav(bytes([len(self.calls), 0]) * 2))
+        return SpeechResult(path=path, relative_path=relative, duration=0.1, peak_memory_gb=None)
+
+
+def test_create_with_extend_reads_reference_texts_in_take_voice(tmp_path):
+    tts = TakeWritingTTS(tmp_path)
+    _, client = build(tts=tts, data_root=tmp_path)
+    (tmp_path / "generations").mkdir()
+    (tmp_path / "generations" / "take.wav").write_bytes(make_wav(b"\x09\x00" * 2))
+
+    response = client.post(
+        "/profiles",
+        json={
+            "name": "伸ばした声",
+            "caption": "低め",
+            "takes": ["generations/take.wav"],
+            "extend": True,
+            "rng_seed": 7,
+        },
+    )
+
+    assert response.status_code == 201
+    # 1文ずつ、テイクの声と同じ caption・種で、丁寧な段数で読む
+    assert [call["text"] for call in tts.calls] == list(REFERENCE_TEXTS)
+    assert {
+        (call["caption"], call["sampler"]["rng_seed"], call["sampler"]["num_steps"])
+        for call in tts.calls
+    } == {("低め", 7, MASTER_STEPS)}
+    take = (tmp_path / "generations" / "take.wav").resolve()
+    assert all(call["mix"] == [(take, 1.0)] for call in tts.calls)
+    audio = client.get(f"/profiles/{response.json()['id']}/audio").content
+    gap = bytes(round(TAKE_GAP_SECONDS * 24000) * 2)
+    made = [bytes([n, 0]) * 2 for n in (1, 2, 3)]
+    assert audio[44:] == gap.join([b"\x09\x00" * 2, *made])
+
+
+def test_create_with_extend_rejects_other_profiles_before_synthesizing(tmp_path):
+    tts = TakeWritingTTS(tmp_path)
+    _, client = build(tts=tts, data_root=tmp_path)
+    reference = upload(client).json()["id"]
+
+    response = client.post(
+        "/profiles",
+        json={"name": "x", "takes": [f"profiles/{reference}/reference.wav"], "extend": True},
+    )
+
+    assert response.status_code == 400
+    assert response.json()["error"] == "invalid_take"
+    assert tts.calls == []
+
+
+def test_reference_texts_and_steps_match_studio():
+    # studio は進み具合を出すため、同じ文を自分で1本ずつ合成している。文がずれると、
+    # 同じ声から作っても API と studio で参照音声が変わる
+    source = (Path(__file__).parents[1] / "studio/web/src/features/profiles/mixSynth.ts").read_text(
+        encoding="utf-8"
+    )
+    assert all(f"'{text}'" in source for text in REFERENCE_TEXTS)
+    assert f"export const MASTER_STEPS = {MASTER_STEPS}\n" in source

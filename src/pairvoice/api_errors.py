@@ -11,7 +11,7 @@ from fastapi.responses import JSONResponse
 from pydantic import BaseModel, Field
 
 from .history import InvalidVersion, VersionNotFound
-from .profiles import ProfileInUse, ProfileNotFound
+from .profiles import ProfileInUse, ProfileNotFound, TakeRejected
 from .studio_process import NodeNotFound
 from .styles import StyleInvalid, StyleNotFound, StyleRejected
 from .tts import AudioNotFound
@@ -44,6 +44,7 @@ _ERRORS: dict[type[Exception], tuple[int, str, bool]] = {
     InvalidVersion: (400, "invalid_version", False),
     VersionNotFound: (404, "version_not_found", False),
     WavFormatError: (400, "invalid_take", True),
+    TakeRejected: (400, "invalid_take", True),
     NodeNotFound: (503, "node_not_found", True),
 }
 

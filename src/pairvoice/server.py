@@ -519,5 +519,5 @@ def create_app(engine: Engine) -> FastAPI:
             results.append(evaluation.judge(case, output, engine.config.eval.style))
         return {"summary": evaluation.format_summary(results), "results": results}
 
-    app.include_router(data_router(data_root))
+    app.include_router(data_router(data_root, engine.synthesize))
     return app

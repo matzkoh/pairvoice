@@ -9,7 +9,7 @@ from __future__ import annotations
 import asyncio
 import dataclasses
 from pathlib import Path
-from typing import Annotated, Literal
+from typing import Annotated, Literal, Protocol
 
 from fastapi import APIRouter, Query, Request
 from fastapi.responses import FileResponse
@@ -25,10 +25,10 @@ from pydantic import (
 from . import reading
 from .api_errors import error_doc as _error
 from .api_errors import fail as _fail
-from .profiles import PROFILES_DIRNAME, ProfileStore
+from .profiles import PROFILES_DIRNAME, ProfileStore, TakeRejected
 from .prompt import PromptStore
 from .styles import STYLES_FILENAME, StyleStore
-from .tts import resolve_data_audio
+from .tts import SpeechResult, resolve_data_audio
 from .wav import concat_wavs, has_wav_header
 
 # 手持ちの wav を取り込むときの上限。数十秒の参照音声で足りる
@@ -36,6 +36,33 @@ UPLOAD_MAX_BYTES = 50 * 1024 * 1024
 # テイクをつなぐときの数の上限と、間に挟む無音
 MAX_TAKES = 8
 TAKE_GAP_SECONDS = 0.3
+# 伸ばすときの合成の段数（モデル既定は 40）。参照音声は一度しか作らないので丁寧に作る。
+# studio の MASTER_STEPS と同じ値にしておく
+MASTER_STEPS = 80
+# 伸ばすときにテイクの声で読ませる文。Irodori-TTS は同じ話者の短い発話を合わせて 30 秒ほどの
+# 参照音声を勧めるので、テイクにこの3つ（各 6〜7 秒）を足してつなぐ。studio の
+# REFERENCE_TEXTS（web/src/features/profiles/mixSynth.ts）と同じ文にしておく
+# - 読み上げるのはエージェントの作業の要約なので、落ち着いた説明調を軸にし、問いかけと
+#   軽い相づちで抑揚に幅を持たせる。参照音声の話し方は複製した声に移るので、強い感情は入れない
+# - 拗音（しゅ・ちょ・じゅ）、促音、撥音、長音、濁音・半濁音、カタカナ語と数を一通り含める
+REFERENCE_TEXTS = (
+    "ビルドとテストはすべて通りました。変更は三つのファイルにまとまっていて、再起動も済んでいます。",
+    "ひとつ確認させてください。この設定は、来週のアップデートまでに切り替えておけば間に合いますか？",
+    "ちょっと待ってくださいね。原因はわかったので、じゅうぶん直せそうです。順番に片づけましょう。",
+)
+
+
+class Synthesize(Protocol):
+    """Engine.synthesize のうち、声を伸ばすのに使う引数。"""
+
+    async def __call__(
+        self,
+        text: str,
+        caption: str | None = None,
+        sampler: dict | None = None,
+        *,
+        mix: list[tuple[str, float]] | None = None,
+    ) -> SpeechResult: ...
 
 
 _VERSION_ERRORS: dict[int | str, dict] = {
@@ -144,6 +171,16 @@ class CreateProfileBody(BaseModel):
         description="`/synthesize` で作った wav（データの置き場所からの相対パス）。"
         "短い無音を挟んで1本の参照音声につなぐ",
     )
+    extend: bool = Field(
+        default=False,
+        description="テイクの声で決まった文（3つ、計 20 秒ほど）も読ませ、テイクの後ろにつなぐ。"
+        "短いテイク1本からでも安定した声になる。テイクが複数なら等分に混ぜた声で読む。"
+        "合成するので数十秒かかる",
+    )
+    rng_seed: int | None = Field(
+        default=None,
+        description="`extend` で読ませるときの乱数の種。省くと config.toml の値",
+    )
 
 
 class ActiveBody(BaseModel):
@@ -163,7 +200,7 @@ class PatchProfileBody(BaseModel):
         return self
 
 
-def data_router(data_root: Path) -> APIRouter:
+def data_router(data_root: Path, synthesize: Synthesize) -> APIRouter:
     router = APIRouter()
     prompt = PromptStore(data_root)
     dict_path = data_root / reading.DICT_FILENAME
@@ -246,6 +283,17 @@ def data_router(data_root: Path) -> APIRouter:
             }
         )
 
+    def read_takes(relatives: list[str]) -> list[bytes]:
+        profiles_dir = profiles.root.resolve()
+        takes = []
+        for relative in relatives:
+            take = resolve_data_audio(data_root, relative)
+            # 他の声の参照音声を取り込み元にさせない
+            if take.is_relative_to(profiles_dir):
+                raise TakeRejected(relative)
+            takes.append(take.read_bytes())
+        return takes
+
     @router.post(
         "/profiles",
         status_code=201,
@@ -255,20 +303,24 @@ def data_router(data_root: Path) -> APIRouter:
         responses={
             400: _error("`invalid_take`（声の参照音声を指している・形式が揃わない）"),
             404: _error("`audio_not_found`"),
+            503: _error("`model_load_failed`（`extend` の合成でモデルを読み込めない）"),
         },
     )
-    def create_profile(body: CreateProfileBody):
+    async def create_profile(body: CreateProfileBody):
         """使用中の声がまだ無ければ、作った声を使用中にする。"""
-        profiles_dir = profiles.root.resolve()
-        takes = []
-        for relative in body.takes:
-            take = resolve_data_audio(data_root, relative)
-            # 他の声の参照音声を取り込み元にさせない
-            if take.is_relative_to(profiles_dir):
-                return _fail(400, "invalid_take", relative)
-            takes.append(take.read_bytes())
+        takes = await asyncio.to_thread(read_takes, body.takes)
+        if body.extend:
+            sampler: dict[str, object] = {"num_steps": MASTER_STEPS}
+            if body.rng_seed is not None:
+                sampler["rng_seed"] = body.rng_seed
+            mix = [(relative, 1.0) for relative in body.takes]
+            # 1文ずつ頼む（まとめると Runner を塞ぎ、フックの読み上げが待たされる）
+            for text in REFERENCE_TEXTS:
+                made = await synthesize(text, caption=body.caption, sampler=sampler, mix=mix)
+                takes.append(await asyncio.to_thread(made.path.read_bytes))
         joined = concat_wavs(takes, TAKE_GAP_SECONDS)
-        created = profiles.create(
+        created = await asyncio.to_thread(
+            profiles.create,
             name=body.name,
             caption=body.caption,
             source="design",

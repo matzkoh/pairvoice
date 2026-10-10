@@ -64,6 +64,10 @@ class ProfileInUse(Exception):
     """使用中のプロファイルは消せない。消すと次の読み上げで既定の声が黙って作り直される。"""
 
 
+class TakeRejected(ValueError):
+    """他の声の参照音声はテイクにできない。"""
+
+
 class ProfileStore:
     def __init__(self, root: Path) -> None:
         self.root = root
