@@ -20,6 +20,7 @@ from .api_errors import ErrorResponse, fail, install_error_handlers
 from .api_errors import error_doc as _error
 from .audio_state import AudioProbe
 from .config import Config
+from .corpus_api import corpus_router
 from .data_api import data_router
 from .lifecycle import Engine, ModelUnavailable, MutedError, Superseded, limit_mlx_cache
 from .llm import MlxLmBackend
@@ -521,4 +522,5 @@ def create_app(engine: Engine) -> FastAPI:
         return {"summary": evaluation.format_summary(results), "results": results}
 
     app.include_router(data_router(data_root, engine.synthesize))
+    app.include_router(corpus_router(data_root))
     return app

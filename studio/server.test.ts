@@ -1,19 +1,13 @@
 import assert from 'node:assert/strict'
 import fs from 'node:fs'
-import { mkdtemp, readdir, readFile, rename, rm } from 'node:fs/promises'
+import { rename, rm } from 'node:fs/promises'
 import http from 'node:http'
 import net from 'node:net'
-import os from 'node:os'
 import path from 'node:path'
 import { test } from 'node:test'
 
 import type { StudioHealth } from './shared/api-types.ts'
 
-// データの置き場所はリポジトリ外にあるのが正しいので一時ディレクトリに向ける。
-// studio 自身の成果物（history/ など）もこの下に入るので、テストが
-// リポジトリを汚さない。
-const tmpRoot = await mkdtemp(path.join(os.tmpdir(), 'studio-test-'))
-process.env.PAIRVOICE_DATA_ROOT = tmpRoot
 // 疎通不可なポートに固定し、pairvoice未起動時の挙動を毎回再現する
 process.env.PAIRVOICE_URL = 'http://127.0.0.1:1'
 
@@ -161,362 +155,7 @@ test('壊れた URL は 400 で断り、サーバーを落とさない', async (
   }
 })
 
-import { writeFile } from 'node:fs/promises'
-
-test('GET /api/corpus merges reviews and reverses to newest-first', async () => {
-  const { CORPUS_FILE, REVIEWS_FILE } = await import('./server.ts')
-  await writeFile(
-    CORPUS_FILE,
-    [
-      JSON.stringify({
-        ts: '2026-01-01 00:00:00',
-        message_id: 'm1',
-        input: 'in1',
-        summary: 'out1',
-        audio_path: '',
-      }),
-      JSON.stringify({
-        ts: '2026-01-01 00:01:00',
-        message_id: 'm2',
-        input: 'in2',
-        summary: 'out2',
-        audio_path: 'generations/x.wav',
-      }),
-    ].join('\n') + '\n',
-    'utf8',
-  )
-  await writeFile(
-    REVIEWS_FILE,
-    JSON.stringify({
-      ts: '2026-01-01 00:02:00',
-      message_id: 'm2',
-      verdict: 'bad',
-      ideal: 'こう言ってほしかった',
-    }) + '\n',
-    'utf8',
-  )
-
-  const server = await startServer(0)
-  const port = portOf(server)
-  const res = await fetch(`http://127.0.0.1:${port}/api/corpus`)
-  const body = await readJson(res)
-  assert.equal(body.total, 2)
-  assert.equal(body.items[0].message_id, 'm2') // 新しい順
-  assert.equal(body.items[0].verdict, 'bad')
-  assert.equal(body.items[0].ideal, 'こう言ってほしかった')
-  assert.equal(body.items[1].verdict, null)
-  await new Promise((resolve) => server.close(resolve))
-})
-
-test('POST /api/reviews with verdict "none" resets a review to unreviewed in /api/corpus', async () => {
-  const { CORPUS_FILE, REVIEWS_FILE } = await import('./server.ts')
-  await writeFile(
-    CORPUS_FILE,
-    JSON.stringify({
-      ts: '2026-01-01 00:00:00',
-      message_id: 'mnone',
-      input: 'in',
-      summary: 'out',
-      audio_path: '',
-    }) + '\n',
-    'utf8',
-  )
-  await writeFile(
-    REVIEWS_FILE,
-    JSON.stringify({
-      ts: '2026-01-01 00:01:00',
-      message_id: 'mnone',
-      verdict: 'bad',
-      ideal: '理想',
-    }) + '\n',
-    'utf8',
-  )
-
-  const server = await startServer(0)
-  const port = portOf(server)
-
-  const noneRes = await fetch(`http://127.0.0.1:${port}/api/reviews`, {
-    method: 'POST',
-    headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify({ message_id: 'mnone', verdict: 'none' }),
-  })
-  assert.equal(noneRes.status, 200)
-
-  const corpusRes = await fetch(`http://127.0.0.1:${port}/api/corpus`)
-  const body = await readJson(corpusRes)
-  const item = body.items.find((c: { message_id: string }) => c.message_id === 'mnone')
-  assert.equal(item.verdict, null)
-  assert.equal(item.ideal, null)
-
-  const raw = await (await import('node:fs/promises')).readFile(REVIEWS_FILE, 'utf8')
-  const lines = raw.trim().split('\n')
-  assert.equal(lines.length, 2) // 追記専用: 元のbadレコードは残り、noneが追記される
-  assert.ok(JSON.parse(lines[1]!).verdict === 'none') // 直前に2行あることを確かめている
-
-  await new Promise((resolve) => server.close(resolve))
-})
-
-test('POST /api/reviews appends a record and rejects invalid verdict', async () => {
-  const { REVIEWS_FILE } = await import('./server.ts')
-  const server = await startServer(0)
-  const port = portOf(server)
-
-  const bad = await fetch(`http://127.0.0.1:${port}/api/reviews`, {
-    method: 'POST',
-    headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify({ message_id: 'm3', verdict: 'maybe' }),
-  })
-  assert.equal(bad.status, 400)
-
-  const ok = await fetch(`http://127.0.0.1:${port}/api/reviews`, {
-    method: 'POST',
-    headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify({ message_id: 'm3', verdict: 'good' }),
-  })
-  assert.equal(ok.status, 200)
-
-  const raw = await (await import('node:fs/promises')).readFile(REVIEWS_FILE, 'utf8')
-  assert.ok(raw.includes('"message_id":"m3"'))
-  await new Promise((resolve) => server.close(resolve))
-})
-
-test('POST /api/archives appends a record, rejects invalid body, and GET /api/corpus reflects it', async () => {
-  const { CORPUS_FILE, ARCHIVES_FILE } = await import('./server.ts')
-  await writeFile(
-    CORPUS_FILE,
-    JSON.stringify({ ts: 't', message_id: 'arc1', input: 'in', summary: 'out', audio_path: '' }) +
-      '\n',
-    'utf8',
-  )
-
-  const server = await startServer(0)
-  const port = portOf(server)
-
-  const bad = await fetch(`http://127.0.0.1:${port}/api/archives`, {
-    method: 'POST',
-    headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify({ message_id: '', archived: true }),
-  })
-  assert.equal(bad.status, 400)
-
-  const bad2 = await fetch(`http://127.0.0.1:${port}/api/archives`, {
-    method: 'POST',
-    headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify({ message_id: 'arc1', archived: 'yes' }),
-  })
-  assert.equal(bad2.status, 400)
-
-  const ok = await fetch(`http://127.0.0.1:${port}/api/archives`, {
-    method: 'POST',
-    headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify({ message_id: 'arc1', archived: true }),
-  })
-  assert.equal(ok.status, 200)
-
-  let corpus = await readJson(await fetch(`http://127.0.0.1:${port}/api/corpus`))
-  assert.equal(
-    corpus.items.find((c: { message_id: string }) => c.message_id === 'arc1').archived,
-    true,
-  )
-
-  // 解除も追記で表現できる
-  await fetch(`http://127.0.0.1:${port}/api/archives`, {
-    method: 'POST',
-    headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify({ message_id: 'arc1', archived: false }),
-  })
-  corpus = await readJson(await fetch(`http://127.0.0.1:${port}/api/corpus`))
-  assert.equal(
-    corpus.items.find((c: { message_id: string }) => c.message_id === 'arc1').archived,
-    false,
-  )
-
-  const raw = await (await import('node:fs/promises')).readFile(ARCHIVES_FILE, 'utf8')
-  assert.equal(raw.trim().split('\n').length, 2) // 追記専用
-
-  await new Promise((resolve) => server.close(resolve))
-})
-
-test('POST /api/archives/bulk archives multiple message_ids in one request, rejects empty array', async () => {
-  const { CORPUS_FILE } = await import('./server.ts')
-  await writeFile(
-    CORPUS_FILE,
-    [
-      JSON.stringify({ ts: 't', message_id: 'bulk1', input: 'in', summary: 'out', audio_path: '' }),
-      JSON.stringify({ ts: 't', message_id: 'bulk2', input: 'in', summary: 'out', audio_path: '' }),
-    ].join('\n') + '\n',
-    'utf8',
-  )
-
-  const server = await startServer(0)
-  const port = portOf(server)
-
-  const bad = await fetch(`http://127.0.0.1:${port}/api/archives/bulk`, {
-    method: 'POST',
-    headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify({ message_ids: [], archived: true }),
-  })
-  assert.equal(bad.status, 400)
-
-  const ok = await fetch(`http://127.0.0.1:${port}/api/archives/bulk`, {
-    method: 'POST',
-    headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify({ message_ids: ['bulk1', 'bulk2'], archived: true }),
-  })
-  assert.equal(ok.status, 200)
-
-  const corpus = await readJson(await fetch(`http://127.0.0.1:${port}/api/corpus`))
-  assert.equal(
-    corpus.items.find((c: { message_id: string }) => c.message_id === 'bulk1').archived,
-    true,
-  )
-  assert.equal(
-    corpus.items.find((c: { message_id: string }) => c.message_id === 'bulk2').archived,
-    true,
-  )
-
-  await new Promise((resolve) => server.close(resolve))
-})
-
-import { mkdir } from 'node:fs/promises'
-
-test('GET /api/audio/:message_id streams the wav file', async () => {
-  const { CORPUS_FILE, DATA_ROOT } = await import('./server.ts')
-  await mkdir(path.join(DATA_ROOT, 'generations'), { recursive: true })
-  await writeFile(path.join(DATA_ROOT, 'generations', 'a1.wav'), Buffer.from('RIFF-fake-wav-body'))
-  await writeFile(
-    CORPUS_FILE,
-    JSON.stringify({
-      ts: 't',
-      message_id: 'aud1',
-      input: 'in',
-      summary: 'out',
-      audio_path: 'generations/a1.wav',
-    }) + '\n',
-    'utf8',
-  )
-
-  const server = await startServer(0)
-  const port = portOf(server)
-  try {
-    const res = await fetch(`http://127.0.0.1:${port}/api/audio/aud1`)
-    assert.equal(res.status, 200)
-    assert.equal(res.headers.get('content-type'), 'audio/wav')
-    assert.equal(Buffer.from(await res.arrayBuffer()).toString(), 'RIFF-fake-wav-body')
-  } finally {
-    await new Promise((resolve) => server.close(resolve))
-  }
-})
-
-test('GET /api/audio/:message_id rejects path traversal in audio_path', async () => {
-  const { CORPUS_FILE } = await import('./server.ts')
-  await writeFile(
-    CORPUS_FILE,
-    JSON.stringify({
-      ts: 't',
-      message_id: 'evil1',
-      input: 'in',
-      summary: 'out',
-      audio_path: '../../../etc/passwd',
-    }) + '\n',
-    'utf8',
-  )
-
-  const server = await startServer(0)
-  const port = portOf(server)
-  const res = await fetch(`http://127.0.0.1:${port}/api/audio/evil1`)
-  // パス脱出の検証は resolveAudioPath 側に移った（見つからない場合と区別しない）ため 404 になる。
-  assert.equal(res.status, 404)
-  await new Promise((resolve) => server.close(resolve))
-})
-
-test('GET /api/audio/:message_id returns 404 for unknown message_id', async () => {
-  const server = await startServer(0)
-  const port = portOf(server)
-  const res = await fetch(`http://127.0.0.1:${port}/api/audio/does-not-exist`)
-  assert.equal(res.status, 404)
-  await new Promise((resolve) => server.close(resolve))
-})
-
-test('makeAudioPathResolver は置き場所の下にある実ファイルだけを返し、無ければ null を返す', async () => {
-  const { makeAudioPathResolver } = await import('./server.ts')
-  const root = await mkdtemp(path.join(os.tmpdir(), 'pairvoice-test-'))
-  await mkdir(path.join(root, 'generations'), { recursive: true })
-  await writeFile(path.join(root, 'generations', 'a.wav'), 'a')
-
-  const resolve = makeAudioPathResolver(root)
-
-  assert.equal(await resolve('generations/a.wav'), path.join(root, 'generations', 'a.wav'))
-  assert.equal(await resolve('generations/missing.wav'), null)
-})
-
-test('makeAudioPathResolver はディレクトリの外を指すパスを拒否する', async () => {
-  const { makeAudioPathResolver } = await import('./server.ts')
-  const root = await mkdtemp(path.join(os.tmpdir(), 'pairvoice-test-'))
-  const resolve = makeAudioPathResolver(root)
-
-  assert.equal(await resolve('../../etc/passwd'), null)
-  assert.equal(await resolve('/etc/passwd'), null)
-})
-
-import { execFileSync } from 'node:child_process'
-
-// 辞書の置換は Python（常駐サーバーが合成の直前にかける）と JS（studio のプレビュー）に
-// 二重実装されている。食い違うと studio のプレビューが嘘をつくので、記号・CRLF を含む辞書で
-// 両者が同じ結果になるかを見る
-test('Python の apply_dict と JS の applyDict は記号や CRLF を含む辞書で一致する', async () => {
-  const { applyDict } = await import('./server.ts')
-  const dir = await mkdtemp(path.join(os.tmpdir(), 'pairvoice-dict-'))
-  try {
-    const lf = 'A\tエー\tメモ\n&\tアンド\n#\tシャープ\nq\t"引用"\nb\t\\&\nエー\tえー\n'
-    // Windows のエディタで保存されると CRLF になる。行末の \r を置換先に混ぜない
-    const crlf = lf.replaceAll('\n', '\r\n')
-    const input = 'A & # q b A'
-    for (const tsv of [lf, crlf]) {
-      const dictPath = path.join(dir, 'dict.tsv')
-      await writeFile(dictPath, tsv)
-      // 合成は load_dict で読んで置き換え、studio のプレビューは GET /dict（read_rows）の行で置き換える
-      const out = execFileSync(
-        'uv',
-        [
-          'run',
-          '--quiet',
-          'python',
-          '-c',
-          'import json, sys; from pathlib import Path; ' +
-            'from pairvoice.reading import apply_dict, load_dict, read_rows; ' +
-            'p = Path(sys.argv[1]); ' +
-            'json.dump({"applied": apply_dict(sys.argv[2], load_dict(p)), "rows": read_rows(p)}, sys.stdout)',
-          dictPath,
-          input,
-        ],
-        { cwd: path.join(import.meta.dirname, '..'), encoding: 'utf8' },
-      )
-      const { applied, rows } = JSON.parse(out)
-      assert.equal(applied, applyDict(input, rows), tsv === crlf ? 'CRLF' : 'LF')
-    }
-  } finally {
-    await rm(dir, { recursive: true, force: true })
-  }
-})
-test('POST /api/dict/test applies rows in order without saving', async () => {
-  const server = await startServer(0)
-  const port = portOf(server)
-  const res = await fetch(`http://127.0.0.1:${port}/api/dict/test`, {
-    method: 'POST',
-    headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify({
-      text: 'PR #4688 が通った',
-      rows: [
-        { from: '通っ', to: 'とおっ', memo: '' },
-        { from: '#', to: '', memo: '' },
-      ],
-    }),
-  })
-  const body = await readJson(res)
-  assert.equal(body.result, 'PR 4688 がとおった')
-  await new Promise((resolve) => server.close(resolve))
-})
+import { mkdir, writeFile } from 'node:fs/promises'
 
 // DIST_DIR（studio/web/dist）は pnpm build が作る成果物で、開発中や CI の
 // 実行順序次第では存在したりしなかったりする。以下のテストは「無い状態」
@@ -553,10 +192,8 @@ test('dist が無いときは 500 ではなく手順を書いた案内を返す'
   })
 })
 
-test('データの置き場所はコードの外にあり、静的ファイルはコードの置き場所から配信する', async () => {
-  const { DATA_ROOT, DIST_DIR } = await import('./server.ts')
-  // テストは PAIRVOICE_DATA_ROOT を一時ディレクトリに向けてあるので、コードの置き場所の外になる
-  assert.ok(!DATA_ROOT.startsWith(path.dirname(STUDIO_DIR) + path.sep))
+test('静的ファイルはコードの置き場所から配信する', async () => {
+  const { DIST_DIR } = await import('./server.ts')
   assert.equal(DIST_DIR, path.join(STUDIO_DIR, 'web', 'dist'))
 
   await withDist(
@@ -610,127 +247,6 @@ test('SPA なので実ファイルに無いパスも index.html を返す（/rev
       }
     },
   )
-})
-
-test('parseHistoryTs / parseCorpusTs read the two timestamp formats on the same number line', async () => {
-  const { parseHistoryTs, parseCorpusTs } = await import('./server.ts')
-  // snapshotPrompt が付ける名前（ISO の : と . を - に潰したもの）を時刻に戻せること
-  assert.equal(
-    parseHistoryTs('prompt-2026-07-28T05-03-13-373Z.txt'),
-    Date.parse('2026-07-28T05:03:13.373Z'),
-  )
-  assert.equal(parseHistoryTs('prompt-latest.txt'), null)
-  assert.equal(parseHistoryTs('notes.txt'), null)
-  // corpus.jsonl の ts はオフセットの無いローカル時刻。同じ壁時計を UTC として
-  // 読んでしまうと時差の分だけ境界がずれ、差し替え直後の数件を取り違える。
-  assert.equal(parseCorpusTs('2026-07-28 14:01:59'), new Date(2026, 6, 28, 14, 1, 59).getTime())
-  assert.equal(parseCorpusTs('t'), null)
-  assert.equal(parseCorpusTs(undefined), null)
-})
-
-// 境界を指定の時刻に固定する。名前が一番新しいスナップショットの中身を prompt.txt と
-// 一致させることで、そのスナップショットが「いまの版が動き出した時刻」になる。
-// .test-state/history には他のテストが作ったスナップショットが残るので、未来の日付で
-// 置いて最新の位置を握らないと結果が実行順に左右される。
-// 残すと /api/prompt/history のテストを壊すので必ず消す。
-async function withPromptSnapshotAt(name: string, fn: () => Promise<void>) {
-  const { HISTORY_DIR, PROMPT_FILE } = await import('./server.ts')
-  const file = path.join(HISTORY_DIR, name)
-  await fs.promises.mkdir(HISTORY_DIR, { recursive: true })
-  await writeFile(file, 'boundary', 'utf8')
-  await writeFile(PROMPT_FILE, 'boundary', 'utf8')
-  try {
-    await fn()
-  } finally {
-    await rm(file, { force: true })
-  }
-}
-
-test('現行プロンプトの開始時刻は中身で決まる（同じ内容の保存し直しでは動かない）', async () => {
-  const { HISTORY_DIR, PROMPT_FILE, currentPromptSince } = await import('./server.ts')
-  await fs.promises.mkdir(HISTORY_DIR, { recursive: true })
-  const before = new Set(await readdir(HISTORY_DIR))
-  // pairvoice（prompt.py）と同じく、prompt.txt を書いた後に書いた内容で版を撮る
-  let at = Date.parse('2999-01-01T00:00:00.000Z')
-  const save = async (text: string) => {
-    await writeFile(PROMPT_FILE, text, 'utf8')
-    const name = `prompt-${new Date(at).toISOString().replace(/[:.]/g, '-')}.txt`
-    await writeFile(path.join(HISTORY_DIR, name), text, 'utf8')
-    at += 1000
-  }
-  try {
-    await save('ひとつ前の版')
-    await save('いまの版')
-    const since = await currentPromptSince()
-    assert.ok(since !== null, '境界が引けていない')
-
-    // 中身を変えずに保存し直しても境界は動かない。動くと、何も変えていないのに
-    // 直前までの読み上げが全部「旧プロンプト」に落ちてレビュー待ちが消える。
-    await save('いまの版')
-    assert.equal(await currentPromptSince(), since)
-
-    // 中身が変われば境界は進む
-    await save('次の版')
-    assert.ok((await currentPromptSince())! > since) // 直前に書いた版が履歴の最新
-
-    // API を通さず prompt.txt を書き換えると、いつからの版か分からないので境界を引かない
-    await writeFile(PROMPT_FILE, '履歴に無い版', 'utf8')
-    assert.equal(await currentPromptSince(), null)
-  } finally {
-    // 未来の日付の版を残すと、ほかのテストの境界を握ってしまう
-    for (const name of await readdir(HISTORY_DIR)) {
-      if (!before.has(name)) await rm(path.join(HISTORY_DIR, name), { force: true })
-    }
-  }
-})
-test('GET /api/corpus marks readings made before the current prompt as stale', async () => {
-  const { CORPUS_FILE } = await import('./server.ts')
-  await writeFile(
-    CORPUS_FILE,
-    [
-      JSON.stringify({
-        ts: '2099-01-01 00:00:00',
-        message_id: 'old',
-        input: 'in',
-        summary: 'out',
-        audio_path: '',
-      }),
-      JSON.stringify({
-        ts: '2099-12-31 00:00:00',
-        message_id: 'new',
-        input: 'in',
-        summary: 'out',
-        audio_path: '',
-      }),
-      // 時刻が読めない行は「古い」と言い切る根拠が無いので古い側に落とさない
-      JSON.stringify({
-        ts: 'こわれた',
-        message_id: 'unknown',
-        input: 'in',
-        summary: 'out',
-        audio_path: '',
-      }),
-    ].join('\n') + '\n',
-    'utf8',
-  )
-
-  await withPromptSnapshotAt('prompt-2099-06-01T00-00-00-000Z.txt', async () => {
-    const server = await startServer(0)
-    const port = portOf(server)
-    try {
-      const body = await readJson(await fetch(`http://127.0.0.1:${port}/api/corpus`))
-      const byId = new Map<string, any>(
-        body.items.map((i: { message_id: string }) => [i.message_id, i]),
-      )
-      // 3件とも直前に書いた corpus.jsonl にあるので必ず引ける
-      assert.equal(byId.get('old')!.stale, true)
-      assert.equal(byId.get('new')!.stale, false)
-      assert.equal(byId.get('unknown')!.stale, false)
-      assert.equal(body.prompt_changed_at, '2099-06-01T00:00:00.000Z')
-    } finally {
-      await new Promise((resolve) => server.close(resolve))
-    }
-  })
 })
 
 // 応答を丸ごと決められる偽 pairvoice。startFakePairvoice は固定の {ok:true} を返すため、
@@ -985,32 +501,6 @@ test('POST /api/speak は sampler が無いときペイロードにキーを含�
   }
 })
 
-test('GET /api/audio-file は生成された wav を返し、データの置き場所の外を拒否する', async () => {
-  const server = await startServer(0)
-  try {
-    const port = portOf(server)
-    const dir = path.join(tmpRoot, 'generations')
-    await mkdir(dir, { recursive: true })
-    await writeFile(path.join(dir, 'preview.wav'), 'RIFFfake', 'utf8')
-
-    const ok = await fetch(`http://127.0.0.1:${port}/api/audio-file?path=generations/preview.wav`)
-    assert.equal(ok.status, 200)
-    assert.equal(ok.headers.get('content-type'), 'audio/wav')
-    assert.equal(await ok.text(), 'RIFFfake')
-
-    const escaped = await fetch(`http://127.0.0.1:${port}/api/audio-file?path=../../etc/passwd`)
-    assert.equal(escaped.status, 404)
-
-    const missing = await fetch(`http://127.0.0.1:${port}/api/audio-file?path=generations/nope.wav`)
-    assert.equal(missing.status, 404)
-
-    const empty = await fetch(`http://127.0.0.1:${port}/api/audio-file`)
-    assert.equal(empty.status, 400)
-  } finally {
-    await new Promise((resolve) => server.close(resolve))
-  }
-})
-
 // node の fetch は Host を上書きできないので、http.request で指定して叩く
 function requestWithHeaders(
   port: number,
@@ -1055,7 +545,7 @@ test('Host が 127.0.0.1 / localhost / [::1] なら、ポートが何でも通�
       'LOCALHOST',
       '[::1]:8080',
     ]) {
-      assert.equal(await requestWithHeaders(port, '/api/corpus', { host }), 200, host)
+      assert.equal(await requestWithHeaders(port, '/api/health', { host }), 200, host)
     }
   } finally {
     server.close()
@@ -1075,7 +565,7 @@ test('外部のページの Origin は、Host がローカルでも 403 にす�
       )
     }
     assert.equal(
-      await requestWithHeaders(port, '/api/corpus', { host, origin: 'http://localhost:17493' }),
+      await requestWithHeaders(port, '/api/health', { host, origin: 'http://localhost:17493' }),
       200,
     )
   } finally {
@@ -1101,50 +591,17 @@ function rawRequest(base: string, pathname: string, method: string, body: string
   })
 }
 
-test('開けない音声は 500 で返し、プロセスを落とさない', async () => {
-  const dir = path.join(tmpRoot, 'generations')
-  await mkdir(dir, { recursive: true })
-  const locked = path.join(dir, 'locked.wav')
-  await writeFile(locked, 'RIFFfake')
-  await fs.promises.chmod(locked, 0o000)
-  try {
-    await withServer(async (base) => {
-      const res = await fetch(`${base}/api/audio-file?path=generations/locked.wav`)
-      assert.equal(res.status, 500)
-      assert.equal((await fetch(`${base}/api/health`)).status, 200)
-    })
-  } finally {
-    await fs.promises.chmod(locked, 0o644)
-    await rm(locked, { force: true })
-  }
-})
-
 test('JSON として読めない本文やオブジェクトでない本文は 400 にする', async () => {
   await withServer(async (base) => {
     for (const body of ['{', 'null', '[]', '1', '"x"']) {
-      const res = await rawRequest(base, '/api/reviews', 'POST', body)
+      const res = await rawRequest(base, '/api/speak', 'POST', body)
       assert.equal(res.status, 400, body)
       assert.equal((await readJson(res)).error, 'invalid_json', body)
     }
-    for (const pathname of ['/api/reviews', '/api/archives', '/api/speak', '/api/mute']) {
+    for (const pathname of ['/api/speak', '/api/speaker-vector', '/api/mute']) {
       assert.equal((await rawRequest(base, pathname, 'POST', 'null')).status, 400, pathname)
     }
   })
-})
-
-test('JSONL の末尾が改行で終わっていなければ、新しい行を壊れた行から切り離す', async () => {
-  const { REVIEWS_FILE } = await import('./server.ts')
-  await writeFile(REVIEWS_FILE, '{"message_id":"cut","verd')
-  await withServer(async (base) => {
-    const res = await fetch(
-      `${base}/api/reviews`,
-      jsonInit('POST', { message_id: 'after-cut', verdict: 'good' }),
-    )
-    assert.equal(res.status, 200)
-  })
-  const lines = (await readFile(REVIEWS_FILE, 'utf8')).split('\n')
-  assert.equal(lines[0], '{"message_id":"cut","verd')
-  assert.equal(JSON.parse(lines[1]!).message_id, 'after-cut')
 })
 
 test('pairvoice に繋がらなければ /api/mute と /api/speak は 502 で申告する', async () => {
@@ -1198,80 +655,6 @@ test('/api/speak はクライアントが切ったら pairvoice への要求も�
   } finally {
     process.env.PAIRVOICE_URL = prevUrl
     await fake.close()
-  }
-})
-
-test('POST /api/reviews は message_id と ideal の型を確かめ、GET /api/corpus は負の offset/limit を丸める', async () => {
-  const { CORPUS_FILE } = await import('./server.ts')
-  await writeFile(
-    CORPUS_FILE,
-    ['c1', 'c2', 'c3']
-      .map((id) => JSON.stringify({ ts: 't', message_id: id, input: 'i', summary: 's' }))
-      .join('\n') + '\n',
-  )
-  await withServer(async (base) => {
-    for (const body of [
-      { message_id: 1, verdict: 'good' },
-      { message_id: ['x'], verdict: 'good' },
-      { message_id: 'm', verdict: 'bad', ideal: 5 },
-      { message_id: 'm', verdict: 'bad', ideal: { a: 1 } },
-    ]) {
-      const res = await fetch(`${base}/api/reviews`, jsonInit('POST', body))
-      assert.equal(res.status, 400, JSON.stringify(body))
-    }
-    const ids = async (query: string) =>
-      (await readJson(await fetch(`${base}/api/corpus?${query}`))).items.map(
-        (c: { message_id: string }) => c.message_id,
-      )
-    assert.deepEqual(await ids('offset=-1&limit=2'), ['c3', 'c2'])
-    assert.deepEqual(await ids('offset=0&limit=-1'), [])
-    assert.deepEqual(await ids('offset=1.5&limit=1'), ['c2'])
-  })
-})
-
-test('GET /api/audio-file は生成音声と参照音声だけを配り、symlink で外へ出させない', async () => {
-  const { DATA_ROOT } = await import('./server.ts')
-  const profiles = path.join(DATA_ROOT, 'profiles')
-  await mkdir(path.join(profiles, 'p-a'), { recursive: true })
-  await writeFile(path.join(profiles, 'p-a', 'reference.wav'), 'RIFF\0\0\0\0WAVE')
-  await writeFile(path.join(profiles, 'p-a', 'profile.json'), '{}')
-  const gen = path.join(DATA_ROOT, 'generations')
-  await mkdir(gen, { recursive: true })
-  const outside = await mkdtemp(path.join(os.tmpdir(), 'studio-outside-'))
-  await writeFile(path.join(outside, 'secret.wav'), 'secret')
-  const link = path.join(gen, 'link.wav')
-  await rm(link, { force: true })
-  await fs.promises.symlink(path.join(outside, 'secret.wav'), link)
-  const inner = path.join(gen, 'inner.wav')
-  await rm(inner, { force: true })
-  await fs.promises.symlink(path.join(DATA_ROOT, 'profiles', 'p-a', 'profile.json'), inner)
-  await writeFile(path.join(gen, 'note.txt'), 'note')
-  await mkdir(path.join(DATA_ROOT, 'custom-out'), { recursive: true })
-  await writeFile(path.join(DATA_ROOT, 'custom-out', 'take.wav'), 'RIFF')
-  try {
-    await withServer(async (base) => {
-      const get = (p: string) => fetch(`${base}/api/audio-file?path=${encodeURIComponent(p)}`)
-      assert.equal((await get('profiles/p-a/reference.wav')).status, 200)
-      // tts.output_dir の名前は設定しだい。データの置き場所の下の wav なら配る
-      assert.equal((await get('custom-out/take.wav')).status, 200)
-      for (const p of [
-        'generations/note.txt',
-        'profiles/p-a/profile.json',
-        'dict.tsv',
-        'reviews.jsonl',
-        'generations/link.wav',
-        'generations/inner.wav',
-      ]) {
-        const res = await get(p)
-        assert.equal(res.status, 404, p)
-        await res.arrayBuffer()
-      }
-    })
-  } finally {
-    await rm(link, { force: true })
-    await rm(inner, { force: true })
-    await rm(outside, { recursive: true, force: true })
-    await rm(profiles, { recursive: true, force: true })
   }
 })
 

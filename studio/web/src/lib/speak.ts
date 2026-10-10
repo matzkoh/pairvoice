@@ -20,7 +20,7 @@ export type SpeakBody = {
 }
 // 合成した音声（データの置き場所からの相対パス）を鳴らす URL
 export function audioFileUrl(relativePath: string) {
-  return `/api/audio-file?path=${encodeURIComponent(relativePath)}`
+  return `/api/audio?path=${encodeURIComponent(relativePath)}`
 }
 
 // 音が返らなかった場合は必ず例外にして、成功の形だけを返す。見分け方を呼び出し側に

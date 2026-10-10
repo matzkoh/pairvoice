@@ -96,14 +96,12 @@ def test_eval_command_reads_prompt_and_cases(tmp_path, monkeypatch, capsys):
     cases.write_text("id\tinput\nc1\tテストが通った\n", encoding="utf-8")
     seen = []
 
-    def fake_summarizer(base, max_tokens=None):
-        def summarize(system, prompt):
-            seen.append((system, prompt))
-            return "テストが全部通ったから次に進めるよ。"
+    def fake_run_on_daemon(base, system, cases, reviews):
+        seen.append((system, [(c.id, c.input) for c in cases], reviews))
+        summarize = lambda system, prompt: "テストが全部通ったから次に進めるよ。"  # noqa: E731
+        return evaluation.run_cases(cases, summarize, system, "casual")
 
-        return summarize
-
-    monkeypatch.setattr(evaluation, "daemon_summarizer", fake_summarizer)
+    monkeypatch.setattr(evaluation, "run_on_daemon", fake_run_on_daemon)
     out = tmp_path / "out.jsonl"
 
     code = main(
@@ -119,7 +117,8 @@ def test_eval_command_reads_prompt_and_cases(tmp_path, monkeypatch, capsys):
     )
 
     assert code == 0
-    assert seen == [("ルール", "テストが通った")]
+    # 要約と判定は常駐サーバーの /eval に任せる
+    assert seen == [("ルール", [("c1", "テストが通った")], False)]
     assert json.loads(out.read_text(encoding="utf-8"))["all_pass"] is True
     assert "ALL_PASS      : 100.0%  (1/1)" in capsys.readouterr().out
 
@@ -156,11 +155,7 @@ def test_eval_command_checks_out_before_summarizing(tmp_path, monkeypatch, capsy
     (tmp_path / "prompt.txt").write_text("ルール", encoding="utf-8")
     (tmp_path / "blocker").write_text("", encoding="utf-8")
     summarized = []
-
-    def fake_summarizer(base, max_tokens=None):
-        return lambda system, prompt: summarized.append(prompt) or "ok"
-
-    monkeypatch.setattr(evaluation, "daemon_summarizer", fake_summarizer)
+    monkeypatch.setattr(evaluation, "run_on_daemon", lambda *args: summarized.append(args) or [])
 
     code = main(
         [
@@ -195,13 +190,10 @@ def test_eval_command_leaves_no_out_file_when_the_run_fails(tmp_path, monkeypatc
     monkeypatch.setenv("PAIRVOICE_DATA_ROOT", str(tmp_path))
     (tmp_path / "prompt.txt").write_text("ルール", encoding="utf-8")
 
-    def fake_summarizer(base, max_tokens=None):
-        def summarize(system, prompt):
-            raise RuntimeError("down")
+    def fake_run_on_daemon(*args):
+        raise RuntimeError("down")
 
-        return summarize
-
-    monkeypatch.setattr(evaluation, "daemon_summarizer", fake_summarizer)
+    monkeypatch.setattr(evaluation, "run_on_daemon", fake_run_on_daemon)
     out = tmp_path / "results" / "out.jsonl"
 
     code = main(["--config", str(tmp_path / "missing.toml"), "eval", "--out", str(out)])

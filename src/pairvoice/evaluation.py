@@ -13,11 +13,13 @@ from collections.abc import Callable, Iterable
 from dataclasses import asdict, dataclass
 from pathlib import Path
 
-from . import checker
+from . import checker, corpus
 
 DEFAULT_CASES = Path(__file__).with_name("eval_cases.tsv")
 # ルールごとに表示する違反例の数
 EXAMPLES_PER_RULE = 3
+# /eval の応答を待つ上限。ケース数 × 要約の時間に、モデルの読み込みを足しても収まる長さ
+EVAL_TIMEOUT_SECONDS = 3600
 
 Summarize = Callable[[str, str], str]
 
@@ -44,45 +46,22 @@ def load_tsv_cases(path: Path) -> list[Case]:
     return cases
 
 
-def _read_jsonl(path: Path) -> list[dict]:
-    if not path.exists():
-        return []
-    records = []
-    # 追記の途中で切れた行はマルチバイトの途中で終わることがある。studio と同じく置換して
-    # 読み、その行は JSON として壊れているので下で落ちる
-    for line in path.read_text(encoding="utf-8", errors="replace").splitlines():
-        try:
-            record = json.loads(line)
-        except json.JSONDecodeError:
-            continue  # 書きかけの行。studio の読み方と揃える
-        if isinstance(record, dict):
-            records.append(record)
-    return records
-
-
 def load_review_cases(data_root: Path) -> list[Case]:
     """studio のレビュー（👍 / 👎）をケースにする。アーカイブしたものは除く。
 
     どのファイルも追記専用で後の行が新しいので、message_id ごとに最後の行を採る。
     """
-    reviews = {
-        r["message_id"]: r for r in _read_jsonl(data_root / "reviews.jsonl") if r.get("message_id")
-    }
-    archived: set[str] = set()
-    for a in _read_jsonl(data_root / "archives.jsonl"):
-        if not a.get("message_id"):
-            continue
-        if a.get("archived") is True:
-            archived.add(a["message_id"])
-        else:
-            archived.discard(a["message_id"])
-    corpus = {
-        c["message_id"]: c for c in _read_jsonl(data_root / "corpus.jsonl") if c.get("message_id")
+    reviews = corpus.latest_reviews(data_root)
+    archived = corpus.archived_ids(data_root)
+    entries = {
+        c["message_id"]: c
+        for c in corpus.read_jsonl(data_root / corpus.CORPUS_FILENAME)
+        if c.get("message_id")
     }
 
     cases = []
     for message_id, review in reviews.items():
-        entry = corpus.get(message_id)
+        entry = entries.get(message_id)
         if message_id in archived or entry is None:
             continue
         verdict = review.get("verdict")
@@ -144,29 +123,27 @@ def write_results(results: list[dict], path: Path) -> None:
     )
 
 
-def daemon_summarizer(base: str, max_tokens: int | None = None) -> Summarize:
-    """常駐サーバーで要約する。読み込み済みのモデルを使うので、メモリを余分に使わない。"""
+def run_on_daemon(base: str, system: str, cases: list[Case], reviews: bool) -> list[dict]:
+    """常駐サーバーの /eval で評価する。読み込み済みのモデルを使うので、メモリを余分に使わない。
+
+    reviews のケースは常駐サーバーがデータの置き場所から読む。
+    """
     from . import client
 
-    def summarize(system: str, prompt: str) -> str:
-        # 初回はモデルの読み込みを待つことがあるので、読み上げより長く待つ
-        result = client.call(
-            base,
-            "/llm",
-            body={
-                "system": system,
-                "prompt": prompt,
-                "max_tokens": max_tokens,
-                # 読み上げの要約に追い越されても1件も欠けさせない
-                "droppable": False,
-            },
-            timeout=300,
-        )
-        if "text" not in result:
-            raise RuntimeError(f"要約できませんでした: {result}")
-        return result["text"]
-
-    return summarize
+    result = client.call(
+        base,
+        "/eval",
+        body={
+            "prompt": system,
+            "cases": [{"id": case.id, "input": case.input} for case in cases],
+            "reviews": reviews,
+        },
+        # 全ケースを要約し終えてから返る。読み上げの要約と同じ列に並ぶので長めに待つ
+        timeout=EVAL_TIMEOUT_SECONDS,
+    )
+    if "results" not in result:
+        raise RuntimeError(f"評価できませんでした: {result}")
+    return result["results"]
 
 
 def local_summarizer(model: str, max_tokens: int) -> Summarize:

@@ -2,8 +2,6 @@ import http from 'node:http'
 
 import { notFound, sendJson } from './http.ts'
 import { createRouter } from './router.ts'
-import { registerCorpusRoutes } from './routes/corpus.ts'
-import { registerDictRoutes } from './routes/dict.ts'
 import { registerPairvoiceRoutes } from './routes/pairvoice.ts'
 import { serveStatic } from './static.ts'
 
@@ -28,8 +26,6 @@ function isLocalOrigin(origin: string | undefined) {
 
 export function createStudioServer() {
   const router = createRouter()
-  registerCorpusRoutes(router.addRoute)
-  registerDictRoutes(router.addRoute)
   registerPairvoiceRoutes(router.addRoute)
 
   async function handle(req: http.IncomingMessage, res: http.ServerResponse) {

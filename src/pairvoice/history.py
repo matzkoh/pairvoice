@@ -1,7 +1,7 @@
 """版の履歴（要約のプロンプトと、声の caption）。
 
-<dir>/<kind>-<ISO 時刻の : と . を - にしたもの>.txt に1版ずつ置く。studio（history.ts）は
-この名前の時刻から「いま動いている版がいつ動き出したか」を読むので、形を変えない。
+<dir>/<kind>-<ISO 時刻の : と . を - にしたもの>.txt に1版ずつ置く。名前の時刻から
+「いま動いている版がいつ動き出したか」を読む（PromptStore.current_since）。
 
 不変条件は「かつて動いていた版はすべて履歴にある」。そのため書いた"後"に、書いた内容
 そのもので撮る。書く"前"の版を残す作りだと、いま動いている版が常に履歴から漏れる。
@@ -27,10 +27,15 @@ class VersionNotFound(LookupError):
     """その名前の版が無い。"""
 
 
+def iso_millis(at: datetime) -> str:
+    """JavaScript の toISOString() と同じ、ミリ秒までの UTC（studio が Date で読む）。"""
+    utc = at.astimezone(UTC)
+    return utc.strftime("%Y-%m-%dT%H:%M:%S.") + f"{utc.microsecond // 1000:03d}Z"
+
+
 def snapshot(kind: str, directory: Path, content: str) -> None:
-    # JavaScript の toISOString() と同じミリ秒までの UTC
-    now = datetime.now(UTC)
-    stamp = now.strftime("%Y-%m-%dT%H-%M-%S-") + f"{now.microsecond // 1000:03d}Z"
+    # ファイル名に使えるよう、: と . を - に潰す
+    stamp = iso_millis(datetime.now(UTC)).replace(":", "-").replace(".", "-")
     atomic_write(directory / f"{kind}-{stamp}.txt", content)
 
 
@@ -45,6 +50,20 @@ def list_versions(kind: str, directory: Path) -> list[dict[str, str]]:
         (n for n in names if n.startswith(prefix) and n.endswith(".txt")), reverse=True
     )
     return [{"name": n, "ts": n[len(prefix) : -len(".txt")]} for n in versions]
+
+
+def version_time(kind: str, name: str) -> datetime | None:
+    """版の名前に付けた時刻。形の違う名前は None。"""
+    match = re.fullmatch(
+        rf"{kind}-(\d{{4}}-\d{{2}}-\d{{2}})T(\d{{2}})-(\d{{2}})-(\d{{2}})-(\d{{3}})Z\.txt", name
+    )
+    if match is None:
+        return None
+    day, hour, minute, second, milli = match.groups()
+    try:
+        return datetime.fromisoformat(f"{day}T{hour}:{minute}:{second}.{milli}+00:00")
+    except ValueError:
+        return None
 
 
 def read_version(kind: str, directory: Path, name: str) -> str:

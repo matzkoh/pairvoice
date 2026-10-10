@@ -25,7 +25,7 @@ class LLMConfig:
 
 
 def default_data_root() -> Path:
-    """データの置き場所。フック・studio と同じく PAIRVOICE_DATA_ROOT → 既定の場所の順で決める。"""
+    """データの置き場所。フックと同じく PAIRVOICE_DATA_ROOT → 既定の場所の順で決める。"""
     configured = os.environ.get("PAIRVOICE_DATA_ROOT")
     if configured:
         # 相対パスはいまの作業ディレクトリで絶対にする。launchd は / で起こすので、

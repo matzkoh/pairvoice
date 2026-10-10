@@ -77,13 +77,12 @@ async function send(path: string, init?: RequestInit): Promise<Response> {
 
 export type ApiOptions = {
   // 既定は false: 404 は「そのルートがまだ無い」＝サーバーが古い、として
-  // StaleServerError にする。音声ファイル不在（GET /api/audio/...）のように、
+  // StaleServerError にする。音声ファイル不在（GET /api/corpus/:id/audio）のように、
   // 404 が正当な業務上の答えになるエンドポイントだけ true にする。
   //
-  // 応答の本文からは区別できない — サーバーはルート未一致とこれらの業務上の 404 を
-  // 同じ { error: 'not_found' } で返す（server.ts の notFound() が唯一の出口）ため、
-  // 判定は応答ではなく「そのエンドポイントに 404 が起こり得ることを知っている」
-  // 呼び出し側に持たせる。
+  // 判定は応答の本文ではなく「そのエンドポイントに 404 が起こり得ることを知っている」
+  // 呼び出し側に持たせる。業務上の 404 は中継先の pairvoice が返すので、本文の形に
+  // 頼ると pairvoice のエラーの形を変えたときに「サーバーが古い」へ化ける。
   allowNotFound?: boolean
   // 画面を離れた・次へ進んだときに、待っている要求を打ち切る
   signal?: AbortSignal

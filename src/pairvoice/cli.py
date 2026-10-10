@@ -297,15 +297,15 @@ def _eval(config, base: str, args: argparse.Namespace) -> int:
         if args.out.is_dir() or not os.access(target, os.W_OK):
             print(f"書けません: {args.out}", file=sys.stderr)
             return 2
-    if args.reviews:
-        cases += evaluation.load_review_cases(data_root)
-
-    if args.model:
-        summarize = evaluation.local_summarizer(args.model, config.llm.max_tokens)
-    else:
-        summarize = evaluation.daemon_summarizer(base)
     try:
-        results = evaluation.run_cases(cases, summarize, system, config.eval.style)
+        if args.model:
+            # 別のモデルは常駐サーバーに載せられないので、このプロセスに読み込んで評価する
+            if args.reviews:
+                cases += evaluation.load_review_cases(data_root)
+            summarize = evaluation.local_summarizer(args.model, config.llm.max_tokens)
+            results = evaluation.run_cases(cases, summarize, system, config.eval.style)
+        else:
+            results = evaluation.run_on_daemon(base, system, cases, args.reviews)
     except error.HTTPError as failed:
         print(_http_error_message(failed), file=sys.stderr)
         return 1

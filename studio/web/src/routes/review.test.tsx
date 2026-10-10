@@ -161,7 +161,7 @@ it('Space で選択中の行を再生する', async () => {
   await press('j')
   await press(' ')
   const audio = document.querySelector('audio')!
-  expect(audio.src).toContain('/api/audio/a')
+  expect(audio.src).toContain('/api/corpus/a/audio')
 })
 
 it('e で選択中の行をアーカイブする', async () => {

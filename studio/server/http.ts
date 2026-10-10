@@ -1,6 +1,4 @@
-import fsp from 'node:fs/promises'
 import type http from 'node:http'
-import { pipeline } from 'node:stream/promises'
 
 // JSON から読んだ値を「キーを引ける形」に絞る。pairvoice の応答のように、形が
 // このリポジトリの外で決まるものを読むときに使う。
@@ -79,29 +77,6 @@ function readBodyBuffer(req: http.IncomingMessage, maxBytes: number) {
 
 async function readBody(req: http.IncomingMessage) {
   return (await readBodyBuffer(req, JSON_BODY_MAX_BYTES)).toString('utf8')
-}
-
-// 無い・ファイルでないなら 404。ファイルから音声を返す経路（コーパス・試聴）はすべてここを通る。
-// 開いてから応答を書き始める。stat と open の間に消される（maintain() の掃除やプロファイルの
-// 削除）・読めない場合に、200 を書いた後で ReadStream の 'error' が誰にも拾われず落ちるため
-export async function streamWav(res: http.ServerResponse, file: string) {
-  let handle
-  try {
-    handle = await fsp.open(file, 'r')
-  } catch (err) {
-    if (isRecord(err) && (err.code === 'ENOENT' || err.code === 'ENOTDIR')) return notFound(res)
-    return sendJson(res, 500, { error: 'audio_unreadable', message: String(err) })
-  }
-  const stat = await handle.stat().catch(() => null)
-  if (!stat?.isFile()) {
-    await handle.close()
-    return notFound(res)
-  }
-
-  res.writeHead(200, { 'Content-Type': 'audio/wav', 'Content-Length': stat.size })
-  // pipeline は失敗やクライアントの切断で両端を壊し、ファイルも閉じる。応答は書き始めて
-  // いるので、ここでの失敗は伝えようがなく、捨てる
-  await pipeline(handle.createReadStream(), res).catch(() => {})
 }
 
 // JSON.parse の戻りを返す。ボディの形は経路ごとに違い、各ハンドラが必要な

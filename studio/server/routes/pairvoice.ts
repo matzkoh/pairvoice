@@ -3,18 +3,9 @@ import { Readable } from 'node:stream'
 import { pipeline } from 'node:stream/promises'
 
 import type { PairvoiceHealth, StudioHealth } from '../../shared/api-types.ts'
-import {
-  badRequest,
-  isRecord,
-  notFound,
-  readJsonBody,
-  relayPairvoice,
-  sendJson,
-  streamWav,
-} from '../http.ts'
+import { badRequest, isRecord, readJsonBody, relayPairvoice, sendJson } from '../http.ts'
 import { pairvoiceBase } from '../paths.ts'
 import type { AddRoute } from '../router.ts'
-import { resolveAudioPath } from '../storage.ts'
 
 // pairvoice（profiles.py）のプロファイル ID と同じ形
 const PROFILE_ID_PATTERN = /^p-[0-9A-Za-z-]+$/
@@ -56,7 +47,7 @@ async function forwardToPairvoice(
           'Content-Length': response.headers.get('content-length')!,
         }),
       })
-      // 書き始めた後の失敗は伝えようがないので捨てる（streamWav と同じ）
+      // 書き始めた後の失敗は伝えようがないので捨てる
       await pipeline(Readable.fromWeb(response.body), res).catch(() => {})
       return
     }
@@ -84,8 +75,8 @@ function postJson(payload: unknown): RequestInit {
   }
 }
 
-// プロンプト・読み辞書・スタイル・声の読み書きは pairvoice の API が持つ（書くのは
-// pairvoice だけ）。パスから /api を外し、クエリも本文もそのまま中継する
+// データの置き場所の読み書きは pairvoice の API が持つ（studio はファイルに触らない）。
+// パスから /api を外し、クエリも本文もそのまま中継する
 const RELAYED_ROUTES = [
   ['GET', '/prompt'],
   ['PUT', '/prompt'],
@@ -93,6 +84,13 @@ const RELAYED_ROUTES = [
   ['POST', '/prompt/restore'],
   ['GET', '/dict'],
   ['PUT', '/dict'],
+  ['POST', '/dict/test'],
+  ['GET', '/corpus'],
+  ['GET', '/corpus/:id/audio'],
+  ['POST', '/reviews'],
+  ['POST', '/archives'],
+  ['POST', '/archives/bulk'],
+  ['GET', '/audio'],
   ['GET', '/styles'],
   ['PUT', '/styles'],
   ['GET', '/profiles'],
@@ -198,18 +196,6 @@ export function registerPairvoiceRoutes(addRoute: AddRoute) {
       return badRequest(res, 'audio (non-empty string) is required')
     }
     await forwardToPairvoice(res, '/speaker-vector', postJson({ audio: body.audio }))
-  })
-
-  // 試聴で生成された音声は corpus.jsonl に載らないので /api/audio/:message_id では
-  // 配信できない。相対パスの検証（配ってよい場所に絞る）は resolveAudioPath 側。
-  addRoute('GET', '/api/audio-file', async (req, res, ctx) => {
-    const relative = ctx.query.get('path')
-    if (!relative) return badRequest(res, 'path is required')
-
-    const resolved = await resolveAudioPath(relative)
-    if (!resolved) return notFound(res)
-
-    await streamWav(res, resolved)
   })
 
   addRoute('GET', '/api/health', async (req, res) => {

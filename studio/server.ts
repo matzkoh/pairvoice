@@ -7,9 +7,6 @@ import { DEFAULT_PORT } from './server/paths.ts'
 
 // テストが取り出す名前。定数は server/paths.ts が読み込み時に確定する
 export * from './server/paths.ts'
-export { currentPromptSince, parseCorpusTs, parseHistoryTs } from './server/history.ts'
-export { applyDict } from './server/routes/dict.ts'
-export { makeAudioPathResolver } from './server/storage.ts'
 
 export function startServer(port = DEFAULT_PORT) {
   const server = createStudioServer()

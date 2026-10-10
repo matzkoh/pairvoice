@@ -58,7 +58,7 @@ it('候補は参照音声を使わない design で作り、選んだ候補の�
     design: true,
   })
   // 最初に鳴らせるようになった候補はすぐ鳴らす
-  expect(onPlay).toHaveBeenCalledWith('/api/audio-file?path=generations%2Fcandidate.wav')
+  expect(onPlay).toHaveBeenCalledWith('/api/audio?path=generations%2Fcandidate.wav')
 
   // 名前の欄は、保存すると決めてから開く
   expect(screen.queryByRole('textbox', { name: '候補 #1 の名前' })).toBeNull()

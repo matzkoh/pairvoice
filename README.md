@@ -114,7 +114,7 @@ pairvoice say --voice 落ち着いた声 --style ささやき "テスト"
 `caption` はスタイルより優先する。鳴らさずに wav だけ作る `/synthesize` は、ミュートを見ず、`sampler` も受け付ける。
 選べる名前は `GET /profiles` と `GET /styles` で引ける。
 API のすべてのエンドポイントと項目は、常駐サーバーが動いている間 http://127.0.0.1:17495/docs で引ける。
-studio の画面でできること（プロンプト・辞書・スタイル・声の編集）と、CLI でできること（再起動・終了・studio の起動・`eval`）も、同じ API で行える。
+studio の画面でできること（プロンプト・辞書・スタイル・声の編集、読み上げのレビュー）と、CLI でできること（再起動・終了・studio の起動・`eval`）も、同じ API で行える。
 Claude Code の読み上げでは、環境変数 `PAIRVOICE_VOICE` と `PAIRVOICE_STYLE` で選ぶ（プロジェクトの `.claude/settings.json` の `env` に書けば、プロジェクトごとに変えられる）。
 
 ## 読み方を育てる

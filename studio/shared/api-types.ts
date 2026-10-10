@@ -79,7 +79,7 @@ export type DictResponse = { rows: DictRowData[] }
 // 動かす項目だけを持つ
 export type StyleData = { name: string; caption: string | null; sampler: SamplerOverrides }
 export type StylesResponse = { items: StyleData[] }
-// /api/dict/test のプレビュー結果。dict タブが試し打ちに使う（旧 app.js:1139 の data.result）。
+// /api/dict/test のプレビュー結果。dict タブが試し打ちに使う。
 export type DictTestResponse = { result: string }
 
 // prompt と caption の履歴は同じ形。ts は ISO 文字列のコロンとピリオドを

@@ -168,6 +168,22 @@ class DictBody(BaseModel):
     rows: list[DictRow] = Field(description="上から順に、字句どおりに置き換える")
 
 
+class PreviewRow(BaseModel):
+    model_config = ConfigDict(populate_by_name=True)
+
+    source: str = Field(alias="from", description="置換元。空の行は飛ばす")
+    target: str = Field(alias="to", description="置換先（読み）")
+
+
+class DictTestBody(BaseModel):
+    text: str = Field(description="試す文")
+    rows: list[PreviewRow] = Field(description="保存していない行でもよい")
+
+
+class DictTestResponse(BaseModel):
+    result: str = Field(description="置き換えた文")
+
+
 class StyleEntry(BaseModel):
     name: str = Field(description="`/speak` と `/synthesize` の `style` に渡す名前")
     caption: str | None = Field(
@@ -293,6 +309,12 @@ def data_router(data_root: Path, synthesize: Synthesize) -> APIRouter:
         """全行を置き換える。次の合成から効く。"""
         reading.write_rows(dict_path, [row.model_dump(by_alias=True) for row in body.rows])
         return Ok()
+
+    @router.post("/dict/test", summary="読み辞書を保存せずに試す", tags=["読み辞書"])
+    def test_dict(body: DictTestBody) -> DictTestResponse:
+        """合成の直前と同じ置き換えを、渡した行でかける。"""
+        rows = [(row.source, row.target) for row in body.rows if row.source]
+        return DictTestResponse(result=reading.apply_dict(body.text, rows))
 
     # ---- スタイル ----
 
