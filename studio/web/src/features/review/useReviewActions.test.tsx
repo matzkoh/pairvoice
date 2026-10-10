@@ -69,7 +69,7 @@ it('同じ判定をもう一度押すと取り消しになる', async () => {
   vi.mocked(apiSend).mockResolvedValue({ ok: true })
   const { current } = setup(item({ verdict: 'good' }))
   await act(async () => screen.getByRole('button', { name: 'good' }).click())
-  expect(apiSend).toHaveBeenCalledWith('/api/reviews', 'POST', {
+  expect(apiSend).toHaveBeenCalledWith('/reviews', 'POST', {
     message_id: 'm1',
     verdict: 'none',
     ideal: '',
@@ -81,7 +81,7 @@ it('投票を投稿し、キャッシュの行を書き換える', async () => {
   vi.mocked(apiSend).mockResolvedValue({ ok: true })
   const { current } = setup(item({}))
   await act(async () => screen.getByRole('button', { name: 'good' }).click())
-  expect(apiSend).toHaveBeenCalledWith('/api/reviews', 'POST', {
+  expect(apiSend).toHaveBeenCalledWith('/reviews', 'POST', {
     message_id: 'm1',
     verdict: 'good',
     ideal: '',
@@ -93,7 +93,7 @@ it('👎 は既存の理想の出力を持ち越す', async () => {
   vi.mocked(apiSend).mockResolvedValue({ ok: true })
   setup(item({ ideal: 'こう読んで' }))
   await act(async () => screen.getByRole('button', { name: 'bad' }).click())
-  expect(apiSend).toHaveBeenCalledWith('/api/reviews', 'POST', {
+  expect(apiSend).toHaveBeenCalledWith('/reviews', 'POST', {
     message_id: 'm1',
     verdict: 'bad',
     ideal: 'こう読んで',
@@ -110,7 +110,7 @@ it('アーカイブを切り替えてキャッシュに反映する', async () =
   vi.mocked(apiSend).mockResolvedValue({ ok: true })
   const { current } = setup(item({}))
   await act(async () => screen.getByRole('button', { name: 'archive' }).click())
-  expect(apiSend).toHaveBeenCalledWith('/api/archives', 'POST', {
+  expect(apiSend).toHaveBeenCalledWith('/archives', 'POST', {
     message_id: 'm1',
     archived: true,
   })
@@ -121,7 +121,7 @@ it('一括アーカイブは message_ids をまとめて送る', async () => {
   vi.mocked(apiSend).mockResolvedValue({ ok: true })
   const { current } = setup(item({ verdict: 'good' }))
   await act(async () => screen.getByRole('button', { name: 'bulk' }).click())
-  expect(apiSend).toHaveBeenCalledWith('/api/archives/bulk', 'POST', {
+  expect(apiSend).toHaveBeenCalledWith('/archives/bulk', 'POST', {
     message_ids: ['m1'],
     archived: true,
   })
@@ -190,7 +190,7 @@ it('投票の投稿中でも、同じ行のアーカイブは受け付ける（�
   await act(async () => screen.getByRole('button', { name: 'good' }).click())
   await act(async () => screen.getByRole('button', { name: 'archive' }).click())
   expect(apiSend).toHaveBeenCalledTimes(2)
-  expect(apiSend).toHaveBeenLastCalledWith('/api/archives', 'POST', {
+  expect(apiSend).toHaveBeenLastCalledWith('/archives', 'POST', {
     message_id: 'm1',
     archived: true,
   })

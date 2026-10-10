@@ -76,7 +76,7 @@ it('caption を変えたテイクは「変更あり」で、2回押すとその�
   await act(async () => {
     fireEvent.click(screen.getByRole('button', { name: '採用してよいですか' }))
   })
-  expect(apiSend).toHaveBeenCalledWith('/api/profiles/p-a', 'PATCH', { caption: '明るく' })
+  expect(apiSend).toHaveBeenCalledWith('/profiles/p-a', 'PATCH', { caption: '明るく' })
   expect(onAdopted).toHaveBeenCalledWith({
     message: '採用しました（次の読み上げから効きます）',
     isError: false,

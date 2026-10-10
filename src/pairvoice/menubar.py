@@ -17,8 +17,9 @@ from dataclasses import dataclass
 from datetime import datetime
 from typing import Any
 
-from . import client, launchd, studio_process
+from . import client, launchd
 from .lifecycle import WARMABLE_STATES, ModelState
+from .studio_web import open_studio
 
 _log = logging.getLogger(__name__)
 
@@ -132,7 +133,7 @@ def warmup_item(health: dict | None) -> MenuItem:
     return MenuItem(label, "warmup", not busy and bool(states & WARMABLE_STATES))
 
 
-def menu_spec(health: dict | None, now: datetime, node_found: bool) -> list[MenuItem]:
+def menu_spec(health: dict | None, now: datetime) -> list[MenuItem]:
     """メニューの並びを決める。AppKit を知らないので、そのままテストできる。"""
     reachable = health is not None
     rows = [MenuItem(describe_state(health, now), None, False)]
@@ -153,13 +154,13 @@ def menu_spec(health: dict | None, now: datetime, node_found: bool) -> list[Menu
     rows.append(MenuItem("ミュートを解除", "unmute", manual))
     rows.append(SEPARATOR)
 
-    studio_label = "studio を開く" if node_found else "studio を開く（node が見つからない）"
-    rows.append(MenuItem(studio_label, "studio", reachable and node_found))
+    # studio の画面はサーバーが配るので、届かないあいだは開けない
+    rows.append(MenuItem("studio を開く", "studio", reachable))
     rows.append(SEPARATOR)
 
     rows.append(warmup_item(health))
     # 再起動と終了は、サーバーに届かないときこそ押したい項目なので常に有効にする。
-    rows.append(MenuItem("再起動（サーバーと studio）", "restart", True))
+    rows.append(MenuItem("再起動", "restart", True))
     rows.append(MenuItem("pairvoice を終了", "quit", True))
     return rows
 
@@ -215,16 +216,9 @@ def perform(action: str, base: str) -> None:
         elif action == "warmup":
             client.call(base, "/warmup", timeout=5)
         elif action == "restart":
-            # studio は切り離して起動しているので、サーバーの再起動だけでは古いコードの
-            # まま残る。menubar は serve の子なので、サーバーを先に再起動すると studio を
-            # 立て直す前に自分が消える。studio が失敗してもサーバーの再起動は続ける
-            try:
-                studio_process.restart_studio()
-            except Exception as failed:
-                _log.warning("studio を再起動できなかった: %s", failed)
             launchd.restart()
         elif action == "studio":
-            studio_process.open_studio()
+            open_studio(base)
     except Exception as failed:
         # 続けるが記録は残す。操作は都度1回なのでログは埋まらず、サーバー未起動と
         # 操作側の不具合を後から見分けられる（モーダルは出さない）。
@@ -248,7 +242,6 @@ def _controller_class(appkit, objc):
             self._base = base
             self._parent_pid = parent_pid
             self._health = None
-            self._node = studio_process.find_node()
             self._item = appkit.NSStatusBar.systemStatusBar().statusItemWithLength_(
                 appkit.NSVariableStatusItemLength
             )
@@ -272,7 +265,7 @@ def _controller_class(appkit, objc):
                 self._item.button().setImage_(image)
 
             self._menu.removeAllItems()
-            for spec in menu_spec(self._health, now, self._node is not None):
+            for spec in menu_spec(self._health, now):
                 if spec.separator:
                     self._menu.addItem_(appkit.NSMenuItem.separatorItem())
                     continue

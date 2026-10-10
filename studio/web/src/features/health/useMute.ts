@@ -3,8 +3,7 @@ import { useState, useTransition } from 'react'
 
 import { apiSend, toErrorMessage } from '@/lib/api'
 
-// minutes が null なら解除。サーバーは minutes の有無で /mute と /unmute を分けるので、
-// 解除は null を明示して送る。
+// minutes が null なら解除（pairvoice の /unmute）、数ならその分数だけミュートする。
 export const MUTE_CHOICES = [
   { label: '30分ミュート', minutes: 30 },
   { label: '1時間ミュート', minutes: 60 },
@@ -22,7 +21,9 @@ export function useMute() {
     setError('')
     startTransition(async () => {
       try {
-        await apiSend('/api/mute', 'POST', { minutes })
+        await (minutes === null
+          ? apiSend('/unmute', 'POST')
+          : apiSend('/mute', 'POST', { minutes }))
         await queryClient.invalidateQueries({ queryKey: ['health'] })
       } catch (err: unknown) {
         setError(toErrorMessage(err))

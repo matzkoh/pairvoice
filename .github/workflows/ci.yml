@@ -39,11 +39,7 @@ jobs:
           node-version: "24"
           cache: pnpm
           cache-dependency-path: studio/pnpm-lock.yaml
-      # server.test.ts は読み辞書の結果を Python 側（pairvoice.reading）と突き合わせる
-      - uses: astral-sh/setup-uv@c18668ad3cf93ea998bef934396af7bb5c839dc7 # v10.2.0
-      - run: mkdir -p web/dist && uv sync --locked
       - run: pnpm install --frozen-lockfile
-      - run: pnpm test
       - run: pnpm test:web
       - run: pnpm typecheck
       - run: pnpm lint

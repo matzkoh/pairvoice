@@ -7,7 +7,7 @@ import type { StylesResponse } from '../../../../shared/api-types'
 export function stylesQueryOptions() {
   return queryOptions({
     queryKey: ['styles'] as const,
-    queryFn: () => apiGet<StylesResponse>('/api/styles'),
+    queryFn: () => apiGet<StylesResponse>('/styles'),
   })
 }
 

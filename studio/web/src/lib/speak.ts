@@ -8,19 +8,19 @@ import { apiSend, speakErrorMessage } from '@/lib/api'
 import type { SamplerOverrides, SpeakResponse } from '../../../shared/api-types'
 
 // design はプロファイル作成の候補づくり用。参照音声を使わず caption だけで声を作る。
-// profile_id は試聴で鳴らすプロファイル。省くと使用中のプロファイルで鳴る
+// voice は試聴で鳴らすプロファイル。省くと使用中のプロファイルで鳴る
 export type SpeakBody = {
   text: string
   caption?: string
   sampler?: SamplerOverrides
   design?: boolean
-  profile_id?: string
+  voice?: string
   // 2択で絞り込むときの、もとの声（試聴で作った wav）を重みで混ぜた声
   mix?: { audio: string; weight: number }[]
 }
 // 合成した音声（データの置き場所からの相対パス）を鳴らす URL
 export function audioFileUrl(relativePath: string) {
-  return `/api/audio?path=${encodeURIComponent(relativePath)}`
+  return `/audio?path=${encodeURIComponent(relativePath)}`
 }
 
 // 音が返らなかった場合は必ず例外にして、成功の形だけを返す。見分け方を呼び出し側に
@@ -28,8 +28,8 @@ export function audioFileUrl(relativePath: string) {
 export async function speakOnce(body: SpeakBody, signal?: AbortSignal): Promise<SpeakResponse> {
   // 打ち切らない呼び出しは、これまでどおり3引数で送る
   const result = signal
-    ? await apiSend<SpeakResponse>('/api/speak', 'POST', body, { signal })
-    : await apiSend<SpeakResponse>('/api/speak', 'POST', body)
+    ? await apiSend<SpeakResponse>('/synthesize', 'POST', body, { signal })
+    : await apiSend<SpeakResponse>('/synthesize', 'POST', body)
   if (!('relative_path' in result) || !result.relative_path) {
     throw new Error(speakErrorMessage(result))
   }

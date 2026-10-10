@@ -15,7 +15,7 @@ vi.mock('@/lib/api', async (importOriginal) => {
 
 beforeEach(() => {
   vi.mocked(apiSend).mockImplementation(async (path: string) => {
-    if (path === '/api/speak') return { relative_path: 'generations/x.wav', duration: 1.5 }
+    if (path === '/synthesize') return { relative_path: 'generations/x.wav', duration: 1.5 }
     return { ok: true }
   })
   vi.mocked(apiGet).mockResolvedValue({ items: [] })
@@ -82,11 +82,11 @@ it('入力欄の caption を、開いているプロファイルの声で試聴�
   fireEvent.change(caption(), { target: { value: '声B' } })
   await generate()
   expect(apiSend).toHaveBeenCalledWith(
-    '/api/speak',
+    '/synthesize',
     'POST',
-    expect.objectContaining({ caption: '声B', profile_id: 'p-a' }),
+    expect.objectContaining({ caption: '声B', voice: 'p-a' }),
   )
-  expect(apiSend).not.toHaveBeenCalledWith('/api/profiles/p-a', 'PATCH', expect.anything())
+  expect(apiSend).not.toHaveBeenCalledWith('/profiles/p-a', 'PATCH', expect.anything())
   expect(await screen.findByRole('button', { name: /テイク 1 を再生/ })).toBeTruthy()
 })
 
@@ -95,7 +95,7 @@ it('caption を空にして試聴し、空のまま採用できる', async () =>
   fireEvent.change(caption(), { target: { value: '' } })
   await generate()
   expect(apiSend).toHaveBeenCalledWith(
-    '/api/speak',
+    '/synthesize',
     'POST',
     expect.objectContaining({ caption: '' }),
   )
@@ -104,7 +104,7 @@ it('caption を空にして試聴し、空のまま採用できる', async () =>
   await act(async () => {
     fireEvent.click(screen.getByRole('button', { name: '採用してよいですか' }))
   })
-  expect(apiSend).toHaveBeenCalledWith('/api/profiles/p-a', 'PATCH', { caption: '' })
+  expect(apiSend).toHaveBeenCalledWith('/profiles/p-a', 'PATCH', { caption: '' })
 })
 
 it('⌘↵ でも生成する', async () => {
@@ -112,7 +112,7 @@ it('⌘↵ でも生成する', async () => {
   await act(async () => {
     fireEvent.keyDown(caption(), { key: 'Enter', metaKey: true })
   })
-  expect(apiSend).toHaveBeenCalledWith('/api/speak', 'POST', expect.anything())
+  expect(apiSend).toHaveBeenCalledWith('/synthesize', 'POST', expect.anything())
 })
 
 it('入力欄をさらに書き換えても、採用するのはテイクを作ったときの caption', async () => {
@@ -124,7 +124,7 @@ it('入力欄をさらに書き換えても、採用するのはテイクを作�
   await act(async () => {
     fireEvent.click(screen.getByRole('button', { name: '採用してよいですか' }))
   })
-  expect(apiSend).toHaveBeenCalledWith('/api/profiles/p-a', 'PATCH', { caption: '声B' })
+  expect(apiSend).toHaveBeenCalledWith('/profiles/p-a', 'PATCH', { caption: '声B' })
 })
 
 it('保存済みの caption が変わったら、書き換えていない入力欄は追従する', () => {
@@ -137,7 +137,7 @@ it('サンプラーの値が不正なら生成せず、理由を出す', async (
   renderWorkbench()
   fireEvent.change(screen.getByLabelText('Seconds'), { target: { value: 'あ' } })
   await generate()
-  expect(apiSend).not.toHaveBeenCalledWith('/api/speak', 'POST', expect.anything())
+  expect(apiSend).not.toHaveBeenCalledWith('/synthesize', 'POST', expect.anything())
   expect(screen.getByText(/seconds/)).toBeTruthy()
 })
 
@@ -154,7 +154,7 @@ it('合成が失敗したらそのテイクに理由を出し、残りの待機�
 function mockSpeakPaths() {
   let n = 0
   vi.mocked(apiSend).mockImplementation(async (path: string) => {
-    if (path === '/api/speak') return { relative_path: `generations/t${++n}.wav`, duration: 1.5 }
+    if (path === '/synthesize') return { relative_path: `generations/t${++n}.wav`, duration: 1.5 }
     return { ok: true }
   })
 }
@@ -197,7 +197,7 @@ it('caption の履歴を開いている間は ⌘↵ で生成しない', async 
   await act(async () => {
     fireEvent.keyDown(sheet, { key: 'Enter', metaKey: true })
   })
-  expect(apiSend).not.toHaveBeenCalledWith('/api/speak', 'POST', expect.anything())
+  expect(apiSend).not.toHaveBeenCalledWith('/synthesize', 'POST', expect.anything())
 })
 
 it('pairvoice が止まったら再生成できない', async () => {

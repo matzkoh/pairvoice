@@ -35,7 +35,7 @@ export function useReviewActions(): ReviewActions {
   const [errors, setErrors] = useState<Readonly<Record<string, string>>>({})
   // 投稿が返るまでは、その行の同じ種類の操作を受け付けない。ボタンは pending で止まるが
   // ホットキーは止まらず、連打すると投稿前の同じ行から同じ判定を二重に送る（取り消しにも
-  // ならない）。種類は送り先ごと（判定と理想の出力はどちらも /api/reviews）で分け、
+  // ならない）。種類は送り先ごと（判定と理想の出力はどちらも /reviews）で分け、
   // 投票の直後のアーカイブは止めない
   const inFlight = useRef(new Set<string>())
 
@@ -79,7 +79,7 @@ export function useReviewActions(): ReviewActions {
   ): CorpusItem {
     const patch = { verdict, ideal: verdict === null ? null : ideal }
     run(item.message_id, 'review', '判定の投稿', async () => {
-      await apiSend('/api/reviews', 'POST', {
+      await apiSend('/reviews', 'POST', {
         message_id: item.message_id,
         verdict: verdict ?? 'none',
         ideal,
@@ -108,7 +108,7 @@ export function useReviewActions(): ReviewActions {
     if (inFlight.current.has(flightKey('archive', item.message_id))) return null
     const patch = { archived: !item.archived }
     run(item.message_id, 'archive', 'アーカイブの操作', async () => {
-      await apiSend('/api/archives', 'POST', { message_id: item.message_id, ...patch })
+      await apiSend('/archives', 'POST', { message_id: item.message_id, ...patch })
       patchItems([item.message_id], patch)
     })
     return { ...item, ...patch }
@@ -118,7 +118,7 @@ export function useReviewActions(): ReviewActions {
     if (targets.length === 0) return
     const ids = targets.map((r) => r.message_id)
     run(BULK_ERROR_ID, 'archive', '一括アーカイブ', async () => {
-      await apiSend('/api/archives/bulk', 'POST', { message_ids: ids, archived: true })
+      await apiSend('/archives/bulk', 'POST', { message_ids: ids, archived: true })
       patchItems(ids, { archived: true })
     })
   }

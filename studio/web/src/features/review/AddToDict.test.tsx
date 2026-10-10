@@ -18,7 +18,7 @@ const DICT: DictResponse = { rows: [{ from: 'API', to: 'エーピーアイ', mem
 beforeEach(() => {
   vi.mocked(apiGet).mockResolvedValue(DICT)
   vi.mocked(apiSend).mockImplementation(async (path: string) => {
-    if (path === '/api/dict/test') return { result: 'プレビュー結果' }
+    if (path === '/dict/test') return { result: 'プレビュー結果' }
     return { ok: true }
   })
 })
@@ -62,7 +62,7 @@ it('保存すると取り直した辞書に1行足して書き、結果を出し
   await act(async () => {
     fireEvent.click(screen.getByRole('button', { name: '保存' }))
   })
-  expect(apiSend).toHaveBeenCalledWith('/api/dict', 'PUT', {
+  expect(apiSend).toHaveBeenCalledWith('/dict', 'PUT', {
     rows: [...DICT.rows, { from: 'PR', to: 'ピーアール', memo: '' }],
   })
   expect(await screen.findByText(/辞書に追加しました/)).toBeTruthy()
@@ -95,7 +95,7 @@ it('置き換えるときは既存の行のメモを引き継ぐ', async () => {
   await act(async () => {
     fireEvent.click(screen.getByRole('button', { name: '置き換えて保存' }))
   })
-  expect(apiSend).toHaveBeenCalledWith('/api/dict', 'PUT', {
+  expect(apiSend).toHaveBeenCalledWith('/dict', 'PUT', {
     rows: [{ from: 'API', to: 'エーピーアイ2', memo: '略語' }],
   })
 })

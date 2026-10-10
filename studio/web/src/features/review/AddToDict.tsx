@@ -85,7 +85,7 @@ function AddToDictForm({ summary, initialFrom, onDone }: FormProps) {
   const preview = useQuery({
     queryKey: ['dict-test', summary, previewFrom, previewTo, dataUpdatedAt],
     queryFn: () =>
-      apiSend<DictTestResponse>('/api/dict/test', 'POST', {
+      apiSend<DictTestResponse>('/dict/test', 'POST', {
         text: summary,
         rows: upsertDictRow(data?.rows ?? [], { ...entry, from: previewFrom, to: previewTo }),
       }),

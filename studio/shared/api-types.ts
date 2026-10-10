@@ -1,9 +1,7 @@
-// studio の /api/* が返す形。server.ts と web/src の両方が参照する。
-// プロンプト・辞書・スタイル・声は pairvoice の API をそのまま中継するので、正本は pairvoice の /docs。
+// pairvoice の API が返す形を、画面（web/src）が使う分だけ写したもの。正本は pairvoice の /docs。
 // ここに置く型は「HTTP を越える形」だけに限る。サーバー内部の都合は入れない。
 
-// pairvoice の /health が申告するモデルの状態。enum ではなく union で書く
-// （Node の type stripping は enum を通さない）。
+// pairvoice の /health が申告するモデルの状態。
 export type ModelState =
   | 'unloaded'
   | 'downloading'
@@ -64,11 +62,6 @@ export type PairvoiceHealth = {
   config_stale: boolean
 }
 
-// pairvoice が停止していれば pairvoice は null。UI 側は「停止」として扱う。
-export type StudioHealth = {
-  pairvoice: PairvoiceHealth | null
-}
-
 export type PromptResponse = { text: string }
 
 // 辞書の1行。TSV の1行が from/to/memo の3列（pairvoice の reading.read_rows）。
@@ -87,7 +80,7 @@ export type DictTestResponse = { result: string }
 export type HistoryItem = { name: string; ts: string }
 export type HistoryResponse = { items: HistoryItem[] }
 
-// 声のプロファイル（参照音声 + caption）。design = studio で caption から作った、
+// 声のプロファイル（参照音声 + caption）。design = caption や合成した声から作った、
 // upload = 手持ちの wav を取り込んだ、auto / import = pairvoice が初回に作った
 export type ProfileSource = 'design' | 'upload' | 'auto' | 'import'
 export type ProfileItem = {

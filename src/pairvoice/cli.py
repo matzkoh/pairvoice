@@ -132,14 +132,7 @@ def main(argv: list[str] | None = None) -> int:
         "--log-file", type=Path, default=None, help="ログを書くファイル。省くと stderr に出す"
     )
 
-    studio_parser = sub.add_parser(
-        "studio", help="studio をブラウザで開く（動いていなければ起動する）"
-    )
-    studio_parser.add_argument(
-        "--restart",
-        action="store_true",
-        help="動いている studio だけを立て直す（サーバーとモデルはそのまま）",
-    )
+    sub.add_parser("studio", help="studio（常駐サーバーが配る画面）をブラウザで開く")
 
     mute = sub.add_parser("mute", help="期限付きでミュートする")
     mute.add_argument("duration", help="30m / 1h / 45（分）")
@@ -188,9 +181,6 @@ def main(argv: list[str] | None = None) -> int:
 
         return install.uninstall()
 
-    if args.command == "studio":
-        return _studio(restart=args.restart)
-
     try:
         config = load_config(args.config)
     except (OSError, ValueError) as broken:
@@ -224,6 +214,9 @@ def main(argv: list[str] | None = None) -> int:
 
     if args.command == "eval":
         return _eval(config, base, args)
+
+    if args.command == "studio":
+        return _studio(base)
 
     try:
         if args.command == "mute":
@@ -319,24 +312,19 @@ def _eval(config, base: str, args: argparse.Namespace) -> int:
     return 0
 
 
-def _studio(restart: bool) -> int:
-    from . import studio_process
+def _studio(base: str) -> int:
+    from .studio_web import open_studio
 
     try:
-        if not restart:
-            studio_process.open_studio()
-            return 0
-        restarted = studio_process.restart_studio()
-    except studio_process.NodeNotFound as missing:
-        print(str(missing), file=sys.stderr)
-        return 1
-    if not restarted:
+        client.call(base, "/health", method="GET", timeout=2)
+    except (OSError, error.URLError):
+        # 画面は常駐サーバーが配るので、止まっていると開いても何も出ない
         print(
-            "studio を立て直せませんでした（動いていないなら `pairvoice studio` で起動する）",
+            f"常駐サーバーに繋がりません（{base}）。`pairvoice restart` で起動してください",
             file=sys.stderr,
         )
         return 1
-    print("studio を立て直しました。開いているタブは再読み込みしてください")
+    open_studio(base)
     return 0
 
 

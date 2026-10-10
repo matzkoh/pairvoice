@@ -5,7 +5,7 @@
 - reviews.jsonl: studio の 👍 / 👎 と理想の出力。verdict "none" は取り消し
 - archives.jsonl: アーカイブと、その解除
 
-レビューとアーカイブを書くのは常駐サーバーだけにする（studio は API を中継する）。
+レビューとアーカイブを書くのは常駐サーバーだけにする（studio の画面は API を呼ぶ）。
 """
 
 from __future__ import annotations

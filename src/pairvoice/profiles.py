@@ -1,6 +1,6 @@
 """声のプロファイル（参照音声 + caption の組）の読み書き。
 
-データの置き場所の profiles/ に置き、常駐サーバーだけが書く（studio は API を中継する）。
+データの置き場所の profiles/ に置き、常駐サーバーだけが書く（studio の画面は API を呼ぶ）。
 合成のたびに active と profile.json を読むので、API で切り替えた・書き換えた版が
 再起動なしに効く。
 """
@@ -27,7 +27,7 @@ REFERENCE_FILENAME = "reference.wav"
 PROFILES_DIRNAME = "profiles"
 # active や URL の ID でディレクトリの外へ出ないよう、読むときもこの形だけを受ける
 _ID_PATTERN = re.compile(r"p-[0-9A-Za-z-]+")
-# design = studio で caption から作った、upload = 手持ちの wav を取り込んだ、
+# design = caption や合成した声から作った、upload = 手持ちの wav を取り込んだ、
 # auto / import = 初回に常駐サーバーが作った
 SOURCES = ("design", "upload", "auto", "import")
 

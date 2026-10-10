@@ -52,7 +52,7 @@ it('保存時に from が空の行（末尾の空行）を送らない', async (
     saveBtn.click()
   })
 
-  expect(apiSend).toHaveBeenCalledWith('/api/dict', 'PUT', {
+  expect(apiSend).toHaveBeenCalledWith('/dict', 'PUT', {
     rows: [
       { from: 'あ', to: 'ア', memo: 'm1' },
       { from: 'い', to: 'イ', memo: 'm2' },
@@ -194,7 +194,7 @@ it('プレビューはボタンを押さずに、from が空の行を除いて�
 
   expect(await screen.findByText('アイウ変換後')).toBeTruthy()
   expect(apiSend).toHaveBeenCalledWith(
-    '/api/dict/test',
+    '/dict/test',
     'POST',
     expect.objectContaining({
       rows: [
@@ -217,7 +217,7 @@ it('表を編集するとプレビューを取り直す', async () => {
 
   expect(await screen.findByText('編集後')).toBeTruthy()
   expect(apiSend).toHaveBeenLastCalledWith(
-    '/api/dict/test',
+    '/dict/test',
     'POST',
     expect.objectContaining({
       rows: expect.arrayContaining([{ from: 'あ', to: 'A' }]),
@@ -257,7 +257,7 @@ it('レビューから辞書に追加した行（キャッシュ書き込み）�
     screen.getByRole('button', { name: '保存' }).click()
   })
 
-  expect(apiSend).toHaveBeenCalledWith('/api/dict', 'PUT', {
+  expect(apiSend).toHaveBeenCalledWith('/dict', 'PUT', {
     rows: [
       { from: 'あ', to: 'ア', memo: 'm1' },
       { from: 'PR', to: 'ピーアール', memo: '' },

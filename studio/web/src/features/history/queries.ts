@@ -9,7 +9,7 @@ import type { HistoryResponse } from '../../../../shared/api-types'
 // キー。履歴は本体のキーの下に置くので、本体を取り直せば履歴も取り直される
 export type HistorySource = { path: string; key: readonly unknown[] }
 
-export const PROMPT_HISTORY: HistorySource = { path: '/api/prompt', key: ['prompt'] }
+export const PROMPT_HISTORY: HistorySource = { path: '/prompt', key: ['prompt'] }
 
 export function historyQueryOptions(source: HistorySource) {
   return queryOptions({

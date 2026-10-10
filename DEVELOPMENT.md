@@ -7,7 +7,7 @@
 | 部分 | 場所 | 中身 |
 | --- | --- | --- |
 | 常駐サーバー | `src/pairvoice/` | Python / FastAPI。`127.0.0.1:17495`。要約（mlx-lm）と音声合成（mlx-audio / Irodori-TTS）、プロンプト・辞書・スタイル・声の読み書き |
-| studio | `studio/` | `server.ts`（Node の標準ライブラリだけ、`127.0.0.1:17494`）と React 19 + Vite のフロント（`web/`）。データの置き場所には触らず、読み書きはすべて常駐サーバーへ中継する |
+| studio | `studio/` | React 19 + Vite の画面（`web/`）。ビルドした `web/dist` を常駐サーバーが `/studio/` で配り、画面は同じオリジンで API を呼ぶ |
 | 読み上げフック | `plugin/` | Claude Code プラグイン（フックと、要約を改善する `tune` スキル）。マーケットプレイスはリポジトリ直下の `.claude-plugin/marketplace.json` |
 | メニューバー | `src/pairvoice/menubar.py` | 常駐サーバーの子として起きる |
 
@@ -31,8 +31,8 @@ LaunchAgent は tool 側の Python を指すので、リポジトリのコード
 
 | 変えた場所 | 立て直すもの |
 | --- | --- |
-| `studio/` だけ | `pairvoice studio --restart`（studio だけ。モデルは載ったまま） |
-| `src/pairvoice/` | メニューの「再起動」（studio とサーバーの両方。`pairvoice restart` はサーバーだけで、studio は古いコードのまま残る） |
+| `studio/` だけ | 要らない（入れ直した wheel の `web/dist` を次の読み込みから配る。開いているタブは再読み込みする） |
+| `src/pairvoice/` | `pairvoice restart`（モデルを読み込み直す） |
 | `prompt.txt`、辞書 | 要らない（フックとサーバーが読み上げのたびに読む） |
 
 作業ツリーのコードをその場で動かしたいときは、メニューの「pairvoice を終了」で常駐を止めてから手で起動する（ポート `:17495` を取り合うので同時には動かせない）。
@@ -41,8 +41,7 @@ LaunchAgent は tool 側の Python を指すので、リポジトリのコード
 uv run pairvoice serve            # Ctrl-C でメニューバーごと降りる
 launchctl kickstart gui/$(id -u)/local.pairvoice   # 常駐に戻す
 
-# studio のフロントを開発する（:17493。/api は :17494 へ proxy する）
-node studio/server.ts --port 17494 &
+# studio の画面を開発する（http://127.0.0.1:17493/studio/。API は :17495 へ proxy する）
 (cd studio && pnpm dev)
 ```
 
@@ -55,12 +54,8 @@ node studio/server.ts --port 17494 &
 ```bash
 uv run pytest                                   # 実モデルは載らない
 uv run ruff check && uv run ruff format --check && uv run ty check
-cd studio && node --test server.test.ts
 cd studio && pnpm test:web && pnpm typecheck && pnpm lint && pnpm format:check
 ```
-
-studio のテストのうち1本は、`uv run python` で `pairvoice.reading` を呼び、
-辞書置換の Python 実装と JS 実装が一致することを確かめる。
 
 ## 公開用のビルド
 

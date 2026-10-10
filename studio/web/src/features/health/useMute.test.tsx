@@ -46,8 +46,8 @@ it('分数を送り、解除は minutes: null を明示して送る', async () =
   renderHarness()
   await act(async () => screen.getByRole('button', { name: '30分' }).click())
   await act(async () => screen.getByRole('button', { name: '解除' }).click())
-  expect(apiSend).toHaveBeenNthCalledWith(1, '/api/mute', 'POST', { minutes: 30 })
-  expect(apiSend).toHaveBeenNthCalledWith(2, '/api/mute', 'POST', { minutes: null })
+  expect(apiSend).toHaveBeenNthCalledWith(1, '/mute', 'POST', { minutes: 30 })
+  expect(apiSend).toHaveBeenNthCalledWith(2, '/unmute', 'POST')
 })
 
 it('失敗しても投げ直さず、error に理由を持つ', async () => {

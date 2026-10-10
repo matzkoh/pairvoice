@@ -6,7 +6,7 @@ from datetime import datetime, timedelta, timezone
 
 import pytest
 
-from pairvoice import menubar, studio_process
+from pairvoice import menubar
 
 JST = timezone(timedelta(hours=9))
 NOW = datetime(2026, 8, 18, 12, 0, 0, tzinfo=JST)
@@ -129,7 +129,7 @@ def find(items, action):
 
 
 def test_menu_lists_mute_presets():
-    items = menubar.menu_spec(health(), NOW, node_found=True)
+    items = menubar.menu_spec(health(), NOW)
     assert [item.label for item in items if item.action and item.action.startswith("mute:")] == [
         "15分だけ黙らせる",
         "30分だけ黙らせる",
@@ -138,7 +138,7 @@ def test_menu_lists_mute_presets():
 
 
 def test_first_two_rows_are_display_only():
-    items = menubar.menu_spec(health(), NOW, node_found=True)
+    items = menubar.menu_spec(health(), NOW)
     assert items[0].label == "読み上げ有効"
     assert items[1].label == "llm: loaded / tts: loaded"
     assert [items[0].action, items[1].action] == [None, None]
@@ -147,14 +147,14 @@ def test_first_two_rows_are_display_only():
 
 
 def test_unmute_enabled_only_for_manual_mute():
-    manual = menubar.menu_spec(health(reason="manual", until=NOW.isoformat()), NOW, node_found=True)
+    manual = menubar.menu_spec(health(reason="manual", until=NOW.isoformat()), NOW)
     assert find(manual, "unmute").enabled
 
 
 @pytest.mark.parametrize("reason", [None, "microphone", "audio_output"])
 def test_unmute_disabled_without_manual_mute(reason):
     # 自動ミュート中に unmute しても MuteController は何も消さない。押せないようにする。
-    items = menubar.menu_spec(health(reason=reason), NOW, node_found=True)
+    items = menubar.menu_spec(health(reason=reason), NOW)
     assert not find(items, "unmute").enabled
 
 
@@ -162,35 +162,29 @@ def test_unmute_disabled_without_manual_mute(reason):
     "playback", [{"playing": True, "waiting": 0}, {"playing": False, "waiting": 2}]
 )
 def test_stop_enabled_while_speaking(playback):
-    items = menubar.menu_spec(health(playback=playback), NOW, node_found=True)
+    items = menubar.menu_spec(health(playback=playback), NOW)
     assert find(items, "stop").enabled
 
 
 def test_stop_disabled_when_silent():
-    items = menubar.menu_spec(health(), NOW, node_found=True)
+    items = menubar.menu_spec(health(), NOW)
     assert not find(items, "stop").enabled
 
 
 def test_unreachable_leaves_only_restart_and_quit():
-    items = menubar.menu_spec(None, NOW, node_found=True)
+    items = menubar.menu_spec(None, NOW)
     assert actions(items) == ["restart", "quit"]
 
 
-def test_studio_disabled_without_node():
-    items = menubar.menu_spec(health(), NOW, node_found=False)
-    studio = find(items, "studio")
-    assert not studio.enabled
-    assert studio.label == "studio を開く（node が見つからない）"
-
-
-def test_studio_enabled_with_node():
-    items = menubar.menu_spec(health(), NOW, node_found=True)
-    assert find(items, "studio").label == "studio を開く"
+def test_studio_opens_only_while_the_server_answers():
+    # studio の画面はサーバーが配るので、届かないあいだは開けない
+    assert find(menubar.menu_spec(health(), NOW), "studio").enabled
+    assert "studio" not in actions(menubar.menu_spec(None, NOW))
 
 
 def test_menu_has_all_operations_when_healthy():
     # 事前ロードはまだ読み込んでいないときだけ押せる
-    items = menubar.menu_spec(health(llm="unloaded", tts="unloaded"), NOW, node_found=True)
+    items = menubar.menu_spec(health(llm="unloaded", tts="unloaded"), NOW)
     assert actions(items) == [
         "mute:15",
         "mute:30",
@@ -216,12 +210,12 @@ def test_menu_has_all_operations_when_healthy():
     ],
 )
 def test_warmup_label_follows_model_states(llm, tts, label, enabled):
-    item = find(menubar.menu_spec(health(llm=llm, tts=tts), NOW, node_found=True), "warmup")
+    item = find(menubar.menu_spec(health(llm=llm, tts=tts), NOW), "warmup")
     assert (item.label, item.enabled) == (label, enabled)
 
 
 def test_separators_are_marked():
-    items = menubar.menu_spec(health(), NOW, node_found=True)
+    items = menubar.menu_spec(health(), NOW)
     assert menubar.SEPARATOR in items
     # 区切り線は separator で表す。action は「押せる動作」だけを持つ。
     assert all(item.action is None and not item.enabled for item in items if item.separator)
@@ -270,56 +264,20 @@ def test_perform_posts_to_the_right_endpoint(monkeypatch, action, path, body):
     assert calls == [(path, "POST", body)]
 
 
-def test_perform_restart_restarts_studio_before_server(monkeypatch):
-    # menubar は serve の子。サーバーを先に落とすと、studio を立て直す前に自分が消える
-    order = []
-    monkeypatch.setattr(studio_process, "restart_studio", lambda: order.append("studio"))
-    monkeypatch.setattr(menubar.launchd, "restart", lambda: order.append("server") or 0)
-    menubar.perform("restart", "http://127.0.0.1:17495")
-    assert order == ["studio", "server"]
-
-
-def test_perform_restart_restarts_server_even_if_studio_fails(monkeypatch, caplog):
+def test_perform_restart_restarts_the_server(monkeypatch):
     called = []
-
-    def broken():
-        raise OSError("lsof failed")
-
-    monkeypatch.setattr(studio_process, "restart_studio", broken)
-    monkeypatch.setattr(menubar.launchd, "restart", lambda: called.append(True) or 0)
-    with caplog.at_level("WARNING", logger="pairvoice.menubar"):
-        menubar.perform("restart", "http://127.0.0.1:17495")
-    assert called == [True]
-    assert "lsof failed" in caplog.text
-
-
-def test_perform_restart_without_node_restarts_only_server(monkeypatch):
-    called = []
-
-    def no_node():
-        raise studio_process.NodeNotFound()
-
-    monkeypatch.setattr(studio_process, "restart_studio", no_node)
     monkeypatch.setattr(menubar.launchd, "restart", lambda: called.append("server") or 0)
     menubar.perform("restart", "http://127.0.0.1:17495")
     assert called == ["server"]
 
 
-def test_perform_studio_opens_studio(monkeypatch):
+def test_perform_studio_opens_the_page_the_server_serves(monkeypatch):
     opened = []
-    monkeypatch.setattr(studio_process, "open_studio", lambda: opened.append(True))
+    monkeypatch.setattr(
+        "pairvoice.studio_web.subprocess.Popen", lambda command, **kwargs: opened.append(command)
+    )
     menubar.perform("studio", "http://127.0.0.1:17495")
-    assert opened == [True]
-
-
-def test_perform_studio_logs_missing_node(monkeypatch, caplog):
-    def no_node():
-        raise studio_process.NodeNotFound()
-
-    monkeypatch.setattr(studio_process, "open_studio", no_node)
-    with caplog.at_level("WARNING", logger="pairvoice.menubar"):
-        menubar.perform("studio", "http://127.0.0.1:17495")
-    assert "node が見つかりません" in caplog.text
+    assert opened == [["open", "http://127.0.0.1:17495/studio/"]]
 
 
 def test_perform_swallows_http_failure_but_logs_it(monkeypatch, caplog):
@@ -411,5 +369,5 @@ def test_request_shutdown_swallows_failure_but_logs_it(monkeypatch, caplog):
 
 def test_quit_label_says_it_stops_pairvoice():
     # 「終了」はアイコンだけでなくサーバーも落とす。ラベルでそう伝える。
-    items = menubar.menu_spec(health(), NOW, node_found=True)
+    items = menubar.menu_spec(health(), NOW)
     assert find(items, "quit").label == "pairvoice を終了"

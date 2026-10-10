@@ -605,29 +605,17 @@ def test_shutdown_sends_sigterm_to_itself(monkeypatch):
     assert killed == [(os.getpid(), signal.SIGTERM)]
 
 
-def test_studio_open_reports_missing_node(monkeypatch):
-    from pairvoice import studio_process
-
-    def missing():
-        raise studio_process.NodeNotFound()
-
-    monkeypatch.setattr("pairvoice.server.studio_process.open_studio", missing)
+def test_studio_open_opens_the_page_this_server_serves(monkeypatch):
+    opened = []
+    monkeypatch.setattr(
+        "pairvoice.studio_web.subprocess.Popen", lambda command, **kwargs: opened.append(command)
+    )
     _, client = build()
 
     response = client.post("/studio/open")
 
-    assert response.status_code == 503
-    assert response.json()["error"] == "node_not_found"
-
-
-def test_studio_restart_reports_not_running(monkeypatch):
-    monkeypatch.setattr("pairvoice.server.studio_process.restart_studio", lambda: False)
-    _, client = build()
-
-    response = client.post("/studio/restart")
-
-    assert response.status_code == 409
-    assert response.json() == {"error": "studio_not_running"}
+    assert response.json() == {"url": "http://127.0.0.1:17495/studio/"}
+    assert opened == [["open", "http://127.0.0.1:17495/studio/"]]
 
 
 def test_eval_summarizes_given_cases_with_given_prompt(tmp_path):

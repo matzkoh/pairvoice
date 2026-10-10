@@ -1,6 +1,6 @@
 """読み上げの記録（コーパス）・レビュー・アーカイブと、合成した音声の HTTP API。
 
-studio のレビュー画面が使う。書くのは常駐サーバーだけで、studio はここを中継する。
+studio のレビュー画面が使う。書くのは常駐サーバーだけで、studio の画面はここを呼ぶ。
 """
 
 from __future__ import annotations

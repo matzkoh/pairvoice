@@ -11,9 +11,9 @@ import {
 import { cleanup, render, screen } from '@testing-library/react'
 import { afterEach, expect, it, vi } from 'vitest'
 
-import { apiGet } from '@/lib/api'
+import { apiGet, UnreachableServerError } from '@/lib/api'
 
-import type { CorpusItem, CorpusResponse, StudioHealth } from '../../../shared/api-types'
+import type { CorpusItem, CorpusResponse } from '../../../shared/api-types'
 import { AppSidebar } from './AppSidebar'
 
 vi.mock('@/lib/api', async (importOriginal) => {
@@ -40,10 +40,10 @@ function item(overrides: Partial<CorpusItem>): CorpusItem {
   }
 }
 
-function mockApi(health: StudioHealth, items: CorpusItem[]) {
+function mockApi(items: CorpusItem[]) {
   vi.mocked(apiGet).mockImplementation(async (path: string) => {
-    if (path === '/api/health') return health
-    if (path.startsWith('/api/corpus')) {
+    if (path === '/health') throw new UnreachableServerError('/health', new Error('down'))
+    if (path.startsWith('/corpus')) {
       const corpus: CorpusResponse = { total: items.length, items, prompt_changed_at: null }
       return corpus
     }
@@ -77,10 +77,8 @@ function renderAt(path: string) {
   )
 }
 
-const HEALTH_DOWN: StudioHealth = { pairvoice: null }
-
 it('用途別の3グループを出し、今いる画面の項目を active にする', async () => {
-  mockApi(HEALTH_DOWN, [])
+  mockApi([])
   renderAt('/dict')
   const link = await screen.findByRole('link', { name: '辞書' })
   expect(link.getAttribute('data-status')).toBe('active')
@@ -89,7 +87,7 @@ it('用途別の3グループを出し、今いる画面の項目を active に�
 })
 
 it('レビューに未レビュー件数のバッジが付く', async () => {
-  mockApi(HEALTH_DOWN, [
+  mockApi([
     item({ message_id: 'a' }),
     item({ message_id: 'b' }),
     item({ message_id: 'c', verdict: 'good' }),
@@ -99,7 +97,7 @@ it('レビューに未レビュー件数のバッジが付く', async () => {
 })
 
 it('pairvoice 停止中はそう出し、ミュートは押せない', async () => {
-  mockApi(HEALTH_DOWN, [])
+  mockApi([])
   renderAt('/review')
   expect(await screen.findByText('pairvoice 停止')).toBeTruthy()
   expect(screen.getByRole('button', { name: /ミュート/ })).toHaveProperty('disabled', true)

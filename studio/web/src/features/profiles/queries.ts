@@ -11,14 +11,14 @@ export type ProfileStatus = { message: string; isError: boolean }
 export function profilesQueryOptions() {
   return queryOptions({
     queryKey: ['profiles'] as const,
-    queryFn: () => apiGet<ProfilesResponse>('/api/profiles'),
+    queryFn: () => apiGet<ProfilesResponse>('/profiles'),
   })
 }
 
 // caption の履歴はプロファイルの下のキーに置く。採用・復元で ['profiles'] を取り直せば含まれる
 export function captionHistorySource(profileId: string): HistorySource {
   return {
-    path: `/api/profiles/${encodeURIComponent(profileId)}/caption`,
+    path: `/profiles/${encodeURIComponent(profileId)}/caption`,
     key: ['profiles', profileId, 'caption'],
   }
 }

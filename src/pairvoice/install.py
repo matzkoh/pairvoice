@@ -66,8 +66,8 @@ def launch_agent(
     config_path: Path | None = None,
 ) -> dict:
     # launchd から起きるサーバーには利用者のシェルの環境変数が届かないので、
-    # インストール時の値を焼き込む。PATH はメニューから studio を起動するとき node を
-    # 探すため（launchd の既定の PATH には Homebrew も mise も載っていない）
+    # インストール時の値を焼き込む。PATH も利用者のシェルと同じにする（launchd の既定の
+    # PATH には Homebrew も mise も載っていない）
     environment = {"PATH": path_env}
     if data_root_env:
         environment["PAIRVOICE_DATA_ROOT"] = data_root_env

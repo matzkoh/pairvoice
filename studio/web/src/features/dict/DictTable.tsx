@@ -98,7 +98,7 @@ export function DictTable() {
   function save() {
     startTransition(async () => {
       try {
-        await apiSend('/api/dict', 'PUT', { rows: toWireRows(rows) })
+        await apiSend('/dict', 'PUT', { rows: toWireRows(rows) })
         // 保存後に再読込はしない（rows はローカルの編集内容のまま）。他所からの再訪問に
         // 備えてキャッシュだけ古さの印を付けておく。
         await queryClient.invalidateQueries({ queryKey: ['dict'] })
@@ -125,7 +125,7 @@ export function DictTable() {
   // 例外は useQuery が error に収めるので、画面ごと消えずにインラインで出せる
   const preview = useQuery({
     queryKey: ['dict-test', previewInput],
-    queryFn: () => apiSend<DictTestResponse>('/api/dict/test', 'POST', previewInput),
+    queryFn: () => apiSend<DictTestResponse>('/dict/test', 'POST', previewInput),
     placeholderData: keepPreviousData,
   })
 

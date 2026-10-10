@@ -4,9 +4,9 @@ import { RouterProvider, createMemoryHistory, createRouter } from '@tanstack/rea
 import { act, cleanup, fireEvent, render, screen, waitFor } from '@testing-library/react'
 import { afterEach, beforeEach, expect, it, vi } from 'vitest'
 
-import { apiGet, apiSend } from '@/lib/api'
+import { apiGet, apiSend, UnreachableServerError } from '@/lib/api'
 
-import type { CorpusItem, CorpusResponse, StudioHealth } from '../../../shared/api-types'
+import type { CorpusItem, CorpusResponse } from '../../../shared/api-types'
 import { Route as rootRoute } from './__root'
 import { Route as reviewRoute } from './review'
 
@@ -36,12 +36,11 @@ const ITEMS = [
   item({ message_id: 'c', summary: '三つ目', verdict: 'good' }),
   item({ message_id: 'd', summary: '四つ目', verdict: 'bad', ideal: '' }),
 ]
-const HEALTH: StudioHealth = { pairvoice: null }
 
 beforeEach(() => {
   vi.mocked(apiGet).mockImplementation(async (path: string) => {
-    if (path === '/api/health') return HEALTH
-    if (path.startsWith('/api/corpus')) {
+    if (path === '/health') throw new UnreachableServerError('/health', new Error('down'))
+    if (path.startsWith('/corpus')) {
       const corpus: CorpusResponse = { total: ITEMS.length, items: ITEMS, prompt_changed_at: null }
       return corpus
     }
@@ -100,7 +99,7 @@ it('1 で 👍 を投稿し、未レビューから消えた行の次が選ば�
   await renderReview()
   await press('j')
   await press('1')
-  expect(apiSend).toHaveBeenCalledWith('/api/reviews', 'POST', {
+  expect(apiSend).toHaveBeenCalledWith('/reviews', 'POST', {
     message_id: 'a',
     verdict: 'good',
     ideal: '',
@@ -109,7 +108,7 @@ it('1 で 👍 を投稿し、未レビューから消えた行の次が選ば�
   expect(selectedRow()?.textContent).toContain('二つ目')
   // 続けて 1 を押せば、選び直さずに次の行も片付く
   await press('1')
-  expect(apiSend).toHaveBeenLastCalledWith('/api/reviews', 'POST', {
+  expect(apiSend).toHaveBeenLastCalledWith('/reviews', 'POST', {
     message_id: 'b',
     verdict: 'good',
     ideal: '',
@@ -161,14 +160,14 @@ it('Space で選択中の行を再生する', async () => {
   await press('j')
   await press(' ')
   const audio = document.querySelector('audio')!
-  expect(audio.src).toContain('/api/corpus/a/audio')
+  expect(audio.src).toContain('/corpus/a/audio')
 })
 
 it('e で選択中の行をアーカイブする', async () => {
   await renderReview()
   await press('j')
   await press('e')
-  expect(apiSend).toHaveBeenCalledWith('/api/archives', 'POST', { message_id: 'a', archived: true })
+  expect(apiSend).toHaveBeenCalledWith('/archives', 'POST', { message_id: 'a', archived: true })
 })
 
 it('絞り込みを「すべて」にすると評価済みの行も出る', async () => {
@@ -192,9 +191,9 @@ it('「…」メニューを開いている間は 1 を押しても投稿しな�
 
 it('辞書に追加を開いている間は 1 / j が行に効かず、フォームも閉じない', async () => {
   vi.mocked(apiGet).mockImplementation(async (path: string) => {
-    if (path === '/api/health') return HEALTH
-    if (path === '/api/dict') return { rows: [] }
-    if (path.startsWith('/api/corpus')) {
+    if (path === '/health') throw new UnreachableServerError('/health', new Error('down'))
+    if (path === '/dict') return { rows: [] }
+    if (path.startsWith('/corpus')) {
       const corpus: CorpusResponse = { total: ITEMS.length, items: ITEMS, prompt_changed_at: null }
       return corpus
     }
@@ -210,8 +209,8 @@ it('辞書に追加を開いている間は 1 / j が行に効かず、フォー
   })
   const popover = await screen.findByRole('dialog')
   for (const key of ['1', 'j', 'e']) await press(key, popover)
-  expect(apiSend).not.toHaveBeenCalledWith('/api/reviews', 'POST', expect.anything())
-  expect(apiSend).not.toHaveBeenCalledWith('/api/archives', 'POST', expect.anything())
+  expect(apiSend).not.toHaveBeenCalledWith('/reviews', 'POST', expect.anything())
+  expect(apiSend).not.toHaveBeenCalledWith('/archives', 'POST', expect.anything())
   expect(selectedRow()?.textContent).toContain('一つ目')
   expect(popover.querySelector('#add-dict-to')).toBeTruthy()
 })
@@ -224,7 +223,7 @@ it('投稿に失敗した行の理由は、次の行を操作した後も残る'
   expect(await screen.findByText('判定の投稿に失敗しました: boom')).toBeTruthy()
   expect(selectedRow()?.textContent).toContain('二つ目')
   await press('1')
-  expect(apiSend).toHaveBeenLastCalledWith('/api/reviews', 'POST', {
+  expect(apiSend).toHaveBeenLastCalledWith('/reviews', 'POST', {
     message_id: 'b',
     verdict: 'good',
     ideal: '',

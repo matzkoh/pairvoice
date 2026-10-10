@@ -16,8 +16,6 @@ from pathlib import Path
 _LOG_DIR = Path.home() / "Library" / "Logs"
 LOG_PATH = _LOG_DIR / "pairvoice.log"
 STDERR_LOG_PATH = _LOG_DIR / "pairvoice.stderr.log"
-# studio（Node）の標準出力と標準エラー。起動の1行と落ちたときの出力しか書かれないので回さない
-STUDIO_LOG_PATH = _LOG_DIR / "pairvoice-studio.log"
 MAX_BYTES = 10 * 1024 * 1024
 BACKUP_COUNT = 3
 

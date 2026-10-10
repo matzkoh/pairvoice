@@ -33,7 +33,7 @@ export function PromptEditor() {
       const value = typeof raw === 'string' ? raw : ''
       markSubmitted(value)
       try {
-        await apiSend('/api/prompt', 'PUT', { text: value })
+        await apiSend('/prompt', 'PUT', { text: value })
         await Promise.all([
           queryClient.invalidateQueries({ queryKey: ['prompt'] }),
           queryClient.invalidateQueries({ queryKey: ['prompt', 'history'] }),

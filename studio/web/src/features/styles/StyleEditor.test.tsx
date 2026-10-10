@@ -15,7 +15,7 @@ vi.mock('@/lib/api', async (importOriginal) => {
 
 beforeEach(() => {
   vi.mocked(apiSend).mockImplementation(async (path: string) => {
-    if (path === '/api/speak') return { relative_path: 'generations/x.wav', duration: 1.5 }
+    if (path === '/synthesize') return { relative_path: 'generations/x.wav', duration: 1.5 }
     return { ok: true }
   })
 })
@@ -56,7 +56,7 @@ function renderEditor(props: Partial<Props> = {}) {
 }
 
 function putBody() {
-  const call = vi.mocked(apiSend).mock.calls.find(([path]) => path === '/api/styles')
+  const call = vi.mocked(apiSend).mock.calls.find(([path]) => path === '/styles')
   return call?.[2]
 }
 
@@ -83,8 +83,8 @@ it('新しいスタイルはプロファイルの caption のまま読む。capt
   fireEvent.click(screen.getByRole('button', { name: /試聴/ }))
 
   await waitFor(() => expect(BASE.onPlay).toHaveBeenCalled())
-  const speak = vi.mocked(apiSend).mock.calls.find(([path]) => path === '/api/speak')?.[2]
-  expect(speak).toMatchObject({ profile_id: 'p-b' })
+  const speak = vi.mocked(apiSend).mock.calls.find(([path]) => path === '/synthesize')?.[2]
+  expect(speak).toMatchObject({ voice: 'p-b' })
   expect(speak).not.toHaveProperty('caption')
 
   fireEvent.click(screen.getByRole('button', { name: '保存' }))

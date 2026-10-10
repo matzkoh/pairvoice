@@ -111,7 +111,7 @@ it('再生成はそのテイクを作ったときの条件で行う', async () =
   vi.mocked(apiSend).mockClear()
   await click('最古を再生成')
   expect(apiSend).toHaveBeenCalledWith(
-    '/api/speak',
+    '/synthesize',
     'POST',
     expect.objectContaining({ caption: '声A', sampler: { num_steps: 40, rng_seed: 12 } }),
   )

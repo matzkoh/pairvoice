@@ -75,7 +75,7 @@ export function VoiceWorkbench({
 
   async function pickFromCorpus() {
     try {
-      const corpus = await apiGet<CorpusResponse>('/api/corpus?limit=1')
+      const corpus = await apiGet<CorpusResponse>('/corpus?limit=1')
       const latest = corpus.items[0]
       if (!latest) {
         onStatus({ message: '読み上げの記録がまだありません', isError: true })

@@ -55,7 +55,7 @@ def test_launch_agent_runs_this_python_and_keeps_alive_only_on_crash(tmp_path):
         "--log-file",
         str(tmp_path / "pairvoice.log"),
     ]
-    # メニューから studio を起こすとき node を探す。launchd の既定の PATH には載っていない
+    # 利用者のシェルの PATH を焼き込む。launchd の既定の PATH には Homebrew も mise も載っていない
     assert agent["EnvironmentVariables"] == {"PATH": "/opt/homebrew/bin:/usr/bin"}
     assert agent["RunAtLoad"] is True
     # 「pairvoice を終了」（終了コード 0）で落としたら戻さない。クラッシュしたときだけ戻す

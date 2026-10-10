@@ -80,8 +80,8 @@ export function StylesPage() {
           style={selected}
           styles={data.items}
           profiles={profiles}
-          baseSampler={health.pairvoice?.tts.sampler}
-          pairvoiceDown={health.pairvoice === null}
+          baseSampler={health?.tts.sampler}
+          pairvoiceDown={health === null}
           onPlay={play}
           onStatus={setStatus}
           onSaved={setSelectedName}

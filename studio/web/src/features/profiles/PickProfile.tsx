@@ -138,7 +138,7 @@ async function makeVoice(text: string, known: Point, signal?: AbortSignal) {
 
 async function measure(path: string, signal?: AbortSignal) {
   const { vector } = await apiSend<{ vector: number[] }>(
-    '/api/speaker-vector',
+    '/speaker-vector',
     'POST',
     { audio: path },
     { signal },

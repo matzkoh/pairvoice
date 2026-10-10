@@ -8,7 +8,7 @@ from urllib.error import HTTPError
 
 import pytest
 
-from pairvoice import cli, client, studio_process
+from pairvoice import cli, client
 from pairvoice.config import load_config
 
 
@@ -249,34 +249,28 @@ def test_menubar_subcommand_takes_the_parent_pid(monkeypatch, config_path):
     assert seen == [4321]
 
 
-def test_studio_subcommand_opens_the_studio(monkeypatch, config_path):
+def test_studio_subcommand_opens_the_page_the_server_serves(monkeypatch, config_path):
+    monkeypatch.setattr(client, "call", lambda *args, **kwargs: {"ok": True})
     opened = []
-    monkeypatch.setattr(studio_process, "open_studio", lambda: opened.append(True))
+    monkeypatch.setattr(
+        "pairvoice.studio_web.subprocess.Popen", lambda command, **kwargs: opened.append(command)
+    )
+
     assert cli.main(["--config", str(config_path), "studio"]) == 0
-    assert opened == [True]
+    assert opened == [["open", "http://127.0.0.1:17495/studio/"]]
 
 
-def test_studio_restart_rebuilds_only_the_studio(monkeypatch, config_path):
-    restarted = []
-    monkeypatch.setattr(studio_process, "restart_studio", lambda: restarted.append(True) or True)
-    monkeypatch.setattr(cli.launchd, "restart", lambda: pytest.fail("サーバーは再起動しないはず"))
-    assert cli.main(["--config", str(config_path), "studio", "--restart"]) == 0
-    assert restarted == [True]
+def test_studio_subcommand_reports_a_stopped_server(monkeypatch, capsys, config_path):
+    def unreachable(*args, **kwargs):
+        raise OSError("refused")
 
+    monkeypatch.setattr(client, "call", unreachable)
+    monkeypatch.setattr(
+        "pairvoice.studio_web.subprocess.Popen", lambda *a, **k: pytest.fail("開かないはず")
+    )
 
-def test_studio_restart_reports_a_studio_that_is_not_running(monkeypatch, capsys, config_path):
-    monkeypatch.setattr(studio_process, "restart_studio", lambda: False)
-    assert cli.main(["--config", str(config_path), "studio", "--restart"]) == 1
-    assert "pairvoice studio" in capsys.readouterr().err
-
-
-def test_studio_reports_missing_node(monkeypatch, capsys, config_path):
-    def no_node():
-        raise studio_process.NodeNotFound()
-
-    monkeypatch.setattr(studio_process, "open_studio", no_node)
     assert cli.main(["--config", str(config_path), "studio"]) == 1
-    assert "node が見つかりません" in capsys.readouterr().err
+    assert "pairvoice restart" in capsys.readouterr().err
 
 
 class FakeChild:
@@ -501,11 +495,9 @@ def test_commands_that_do_not_read_config_survive_a_broken_one(monkeypatch, brok
 
     monkeypatch.setattr(install, "uninstall", lambda: 0)
     monkeypatch.setattr(cli.launchd, "restart", lambda: 0)
-    monkeypatch.setattr(studio_process, "open_studio", lambda: None)
 
     assert cli.main(["--config", broken_config, "uninstall"]) == 0
     assert cli.main(["--config", broken_config, "restart"]) == 0
-    assert cli.main(["--config", broken_config, "studio"]) == 0
 
 
 def test_install_subcommand_keeps_a_symlinked_config_path(monkeypatch, tmp_path):

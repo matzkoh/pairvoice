@@ -25,7 +25,7 @@ export function usePlayer(): PlayerState {
     playingIdRef.current = messageId
     const player = audioRef.current
     if (!player) return
-    player.src = `/api/corpus/${encodeURIComponent(messageId)}/audio`
+    player.src = `/corpus/${encodeURIComponent(messageId)}/audio`
     void player.play().catch(() => {
       // autoplay 拒否等。実際のロード失敗（404 等）は <audio> の onError
       // （handleAudioError）側で拾う。
@@ -40,7 +40,7 @@ export function usePlayer(): PlayerState {
       // ルート未一致と区別できない（サーバーはどちらも同じ { error: 'not_found' }）
       // ため、このエンドポイントに 404 が起こり得ることを知っている呼び出し側で
       // 判定する。
-      await apiGetBlob(`/api/corpus/${encodeURIComponent(messageId)}/audio`, {
+      await apiGetBlob(`/corpus/${encodeURIComponent(messageId)}/audio`, {
         allowNotFound: true,
       })
       // 判定を待つ間に別の行を再生していたら、その再生のエラーではない

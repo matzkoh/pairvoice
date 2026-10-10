@@ -1,4 +1,4 @@
-// studio の /api/* を叩く唯一の入口。
+// pairvoice の API を叩く唯一の入口。画面も同じ pairvoice が配るので、同じオリジンで呼ぶ。
 // 失敗を必ず例外にし、本文を捨てない。画面はこの例外を見てエラーを出す。
 
 export class ApiError extends Error {
@@ -13,17 +13,20 @@ export class ApiError extends Error {
   }
 }
 
-// 404 は「そのルートがまだ無い」の意味になる。studio は常駐させて使うので、
-// コードを更新してもプロセスが古いままという状態が普通に起きる。原因の説明を
-// 例外の側に持たせて、画面が黙って固まらないようにする。
+// 404 は「そのルートがまだ無い」の意味になる。画面のタブを開いたまま pairvoice を
+// 古い版に戻すと起きる。原因の説明を例外の側に持たせて、画面が黙って固まらないようにする。
 export class StaleServerError extends ApiError {
   constructor(body: string) {
-    super(404, body, 'サーバーが古い可能性があります。studio を再起動してください。')
+    super(
+      404,
+      body,
+      'pairvoice が古い可能性があります。更新して `pairvoice restart` で再起動してください。',
+    )
     this.name = 'StaleServerError'
   }
 }
 
-// fetch 自体が reject するのは studio のプロセスが落ちているかネットワークが切れている
+// fetch 自体が reject するのは pairvoice が止まっている（再起動中を含む）
 // 場合で、応答が返ってくる 404（StaleServerError）とは別の障害モード。ブラウザが投げる
 // 'Failed to fetch' をそのまま画面に出しても打ち手が読み取れないので、ここで置き換える。
 // HTTP 応答が無い状況なので status は持たせない（嘘の数字を入れない）。そのため
@@ -33,7 +36,7 @@ export class UnreachableServerError extends Error {
 
   constructor(path: string, cause: unknown) {
     super(
-      'studio に接続できませんでした。studio が起動しているか確認し、落ちていれば再起動してください。',
+      'pairvoice に接続できませんでした。再起動中なら少し待ち、止まっていれば `pairvoice restart` で起動してください。',
       {
         cause,
       },
@@ -77,19 +80,19 @@ async function send(path: string, init?: RequestInit): Promise<Response> {
 
 export type ApiOptions = {
   // 既定は false: 404 は「そのルートがまだ無い」＝サーバーが古い、として
-  // StaleServerError にする。音声ファイル不在（GET /api/corpus/:id/audio）のように、
+  // StaleServerError にする。音声ファイル不在（GET /corpus/:id/audio）のように、
   // 404 が正当な業務上の答えになるエンドポイントだけ true にする。
   //
   // 判定は応答の本文ではなく「そのエンドポイントに 404 が起こり得ることを知っている」
-  // 呼び出し側に持たせる。業務上の 404 は中継先の pairvoice が返すので、本文の形に
-  // 頼ると pairvoice のエラーの形を変えたときに「サーバーが古い」へ化ける。
+  // 呼び出し側に持たせる。本文の形に頼ると、pairvoice のエラーの形を変えたときに
+  // 「サーバーが古い」へ化ける。
   allowNotFound?: boolean
   // 画面を離れた・次へ進んだときに、待っている要求を打ち切る
   signal?: AbortSignal
 }
 
-// サーバーは失敗を必ず { error, message? } か、pairvoice を中継した { error, detail? } の形で返す（badRequest は前者、
-// server.ts の badRequest 定義）。message・detail があれば人間向けの説明なのでそれを使い、
+// pairvoice は失敗を { error, detail? } の形で返す（FastAPI の 422 は detail が配列）。
+// message・detail が文字列なら人間向けの説明なのでそれを使い、
 // 無ければ error のコード（例: 'profile_in_use'）を使う。JSON として読めない
 // 応答（プロキシのエラーページ等）は今までどおり `${path}: ${status} ${body}` に
 // フォールバックする。body をそのまま message にすると、インライン表示（各画面）に生 JSON が
@@ -104,7 +107,6 @@ function describeError(path: string, status: number, body: string): string {
         error?: unknown
       }
       if (typeof message === 'string' && message) return message
-      // pairvoice を中継した応答は { error, detail } の形
       if (typeof detail === 'string' && detail) return detail
       if (typeof error === 'string' && error) return error
     }
@@ -166,7 +168,7 @@ export async function apiGetBlob(path: string, opts?: ApiOptions): Promise<Blob>
   return res.blob()
 }
 
-// 音声ファイルの取り込み（POST /api/profiles/upload）専用。apiSend のように JSON にすると
+// 音声ファイルの取り込み（POST /profiles/upload）専用。apiSend のように JSON にすると
 // バイト列が壊れるので、ファイルの型のまま本体として送る。
 export async function apiUpload<T>(path: string, file: Blob, opts?: ApiOptions): Promise<T> {
   const res = await send(path, {

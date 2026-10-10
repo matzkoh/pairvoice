@@ -71,7 +71,7 @@ type SpeakCall = {
 function speakCalls(): SpeakCall[] {
   return vi
     .mocked(apiSend)
-    .mock.calls.filter(([path]) => path === '/api/speak')
+    .mock.calls.filter(([path]) => path === '/synthesize')
     .map(([, , body]) => {
       if (!isRecord(body) || !isRecord(body.sampler)) throw new Error('unexpected body')
       return {
@@ -105,7 +105,7 @@ async function startPicking(known: Record<string, string> = {}) {
   let n = 0
   let anchor = 0
   vi.mocked(apiSend).mockImplementation(async (path: string) => {
-    if (path === '/api/speaker-vector') {
+    if (path === '/speaker-vector') {
       // 声ごとに向きの違う話者ベクトル
       const i = anchor++
       return { vector: Array.from({ length: 6 }, (_, j) => (i === j ? 1 : 0.2)) }
@@ -234,7 +234,7 @@ it('見つけた声に決めると、同じ混ぜ具合で合成の段数を増�
   })
 
   await waitFor(() =>
-    expect(vi.mocked(apiSend).mock.calls.some(([p]) => p === '/api/profiles')).toBe(true),
+    expect(vi.mocked(apiSend).mock.calls.some(([p]) => p === '/profiles')).toBe(true),
   )
   const remastered = speakCalls().filter((call) => call.steps === 80)
   expect(remastered.map((call) => call.text)).toEqual(['読ませる文です。', ...REFERENCE_TEXTS])
@@ -243,7 +243,7 @@ it('見つけた声に決めると、同じ混ぜ具合で合成の段数を増�
     expect(call.mix!.map((part) => part.audio)).toEqual([wav(1), wav(2), wav(3)])
     expect(call.mix).toEqual(remastered[0]!.mix)
   }
-  const saved = vi.mocked(apiSend).mock.calls.find(([p]) => p === '/api/profiles')![2]
+  const saved = vi.mocked(apiSend).mock.calls.find(([p]) => p === '/profiles')![2]
   // 作り直した音声（試聴の A の wav ではない）をつないで参照音声にする
   // 声は参照音声が決めるので、caption は空
   expect(saved).toMatchObject({ name: '見つけた声', caption: '' })

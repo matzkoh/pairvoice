@@ -64,7 +64,7 @@ export function useTakes({ onReady }: Options = {}) {
   const [running, setRunning] = useState(false)
   // 「いま生成ループが動いているか」の正本。state の running はレンダー用の派生値で、
   // 同一 tick 内に start/retry が連続で呼ばれても反映は次のレンダーからになり、二重発火を
-  // 防げない。ref を正本にして入口で弾き、/api/speak を常に1件ずつ叩く不変条件を守る。
+  // 防げない。ref を正本にして入口で弾き、/api/synthesize を常に1件ずつ叩く不変条件を守る。
   const busy = useRef(false)
   const stopped = useRef(false)
   // 画面を離れた（プロファイルを切り替えた）後に残りを投げると、Runner を塞いでフックの
@@ -117,7 +117,7 @@ export function useTakes({ onReady }: Options = {}) {
         caption: take.input.caption,
         sampler: { ...take.input.sampler, rng_seed: take.seed },
         design: take.input.design,
-        profile_id: take.input.profileId,
+        voice: take.input.profileId,
       })
       patch(take.id, {
         status: 'done',

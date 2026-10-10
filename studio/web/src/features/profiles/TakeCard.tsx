@@ -52,7 +52,7 @@ export function TakeCard({
       try {
         // 採用はプロファイルの caption の書き換え。常駐サーバーが合成のたびに読むので
         // 再起動は要らない
-        await apiSend(`/api/profiles/${encodeURIComponent(profileId)}`, 'PATCH', {
+        await apiSend(`/profiles/${encodeURIComponent(profileId)}`, 'PATCH', {
           caption: take.input.caption,
         })
         await invalidateProfiles(queryClient)

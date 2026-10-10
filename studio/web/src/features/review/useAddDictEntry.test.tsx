@@ -46,7 +46,7 @@ it('書く直前に取り直した辞書へ1行足して PUT し、キャッシ�
     { from: 'API', to: 'エーピーアイ', memo: '' },
     { from: 'PR', to: 'ピーアール', memo: '' },
   ]
-  expect(apiGet).toHaveBeenCalledWith('/api/dict')
-  expect(apiSend).toHaveBeenCalledWith('/api/dict', 'PUT', { rows: expected })
+  expect(apiGet).toHaveBeenCalledWith('/dict')
+  expect(apiSend).toHaveBeenCalledWith('/dict', 'PUT', { rows: expected })
   expect(queryClient.getQueryData<DictResponse>(['dict'])?.rows).toEqual(expected)
 })

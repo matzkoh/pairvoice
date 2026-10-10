@@ -48,7 +48,7 @@ it('音声が404のときは「音声ファイルが見つかりません」と�
     screen.getByRole('button', { name: 'onError発火' }).click()
   })
 
-  expect(apiGetBlob).toHaveBeenCalledWith('/api/corpus/m1/audio', { allowNotFound: true })
+  expect(apiGetBlob).toHaveBeenCalledWith('/corpus/m1/audio', { allowNotFound: true })
   expect(screen.getByText('音声ファイルが見つかりません')).toBeTruthy()
 })
 

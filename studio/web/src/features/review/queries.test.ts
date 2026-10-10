@@ -43,8 +43,8 @@ describe('corpusQueryOptions().queryFn', () => {
     const result = await corpusQueryOptions().queryFn!({} as never)
 
     expect(vi.mocked(apiGet).mock.calls).toEqual([
-      ['/api/corpus?limit=500'],
-      ['/api/corpus?limit=500&offset=2'],
+      ['/corpus?limit=500'],
+      ['/corpus?limit=500&offset=2'],
     ])
     expect(result.items.map((i) => i.message_id)).toEqual(['a', 'b', 'c'])
     expect(result.total).toBe(3)
@@ -73,7 +73,7 @@ describe('corpusQueryOptions().queryFn', () => {
   it('2ページ目以降はまとめて並行に取り、offset の順につなぐ', async () => {
     let releaseSecond: (() => void) | undefined
     vi.mocked(apiGet).mockImplementation(async (path: string) => {
-      if (path === '/api/corpus?limit=500') return page(chunk('a'), 1200)
+      if (path === '/corpus?limit=500') return page(chunk('a'), 1200)
       if (path.endsWith('offset=500')) {
         // 後ろのページが先に返っても順序が崩れないことを見るため、2ページ目を遅らせる
         await new Promise<void>((resolve) => {

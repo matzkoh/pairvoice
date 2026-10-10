@@ -4,9 +4,9 @@ import { RouterProvider, createMemoryHistory, createRouter } from '@tanstack/rea
 import { cleanup, render, waitFor } from '@testing-library/react'
 import { afterEach, beforeEach, expect, it, vi } from 'vitest'
 
-import { apiGet } from '@/lib/api'
+import { apiGet, UnreachableServerError } from '@/lib/api'
 
-import type { CorpusResponse, ProfilesResponse, StudioHealth } from '../../../shared/api-types'
+import type { CorpusResponse, ProfilesResponse } from '../../../shared/api-types'
 import { routeTree } from '../router'
 
 vi.mock('@/lib/api', async (importOriginal) => {
@@ -16,15 +16,12 @@ vi.mock('@/lib/api', async (importOriginal) => {
 
 beforeEach(() => {
   vi.mocked(apiGet).mockImplementation(async (path: string) => {
-    if (path === '/api/health') {
-      const health: StudioHealth = { pairvoice: null }
-      return health
-    }
-    if (path === '/api/profiles') {
+    if (path === '/health') throw new UnreachableServerError('/health', new Error('down'))
+    if (path === '/profiles') {
       const profiles: ProfilesResponse = { items: [], active: null }
       return profiles
     }
-    if (path.startsWith('/api/corpus')) {
+    if (path.startsWith('/corpus')) {
       const corpus: CorpusResponse = { total: 0, items: [], prompt_changed_at: null }
       return corpus
     }

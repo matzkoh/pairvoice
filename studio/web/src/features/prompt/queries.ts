@@ -7,6 +7,6 @@ import type { PromptResponse } from '../../../../shared/api-types'
 export function promptQueryOptions() {
   return queryOptions({
     queryKey: ['prompt'] as const,
-    queryFn: () => apiGet<PromptResponse>('/api/prompt'),
+    queryFn: () => apiGet<PromptResponse>('/prompt'),
   })
 }

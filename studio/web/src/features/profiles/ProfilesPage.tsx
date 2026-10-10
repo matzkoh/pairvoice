@@ -67,9 +67,9 @@ export function ProfilesPage() {
         {selected === null ? (
           <NewProfile
             initialCaption={activeItem?.caption ?? ''}
-            anchorText={health.pairvoice?.tts.anchor_text ?? ''}
-            sampler={health.pairvoice?.tts.sampler}
-            pairvoiceDown={health.pairvoice === null}
+            anchorText={health?.tts.anchor_text ?? ''}
+            sampler={health?.tts.sampler}
+            pairvoiceDown={health === null}
             onPlay={play}
             onStatus={setStatus}
             onCreated={select}
@@ -87,9 +87,9 @@ export function ProfilesPage() {
             <VoiceWorkbench
               profileId={selected.id}
               adoptedCaption={selected.caption}
-              sampler={health.pairvoice?.tts.sampler}
-              pairvoiceDown={health.pairvoice === null}
-              outdated={pairvoiceOutdated(health.pairvoice)}
+              sampler={health?.tts.sampler}
+              pairvoiceDown={health === null}
+              outdated={pairvoiceOutdated(health)}
               onPlay={play}
               onStatus={setStatus}
             />

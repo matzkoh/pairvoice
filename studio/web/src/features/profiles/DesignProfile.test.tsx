@@ -39,7 +39,7 @@ function renderDesign() {
 
 it('候補は参照音声を使わない design で作り、選んだ候補の音声からプロファイルを作る', async () => {
   vi.mocked(apiSend).mockImplementation(async (path: string) =>
-    path === '/api/speak'
+    path === '/synthesize'
       ? { relative_path: 'generations/candidate.wav', duration: 9.5 }
       : { id: 'p-new', name: '作った声' },
   )
@@ -51,14 +51,14 @@ it('候補は参照音声を使わない design で作り、選んだ候補の�
   })
 
   const [path, method, body] = vi.mocked(apiSend).mock.calls[0]!
-  expect([path, method]).toEqual(['/api/speak', 'POST'])
+  expect([path, method]).toEqual(['/synthesize', 'POST'])
   expect(body).toMatchObject({
     text: 'pairvoice が申告した文です。',
     caption: 'やわらかい声。',
     design: true,
   })
   // 最初に鳴らせるようになった候補はすぐ鳴らす
-  expect(onPlay).toHaveBeenCalledWith('/api/audio?path=generations%2Fcandidate.wav')
+  expect(onPlay).toHaveBeenCalledWith('/audio?path=generations%2Fcandidate.wav')
 
   // 名前の欄は、保存すると決めてから開く
   expect(screen.queryByRole('textbox', { name: '候補 #1 の名前' })).toBeNull()
@@ -71,7 +71,7 @@ it('候補は参照音声を使わない design で作り、選んだ候補の�
     key: 'Enter',
     isComposing: true,
   })
-  expect(vi.mocked(apiSend).mock.calls.some(([p]) => p === '/api/profiles')).toBe(false)
+  expect(vi.mocked(apiSend).mock.calls.some(([p]) => p === '/profiles')).toBe(false)
   await act(async () => {
     fireEvent.click(screen.getByRole('button', { name: 'この声で作る' }))
   })
@@ -90,7 +90,7 @@ it('候補は参照音声を使わない design で作り、選んだ候補の�
       sampler: { num_steps: 80 },
     }),
   )
-  expect(apiSend).toHaveBeenLastCalledWith('/api/profiles', 'POST', {
+  expect(apiSend).toHaveBeenLastCalledWith('/profiles', 'POST', {
     name: '作った声',
     caption: 'やわらかい声。',
     takes: Array.from({ length: REFERENCE_TEXTS.length + 1 }, () => 'generations/candidate.wav'),

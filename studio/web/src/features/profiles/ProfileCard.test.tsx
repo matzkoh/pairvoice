@@ -65,7 +65,7 @@ it('「使う」で使用中を切り替える', async () => {
     fireEvent.click(screen.getByRole('button', { name: '使う' }))
   })
 
-  expect(apiSend).toHaveBeenCalledWith('/api/profiles/active', 'PUT', { id: 'p-b' })
+  expect(apiSend).toHaveBeenCalledWith('/profiles/active', 'PUT', { id: 'p-b' })
   expect(onStatus).toHaveBeenCalledWith(expect.objectContaining({ isError: false }))
 })
 
@@ -78,14 +78,14 @@ it('削除したら知らせる', async () => {
     fireEvent.click(screen.getByRole('button', { name: '本当に削除' }))
   })
 
-  expect(apiSend).toHaveBeenCalledWith('/api/profiles/p-b', 'DELETE')
+  expect(apiSend).toHaveBeenCalledWith('/profiles/p-b', 'DELETE')
   expect(onDeleted).toHaveBeenCalled()
 })
 
 it('参照音声を再生できる', () => {
   const { onPlay } = renderCard()
   fireEvent.click(screen.getByRole('button', { name: '別の声 の参照音声を再生' }))
-  expect(onPlay).toHaveBeenCalledWith('/api/profiles/p-b/audio')
+  expect(onPlay).toHaveBeenCalledWith('/profiles/p-b/audio')
 })
 
 it('名前をクリックすると変更でき、Enter で保存する', async () => {
@@ -99,7 +99,7 @@ it('名前をクリックすると変更でき、Enter で保存する', async (
     fireEvent.keyDown(input, { key: 'Enter' })
   })
 
-  expect(apiSend).toHaveBeenCalledWith('/api/profiles/p-b', 'PATCH', { name: '新しい名前' })
+  expect(apiSend).toHaveBeenCalledWith('/profiles/p-b', 'PATCH', { name: '新しい名前' })
 })
 
 // 入力欄が消えるとき、ブラウザはフォーカスを失った blur を送ってくることがある

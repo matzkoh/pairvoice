@@ -30,7 +30,7 @@ export function ProfileCard({ item, isActive, onPlay, onStatus, onDeleted }: Pro
   // 1回の編集で確定か取り消しのどちらか1度だけ。入力欄が消えるときにブラウザが blur を
   // 送ってくるので、Enter の後に二重に保存し、Escape の後にも保存してしまう
   const editing = useRef(false)
-  const path = `/api/profiles/${encodeURIComponent(item.id)}`
+  const path = `/profiles/${encodeURIComponent(item.id)}`
 
   function run(work: () => Promise<unknown>, done: string, after?: () => void) {
     startTransition(async () => {
@@ -103,7 +103,7 @@ export function ProfileCard({ item, isActive, onPlay, onStatus, onDeleted }: Pro
               disabled={pending}
               onClick={() =>
                 run(
-                  () => apiSend('/api/profiles/active', 'PUT', { id: item.id }),
+                  () => apiSend('/profiles/active', 'PUT', { id: item.id }),
                   `「${item.name}」を使います（次の読み上げから効きます）`,
                 )
               }

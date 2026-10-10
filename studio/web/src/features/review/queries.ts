@@ -12,7 +12,7 @@ const REVIEW_FETCH_CHUNK = 500
 // 絞り込み・検索・件数表示を全件に対して正しく保つには全件を手元に持つ必要がある
 // visible をサーバーの limit にはしない。
 async function fetchAllCorpus(): Promise<CorpusResponse> {
-  const first = await apiGet<CorpusResponse>(`/api/corpus?limit=${REVIEW_FETCH_CHUNK}`)
+  const first = await apiGet<CorpusResponse>(`/corpus?limit=${REVIEW_FETCH_CHUNK}`)
   const offsets: number[] = []
   // 1ページ目が空なら total が壊れている。続きを取っても進まないので打ち切る
   if (first.items.length > 0) {
@@ -22,7 +22,7 @@ async function fetchAllCorpus(): Promise<CorpusResponse> {
   }
   const rest = await Promise.all(
     offsets.map((offset) =>
-      apiGet<CorpusResponse>(`/api/corpus?limit=${REVIEW_FETCH_CHUNK}&offset=${offset}`),
+      apiGet<CorpusResponse>(`/corpus?limit=${REVIEW_FETCH_CHUNK}&offset=${offset}`),
     ),
   )
   const items = first.items.slice()

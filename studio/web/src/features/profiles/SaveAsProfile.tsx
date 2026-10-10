@@ -50,7 +50,7 @@ export function SaveAsProfile({
       try {
         const takes = await record((done, total) => setProgress({ done, total }))
         setProgress({ done: takes.length, total: takes.length })
-        const created = await apiSend<ProfileItem>('/api/profiles', 'POST', {
+        const created = await apiSend<ProfileItem>('/profiles', 'POST', {
           name: name.trim(),
           caption,
           takes,

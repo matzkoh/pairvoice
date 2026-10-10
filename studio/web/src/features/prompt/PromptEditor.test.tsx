@@ -15,8 +15,8 @@ vi.mock('@/lib/api', async (importOriginal) => {
 
 beforeEach(() => {
   vi.mocked(apiGet).mockImplementation(async (path: string) => {
-    if (path === '/api/prompt') return { text: '元のプロンプト' }
-    if (path === '/api/prompt/history') return { items: [] }
+    if (path === '/prompt') return { text: '元のプロンプト' }
+    if (path === '/prompt/history') return { items: [] }
     throw new Error(`unexpected path in test: ${path}`)
   })
   vi.mocked(apiSend).mockResolvedValue({ ok: true })
@@ -46,7 +46,7 @@ it('保存すると本文を PUT し、保存しましたと出す', async () =>
   await act(async () => {
     fireEvent.click(screen.getByRole('button', { name: '保存（旧版は履歴へ）' }))
   })
-  expect(apiSend).toHaveBeenCalledWith('/api/prompt', 'PUT', { text: '新しいプロンプト' })
+  expect(apiSend).toHaveBeenCalledWith('/prompt', 'PUT', { text: '新しいプロンプト' })
   expect(await screen.findByText('保存しました')).toBeTruthy()
 })
 
@@ -60,8 +60,8 @@ it('変更を破棄すると保存済みの本文に戻る', async () => {
 it('保存中に打ち足した分は、保存した本文が戻ってきても消さない', async () => {
   let serverText = '元のプロンプト'
   vi.mocked(apiGet).mockImplementation(async (path: string) => {
-    if (path === '/api/prompt') return { text: serverText }
-    if (path === '/api/prompt/history') return { items: [] }
+    if (path === '/prompt') return { text: serverText }
+    if (path === '/prompt/history') return { items: [] }
     throw new Error(`unexpected path in test: ${path}`)
   })
   const saving = Promise.withResolvers<unknown>()

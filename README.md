@@ -38,7 +38,7 @@ Claude Code に入れるプラグインが返事を受け取り、手元で常�
 **1. 必要なものをそろえる**
 
 - Apple Silicon の Mac（ユニファイドメモリ 32GB 以上を推奨。下の「動作要件」を参照）
-- [uv](https://docs.astral.sh/uv/)、Node 24.13 以降、`jq`（`brew install jq`）
+- [uv](https://docs.astral.sh/uv/)、`jq`（`brew install jq`）
 
 **2. 入れる**
 
@@ -123,7 +123,7 @@ Claude Code の読み上げでは、環境変数 `PAIRVOICE_VOICE` と `PAIRVOIC
 識別子を読み上げてしまったり、知りたかった結果を落としたりすることがある。
 読み上げの履歴に印を付けておくと、それを材料に要約の指示と辞書を直せる。
 
-studio はメニューの「studio を開く」か `pairvoice studio` で起動する（`127.0.0.1:17494` だけで待ち受ける）。
+studio は常駐サーバーが `http://127.0.0.1:17495/studio/` で配っている。メニューの「studio を開く」か `pairvoice studio` で開く。
 
 | 画面 | できること |
 | --- | --- |
@@ -149,7 +149,7 @@ studio はメニューの「studio を開く」か `pairvoice studio` で起動�
 | `pairvoice stop` | 鳴っている読み上げと、順番待ちの読み上げを止める |
 | `pairvoice warmup` | モデルを読み込み、終わるまで待つ（初回はダウンロードも） |
 | `pairvoice restart` | 常駐サーバーを再起動する（設定を変えたら要る） |
-| `pairvoice studio` | studio を開く（`--restart` で studio だけを立て直す） |
+| `pairvoice studio` | studio をブラウザで開く |
 | `pairvoice eval` | 要約の指示やモデルを規則で採点する（`--reviews` でレビューも使う、`--model` で別のモデルを試す） |
 
 「終了」で止めたサーバーは、ログインし直すか `launchctl kickstart gui/$(id -u)/local.pairvoice` で戻る。

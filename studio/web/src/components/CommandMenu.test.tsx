@@ -4,9 +4,9 @@ import { RouterProvider, createMemoryHistory, createRouter } from '@tanstack/rea
 import { act, cleanup, fireEvent, render, screen, waitFor } from '@testing-library/react'
 import { afterEach, beforeEach, expect, it, vi } from 'vitest'
 
-import { apiGet, apiSend } from '@/lib/api'
+import { apiGet, apiSend, UnreachableServerError } from '@/lib/api'
 
-import type { CorpusResponse, DictResponse, StudioHealth } from '../../../shared/api-types'
+import type { CorpusResponse, DictResponse } from '../../../shared/api-types'
 import { routeTree } from '../router'
 
 vi.mock('@/lib/api', async (importOriginal) => {
@@ -16,15 +16,12 @@ vi.mock('@/lib/api', async (importOriginal) => {
 
 beforeEach(() => {
   vi.mocked(apiGet).mockImplementation(async (path: string) => {
-    if (path === '/api/health') {
-      const health: StudioHealth = { pairvoice: null }
-      return health
-    }
-    if (path.startsWith('/api/corpus')) {
+    if (path === '/health') throw new UnreachableServerError('/health', new Error('down'))
+    if (path.startsWith('/corpus')) {
       const corpus: CorpusResponse = { total: 0, items: [], prompt_changed_at: null }
       return corpus
     }
-    if (path === '/api/dict') {
+    if (path === '/dict') {
       const dict: DictResponse = { rows: [] }
       return dict
     }
@@ -81,7 +78,7 @@ it('↓ で選択を動かしてミュートを実行できる', async () => {
   await act(async () => {
     fireEvent.keyDown(input, { key: 'Enter' })
   })
-  await waitFor(() => expect(apiSend).toHaveBeenCalledWith('/api/mute', 'POST', { minutes: 60 }))
+  await waitFor(() => expect(apiSend).toHaveBeenCalledWith('/mute', 'POST', { minutes: 60 }))
 })
 
 it('一致しなければそう出す', async () => {

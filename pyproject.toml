@@ -54,14 +54,10 @@ build-backend = "hatchling.build"
 [tool.hatch.build.targets.wheel]
 packages = ["src/pairvoice"]
 
-# 利用者はビルドしない。studio はビルド済みの web/dist ごと、雛形も一緒にパッケージの中へ入れる。
-# web/dist は git で追跡しないので、公開前に `cd studio && pnpm build` が要る。無ければ
-# ビルド自体が失敗する
+# 利用者はビルドしない。studio の画面はビルド済みの web/dist を、雛形と一緒にパッケージの中へ
+# 入れ、常駐サーバーが /studio/ で配る。web/dist は git で追跡しないので、公開前に
+# `cd studio && pnpm build` が要る。無ければビルド自体が失敗する
 [tool.hatch.build.targets.wheel.force-include]
-"studio/server.ts" = "pairvoice/studio/server.ts"
-"studio/server" = "pairvoice/studio/server"
-"studio/package.json" = "pairvoice/studio/package.json"
-"studio/shared" = "pairvoice/studio/shared"
 "studio/web/dist" = "pairvoice/studio/web/dist"
 "examples" = "pairvoice/examples"
 

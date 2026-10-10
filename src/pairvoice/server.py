@@ -15,7 +15,7 @@ from fastapi.openapi.models import Example
 from fastapi.responses import JSONResponse
 from pydantic import BaseModel, ConfigDict, Field, StrictInt, model_validator
 
-from . import evaluation, launchd, studio_process
+from . import evaluation, launchd
 from .api_errors import ErrorResponse, fail, install_error_handlers
 from .api_errors import error_doc as _error
 from .audio_state import AudioProbe
@@ -26,9 +26,10 @@ from .lifecycle import Engine, ModelUnavailable, MutedError, Superseded, limit_m
 from .llm import MlxLmBackend
 from .mute import MAX_MINUTES, MIN_MINUTES, InvalidMinutes, MuteController
 from .prompt import PromptStore
+from .studio_web import mount_studio, open_studio
 from .tts import MlxAudioBackend
 
-# studio（studio/server/app.ts）と同じ基準。ポートは問わない
+# ポートは問わない（開発中の Vite の :17493 から来るため）
 LOCAL_HOSTNAMES = frozenset({"127.0.0.1", "localhost", "[::1]"})
 
 
@@ -43,7 +44,7 @@ def is_local_request(host: str | None, origin: str | None) -> bool:
 
     127.0.0.1 にだけ待ち受けても、外部のページから2つの経路で届く。DNS rebinding では Host が
     外部の名前のまま届き、単純な POST（no-cors）では Host は 127.0.0.1 でも Origin に外部の
-    ページが付く。Origin はブラウザしか付けないので、無ければ通す（フック、CLI、studio の中継）。
+    ページが付く。Origin はブラウザしか付けないので、無ければ通す（フック、CLI）。
     """
     if host is None or _hostname(host) not in LOCAL_HOSTNAMES:
         return False
@@ -452,10 +453,7 @@ def create_app(engine: Engine) -> FastAPI:
 
     @app.post("/restart", status_code=202, summary="常駐サーバーを再起動する", tags=["運用"])
     async def restart(background: BackgroundTasks):
-        """応答を返してから LaunchAgent に再起動させる。config.toml の変更を反映するのに使う。
-
-        studio は切り離して動いているので再起動されない（`/studio/restart`）。
-        """
+        """応答を返してから LaunchAgent に再起動させる。config.toml の変更を反映するのに使う。"""
         background.add_task(launchd.restart)
         return {"restarting": True}
 
@@ -466,31 +464,10 @@ def create_app(engine: Engine) -> FastAPI:
         background.add_task(os.kill, os.getpid(), signal.SIGTERM)
         return {"stopping": True}
 
-    @app.post(
-        "/studio/open",
-        summary="studio をブラウザで開く",
-        tags=["運用"],
-        responses={503: _error("`node_not_found`")},
-    )
-    def open_studio():
-        """動いていなければ起動してから開く。"""
-        studio_process.open_studio()
-        return {"url": f"http://127.0.0.1:{studio_process.STUDIO_PORT}"}
-
-    @app.post(
-        "/studio/restart",
-        summary="studio を立て直す",
-        tags=["運用"],
-        responses={
-            409: _error("`studio_not_running`（動いていない。`/studio/open` で起動する）"),
-            503: _error("`node_not_found`"),
-        },
-    )
-    def restart_studio():
-        """動いている studio だけを止めて起動し直す。開いているタブは再読み込みが要る。"""
-        if not studio_process.restart_studio():
-            return fail(409, "studio_not_running")
-        return {"restarted": True}
+    @app.post("/studio/open", summary="studio をブラウザで開く", tags=["運用"])
+    def open_studio_page():
+        """studio の画面はこの常駐サーバーが `/studio/` で配っている。"""
+        return {"url": open_studio(f"http://127.0.0.1:{engine.config.port}")}
 
     def load_eval_inputs(request: EvalRequest) -> tuple[str, list[evaluation.Case]]:
         system = request.prompt if request.prompt is not None else PromptStore(data_root).read()
@@ -523,4 +500,6 @@ def create_app(engine: Engine) -> FastAPI:
 
     app.include_router(data_router(data_root, engine.synthesize))
     app.include_router(corpus_router(data_root))
+    # 画面の道筋は API のあとに足す（API と同じ名前を画面に取られない）
+    mount_studio(app)
     return app

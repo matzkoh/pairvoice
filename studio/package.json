@@ -9,11 +9,9 @@
     "format:check": "oxfmt --check",
     "lint": "oxlint --type-aware",
     "preview": "vite preview --config web/vite.config.ts",
-    "start": "node server.ts",
-    "test": "node --test server.test.ts",
     "test:web": "vitest run --root web",
     "test:web:watch": "vitest --root web",
-    "typecheck": "tsc --noEmit && tsc --noEmit -p web/tsconfig.json"
+    "typecheck": "tsc --noEmit -p web/tsconfig.json"
   },
   "devDependencies": {
     "@babel/core": "^8.0.6",
