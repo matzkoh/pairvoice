@@ -1,8 +1,8 @@
 import { afterEach, describe, expect, it, vi } from 'vitest'
 
 import { apiGet } from '@/lib/api'
+import type { CorpusResponse } from '@/lib/api-types'
 
-import type { CorpusResponse } from '../../../../shared/api-types'
 import { corpusQueryOptions } from './queries'
 
 vi.mock('@/lib/api', () => ({

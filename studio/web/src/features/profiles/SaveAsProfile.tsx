@@ -5,9 +5,9 @@ import { useState, useTransition } from 'react'
 import { Button } from '@/components/ui/button'
 import { Input } from '@/components/ui/input'
 import { apiSend, toErrorMessage } from '@/lib/api'
+import type { ProfileItem } from '@/lib/api-types'
 import { isImeConfirm } from '@/lib/hotkeys'
 
-import type { ProfileItem } from '../../../../shared/api-types'
 import { ProgressBar } from './ProgressBar'
 import { invalidateProfiles, type ProfileStatus } from './queries'
 

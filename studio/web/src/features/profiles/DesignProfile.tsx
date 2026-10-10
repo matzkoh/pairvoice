@@ -3,9 +3,9 @@ import { useState } from 'react'
 
 import { Button } from '@/components/ui/button'
 import { Textarea } from '@/components/ui/textarea'
+import type { SamplerOverrides } from '@/lib/api-types'
 import { audioFileUrl } from '@/lib/speak'
 
-import type { SamplerOverrides } from '../../../../shared/api-types'
 import { Field } from './Field'
 import { MASTER_STEPS, recordTakes, REFERENCE_TEXTS, synth } from './mixSynth'
 import type { ProfileStatus } from './queries'

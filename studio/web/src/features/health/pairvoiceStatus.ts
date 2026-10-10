@@ -1,4 +1,4 @@
-import type { PairvoiceHealth } from '../../../../shared/api-types'
+import type { PairvoiceHealth } from '@/lib/api-types'
 
 // 赤緑2値にせず理由を文字で出すのが運用の核心要件で、「読み上げが来ない理由の
 // 切り分け」がこの1行に集約されている。

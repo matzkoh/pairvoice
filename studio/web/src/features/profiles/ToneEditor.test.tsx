@@ -10,8 +10,8 @@ import { act, cleanup, fireEvent, render, screen } from '@testing-library/react'
 import { afterEach, expect, it, vi } from 'vitest'
 
 import { apiSend } from '@/lib/api'
+import type { ProfileItem } from '@/lib/api-types'
 
-import type { ProfileItem } from '../../../../shared/api-types'
 import { ToneEditor } from './ToneEditor'
 
 vi.mock('@/lib/api', async (importOriginal) => {

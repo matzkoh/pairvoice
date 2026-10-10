@@ -5,8 +5,8 @@ import { cleanup, render, waitFor } from '@testing-library/react'
 import { afterEach, beforeEach, expect, it, vi } from 'vitest'
 
 import { apiGet, UnreachableServerError } from '@/lib/api'
+import type { CorpusResponse, ProfilesResponse } from '@/lib/api-types'
 
-import type { CorpusResponse, ProfilesResponse } from '../../../shared/api-types'
 import { routeTree } from '../router'
 
 vi.mock('@/lib/api', async (importOriginal) => {

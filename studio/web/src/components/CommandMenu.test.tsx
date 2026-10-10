@@ -5,8 +5,8 @@ import { act, cleanup, fireEvent, render, screen, waitFor } from '@testing-libra
 import { afterEach, beforeEach, expect, it, vi } from 'vitest'
 
 import { apiGet, apiSend, UnreachableServerError } from '@/lib/api'
+import type { CorpusResponse, DictResponse } from '@/lib/api-types'
 
-import type { CorpusResponse, DictResponse } from '../../../shared/api-types'
 import { routeTree } from '../router'
 
 vi.mock('@/lib/api', async (importOriginal) => {

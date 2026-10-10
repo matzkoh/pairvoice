@@ -2,8 +2,8 @@ import { useQueryClient } from '@tanstack/react-query'
 import { useRef, useState, useTransition } from 'react'
 
 import { apiSend, toErrorMessage } from '@/lib/api'
+import type { CorpusItem, CorpusResponse } from '@/lib/api-types'
 
-import type { CorpusItem, CorpusResponse } from '../../../../shared/api-types'
 import { CORPUS_COUNTS_KEY } from './queries'
 
 export const BULK_ERROR_ID = '__bulk__'

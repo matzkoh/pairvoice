@@ -1,6 +1,7 @@
 import { describe, expect, it } from 'vitest'
 
-import type { ModelState, PairvoiceHealth } from '../../../../shared/api-types'
+import type { ModelState, PairvoiceHealth } from '@/lib/api-types'
+
 import { pairvoiceStatus } from './pairvoiceStatus'
 
 function health(over: Partial<PairvoiceHealth> = {}): PairvoiceHealth {

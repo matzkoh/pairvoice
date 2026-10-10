@@ -1,4 +1,4 @@
-import type { DictRowData } from '../../../../shared/api-types'
+import type { DictRowData } from '@/lib/api-types'
 
 export function findDictRow(rows: readonly DictRowData[], from: string): DictRowData | undefined {
   const key = from.trim()

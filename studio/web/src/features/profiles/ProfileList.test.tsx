@@ -2,7 +2,8 @@
 import { cleanup, fireEvent, render, screen } from '@testing-library/react'
 import { afterEach, expect, it, vi } from 'vitest'
 
-import type { ProfileItem } from '../../../../shared/api-types'
+import type { ProfileItem } from '@/lib/api-types'
+
 import { ProfileList } from './ProfileList'
 
 afterEach(cleanup)

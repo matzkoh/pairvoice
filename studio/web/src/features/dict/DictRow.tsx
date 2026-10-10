@@ -1,8 +1,7 @@
 import { X } from 'lucide-react'
 
 import { Button } from '@/components/ui/button'
-
-import type { DictRowData } from '../../../../shared/api-types'
+import type { DictRowData } from '@/lib/api-types'
 
 // サーバーの応答には行の id が無い。編集中に行が動いても入力欄の同一性を保つため、
 // クライアントで採番した id を持たせる。key に内容を使うと1文字打つたびに input が作り直される。

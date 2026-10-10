@@ -2,8 +2,7 @@ import { queryOptions } from '@tanstack/react-query'
 
 import type { HistorySource } from '@/features/history/queries'
 import { apiGet } from '@/lib/api'
-
-import type { PromptResponse } from '../../../../shared/api-types'
+import type { PromptResponse } from '@/lib/api-types'
 
 // 要約のプロンプトは、共通の部分に声の口調を足して組む（pairvoice が読み上げのたびに組む）。
 // この画面で直すのは共通の部分と、口調を持たない声が使う既定の口調。声の口調はプロファイル画面で直す

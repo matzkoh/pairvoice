@@ -2,8 +2,7 @@ import { type QueryClient, queryOptions } from '@tanstack/react-query'
 
 import type { HistorySource } from '@/features/history/queries'
 import { apiGet } from '@/lib/api'
-
-import type { ProfilesResponse } from '../../../../shared/api-types'
+import type { ProfilesResponse } from '@/lib/api-types'
 
 // 画面上部に1行で出す操作の結果。プロファイル画面の部品（中身・試聴・作成）が共有する
 export type ProfileStatus = { message: string; isError: boolean }

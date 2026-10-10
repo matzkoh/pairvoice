@@ -7,8 +7,8 @@ import { Button, buttonVariants } from '@/components/ui/button'
 import { Input } from '@/components/ui/input'
 import { Textarea } from '@/components/ui/textarea'
 import { apiUpload, toErrorMessage } from '@/lib/api'
+import type { ProfileItem } from '@/lib/api-types'
 
-import type { ProfileItem } from '../../../../shared/api-types'
 import { Field } from './Field'
 import { invalidateProfiles, type ProfileStatus } from './queries'
 

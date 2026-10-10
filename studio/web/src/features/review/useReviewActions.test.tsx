@@ -4,8 +4,8 @@ import { act, cleanup, render, screen } from '@testing-library/react'
 import { afterEach, expect, it, vi } from 'vitest'
 
 import { apiSend } from '@/lib/api'
+import type { CorpusItem, CorpusResponse } from '@/lib/api-types'
 
-import type { CorpusItem, CorpusResponse } from '../../../../shared/api-types'
 import { CORPUS_COUNTS_KEY } from './queries'
 import { useReviewActions } from './useReviewActions'
 

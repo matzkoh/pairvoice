@@ -1,8 +1,7 @@
 import { type QueryClient, queryOptions } from '@tanstack/react-query'
 
 import { apiGet } from '@/lib/api'
-
-import type { StylesResponse } from '../../../../shared/api-types'
+import type { StylesResponse } from '@/lib/api-types'
 
 export function stylesQueryOptions() {
   return queryOptions({

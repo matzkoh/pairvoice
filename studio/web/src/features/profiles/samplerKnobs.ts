@@ -1,4 +1,4 @@
-import type { SamplerOverrides } from '../../../../shared/api-types'
+import type { SamplerOverrides } from '@/lib/api-types'
 
 // ノブの定義をここ1箇所に集める。フォームはこれを回して描き、toSamplerPayload と
 // tomlSnippet も同じ定義から組む。項目を増やすのが1行で済み、描画と送信のどちらかを

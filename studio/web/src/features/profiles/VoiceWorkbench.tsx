@@ -3,10 +3,10 @@ import { useState } from 'react'
 import { EmptyState } from '@/components/EmptyState'
 import { Button } from '@/components/ui/button'
 import { apiGet, toErrorMessage } from '@/lib/api'
+import type { CorpusResponse, SamplerOverrides } from '@/lib/api-types'
 import { useHotkeys } from '@/lib/hotkeys'
 import { audioFileUrl } from '@/lib/speak'
 
-import type { CorpusResponse, SamplerOverrides } from '../../../../shared/api-types'
 import { ConditionsPanel } from './ConditionsPanel'
 import { ProfileHistorySheet } from './ProfileHistorySheet'
 import type { ProfileStatus } from './queries'
@@ -22,7 +22,6 @@ type Props = {
   adoptedCaption: string
   sampler?: SamplerOverrides
   pairvoiceDown: boolean
-  outdated: boolean
   onPlay: (url: string) => void
   onStatus: (status: ProfileStatus) => void
 }
@@ -34,7 +33,6 @@ export function VoiceWorkbench({
   adoptedCaption,
   sampler,
   pairvoiceDown,
-  outdated,
   onPlay,
   onStatus,
 }: Props) {
@@ -98,12 +96,6 @@ export function VoiceWorkbench({
       {pairvoiceDown && (
         <p className="mb-3 rounded-md border border-destructive/40 bg-destructive/5 px-3 py-2 text-sm text-destructive">
           pairvoice が止まっているので生成できません。
-        </p>
-      )}
-      {outdated && (
-        <p className="mb-3 rounded-md border border-warning/40 bg-warning/5 px-3 py-2 text-sm text-warning">
-          pairvoice が古く、サンプラーを動かしても反映されません。uv run pairvoice restart
-          で再起動してください。
         </p>
       )}
       <div className="grid grid-cols-[minmax(0,22rem)_minmax(0,1fr)] items-start gap-6">

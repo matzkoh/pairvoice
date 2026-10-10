@@ -2,7 +2,8 @@
 import { cleanup, fireEvent, render, screen } from '@testing-library/react'
 import { afterEach, expect, it, vi } from 'vitest'
 
-import type { CorpusItem } from '../../../../shared/api-types'
+import type { CorpusItem } from '@/lib/api-types'
+
 import { ReviewRow, summaryElementId } from './ReviewRow'
 
 afterEach(cleanup)

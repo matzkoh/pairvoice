@@ -36,9 +36,9 @@ import {
 import { nextSelection, selectionAfterRemoval } from '@/features/review/selection'
 import { usePlayer } from '@/features/review/usePlayer'
 import { BULK_ERROR_ID, useReviewActions } from '@/features/review/useReviewActions'
+import type { CorpusItem } from '@/lib/api-types'
 import { useHotkeys } from '@/lib/hotkeys'
 
-import type { CorpusItem } from '../../../shared/api-types'
 import { Route as rootRoute } from './__root'
 
 export const Route = createRoute({

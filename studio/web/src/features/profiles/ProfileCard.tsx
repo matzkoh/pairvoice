@@ -7,9 +7,9 @@ import { Badge } from '@/components/ui/badge'
 import { Button } from '@/components/ui/button'
 import { Input } from '@/components/ui/input'
 import { apiSend, apiUrl, toErrorMessage } from '@/lib/api'
+import type { ProfileItem } from '@/lib/api-types'
 import { isImeConfirm } from '@/lib/hotkeys'
 
-import type { ProfileItem } from '../../../../shared/api-types'
 import { SOURCE_LABELS } from './ProfileList'
 import { invalidateProfiles, type ProfileStatus } from './queries'
 

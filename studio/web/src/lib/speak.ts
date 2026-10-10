@@ -4,8 +4,7 @@
 // ため。api.ts の中から apiSend を呼ぶとその差し替えを素通りしてしまう。
 
 import { apiSend, apiUrl, speakErrorMessage } from '@/lib/api'
-
-import type { SamplerOverrides, SpeakResponse } from '../../../shared/api-types'
+import type { SamplerOverrides, SpeakResponse } from '@/lib/api-types'
 
 // design はプロファイル作成の候補づくり用。参照音声を使わず caption だけで声を作る。
 // voice は試聴で鳴らすプロファイル。省くと使用中のプロファイルで鳴る

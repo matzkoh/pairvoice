@@ -1,6 +1,7 @@
 import { describe, expect, it } from 'vitest'
 
-import type { CorpusItem } from '../../../../shared/api-types'
+import type { CorpusItem } from '@/lib/api-types'
+
 import { bulkArchiveTargets, computeReviewCounts, filterReviews } from './reviewCounts'
 
 function item(overrides: Partial<CorpusItem>): CorpusItem {

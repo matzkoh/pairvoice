@@ -37,7 +37,6 @@ const BASE: Props = {
   adoptedCaption: '声A',
   sampler: undefined,
   pairvoiceDown: false,
-  outdated: false,
   onPlay,
   onStatus,
 }
@@ -70,11 +69,6 @@ it('pairvoice が止まっていれば生成できず、理由を出す', () => 
   renderWorkbench({ pairvoiceDown: true })
   expect(screen.getByRole('button', { name: /生成/ })).toHaveProperty('disabled', true)
   expect(screen.getByText(/pairvoice が止まっている/)).toBeTruthy()
-})
-
-it('pairvoice が古ければ警告する', () => {
-  renderWorkbench({ outdated: true })
-  expect(screen.getByText(/pairvoice が古く/)).toBeTruthy()
 })
 
 it('入力欄の caption を、開いているプロファイルの声で試聴し、プロファイルは書かない', async () => {

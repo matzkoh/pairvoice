@@ -99,7 +99,7 @@ export type ApiOptions = {
 // pairvoice は失敗を { error, detail? } の形で返す（FastAPI の 422 は detail が配列）。
 // message・detail が文字列なら人間向けの説明なのでそれを使い、
 // 無ければ error のコード（例: 'profile_in_use'）を使う。JSON として読めない
-// 応答（プロキシのエラーページ等）は今までどおり `${path}: ${status} ${body}` に
+// 応答（開発中の Vite の proxy のエラーページ等）は今までどおり `${path}: ${status} ${body}` に
 // フォールバックする。body をそのまま message にすると、インライン表示（各画面）に生 JSON が
 // 出てしまうため、ここ1箇所で直す。
 function describeError(path: string, status: number, body: string): string {
@@ -139,7 +139,7 @@ async function unwrap<T>(res: Response, path: string, opts?: ApiOptions): Promis
   const data: unknown = contentType.includes('application/json')
     ? await res.json()
     : await res.text()
-  // T はサーバーの契約（shared/api-types.ts）が決める。全エンドポイントの検査は持たない。
+  // T はサーバーの契約（api-types.ts）が決める。全エンドポイントの検査は持たない。
   // oxlint-disable-next-line typescript/no-unsafe-type-assertion
   return data as T
 }

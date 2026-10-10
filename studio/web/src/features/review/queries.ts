@@ -1,8 +1,7 @@
 import { queryOptions, useQuery } from '@tanstack/react-query'
 
 import { apiGet } from '@/lib/api'
-
-import type { CorpusCounts, CorpusResponse } from '../../../../shared/api-types'
+import type { CorpusCounts, CorpusResponse } from '@/lib/api-types'
 
 // 1リクエストで取得する件数。
 const REVIEW_FETCH_CHUNK = 500

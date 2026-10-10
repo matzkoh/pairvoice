@@ -5,8 +5,8 @@ import { act, cleanup, fireEvent, render, screen, waitFor } from '@testing-libra
 import { afterEach, beforeEach, expect, it, vi } from 'vitest'
 
 import { apiGet, apiSend, UnreachableServerError } from '@/lib/api'
+import type { CorpusItem, CorpusResponse } from '@/lib/api-types'
 
-import type { CorpusItem, CorpusResponse } from '../../../shared/api-types'
 import { Route as rootRoute } from './__root'
 import { Route as reviewRoute } from './review'
 

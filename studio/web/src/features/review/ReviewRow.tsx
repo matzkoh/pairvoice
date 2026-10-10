@@ -5,10 +5,10 @@ import { type MouseEvent, type ReactNode, useEffect, useRef } from 'react'
 import { Button } from '@/components/ui/button'
 import { Input } from '@/components/ui/input'
 import { Kbd } from '@/components/ui/kbd'
+import type { CorpusItem } from '@/lib/api-types'
 import { isImeConfirm } from '@/lib/hotkeys'
 import { useDraft } from '@/lib/useDraft'
 
-import type { CorpusItem } from '../../../../shared/api-types'
 import { formatWhen } from './formatWhen'
 
 const STALE_TITLE = '旧プロンプトでの出力なので、評価しても現行の改善には使われません'

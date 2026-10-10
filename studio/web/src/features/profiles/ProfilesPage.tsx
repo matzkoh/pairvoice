@@ -8,7 +8,6 @@ import { useTransientStatus } from '@/lib/useTransientStatus'
 
 import { healthQueryOptions } from '../health/queries'
 import { NewProfile } from './NewProfile'
-import { pairvoiceOutdated } from './pairvoiceOutdated'
 import { ProfileCard } from './ProfileCard'
 import { ProfileList } from './ProfileList'
 import { type ProfileStatus, profilesQueryOptions } from './queries'
@@ -91,7 +90,6 @@ export function ProfilesPage() {
               adoptedCaption={selected.caption}
               sampler={health?.tts.sampler}
               pairvoiceDown={health === null}
-              outdated={pairvoiceOutdated(health)}
               onPlay={play}
               onStatus={setStatus}
             />

@@ -1,8 +1,7 @@
 import { queryOptions } from '@tanstack/react-query'
 
 import { apiGet } from '@/lib/api'
-
-import type { HistoryResponse } from '../../../../shared/api-types'
+import type { HistoryResponse } from '@/lib/api-types'
 
 // プロンプト・口調とプロファイルの caption で同じ形（{name, ts} と復元ボタン）なので1つにまとめる。
 // path は `${path}/history`（一覧）と `${path}/restore`（復元）の元、key は本体のキャッシュの

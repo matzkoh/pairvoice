@@ -2,8 +2,7 @@ import { cn } from 'cn'
 import { Plus } from 'lucide-react'
 
 import { Badge } from '@/components/ui/badge'
-
-import type { ProfileItem, ProfileSource } from '../../../../shared/api-types'
+import type { ProfileItem, ProfileSource } from '@/lib/api-types'
 
 export const SOURCE_LABELS: Record<ProfileSource, string> = {
   design: '作った声',

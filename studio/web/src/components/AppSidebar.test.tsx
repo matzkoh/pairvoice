@@ -12,8 +12,8 @@ import { cleanup, render, screen } from '@testing-library/react'
 import { afterEach, expect, it, vi } from 'vitest'
 
 import { apiGet, UnreachableServerError } from '@/lib/api'
+import type { CorpusCounts } from '@/lib/api-types'
 
-import type { CorpusCounts } from '../../../shared/api-types'
 import { AppSidebar } from './AppSidebar'
 
 vi.mock('@/lib/api', async (importOriginal) => {

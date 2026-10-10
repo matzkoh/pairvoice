@@ -8,8 +8,8 @@ import { Popover, PopoverContent, PopoverTrigger } from '@/components/ui/popover
 import { dictQueryOptions } from '@/features/dict/queries'
 import { findDictRow, upsertDictRow } from '@/features/dict/upsertDictRow'
 import { apiSend, toErrorMessage } from '@/lib/api'
+import type { DictTestResponse } from '@/lib/api-types'
 
-import type { DictTestResponse } from '../../../../shared/api-types'
 import { selectedTextWithin } from './selection'
 import { useAddDictEntry } from './useAddDictEntry'
 

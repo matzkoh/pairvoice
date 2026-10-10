@@ -3,8 +3,7 @@ import { useQueryClient } from '@tanstack/react-query'
 import { dictQueryOptions } from '@/features/dict/queries'
 import { upsertDictRow } from '@/features/dict/upsertDictRow'
 import { apiSend } from '@/lib/api'
-
-import type { DictResponse, DictRowData } from '../../../../shared/api-types'
+import type { DictResponse, DictRowData } from '@/lib/api-types'
 
 export function useAddDictEntry(): (entry: DictRowData) => Promise<void> {
   const queryClient = useQueryClient()

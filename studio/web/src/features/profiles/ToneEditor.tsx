@@ -5,9 +5,9 @@ import { useTransition } from 'react'
 import { Button } from '@/components/ui/button'
 import { Textarea } from '@/components/ui/textarea'
 import { apiSend, toErrorMessage } from '@/lib/api'
+import type { ProfileItem } from '@/lib/api-types'
 import { useDraft } from '@/lib/useDraft'
 
-import type { ProfileItem } from '../../../../shared/api-types'
 import { ProfileHistorySheet } from './ProfileHistorySheet'
 import { invalidateProfiles, type ProfileStatus } from './queries'
 

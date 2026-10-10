@@ -4,8 +4,8 @@ import { act, cleanup, render, screen } from '@testing-library/react'
 import { afterEach, expect, it, vi } from 'vitest'
 
 import { apiGet, apiSend } from '@/lib/api'
+import type { DictResponse } from '@/lib/api-types'
 
-import type { DictResponse } from '../../../../shared/api-types'
 import { useAddDictEntry } from './useAddDictEntry'
 
 vi.mock('@/lib/api', async (importOriginal) => {

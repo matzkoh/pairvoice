@@ -1,4 +1,4 @@
-import type { CorpusItem } from '../../../../shared/api-types'
+import type { CorpusItem } from '@/lib/api-types'
 
 export const FILTERS = ['all', 'unreviewed', 'bad', 'archived', 'stale'] as const
 export type Filter = (typeof FILTERS)[number]

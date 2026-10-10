@@ -1,4 +1,5 @@
-import type { SamplerOverrides } from '../../../../shared/api-types'
+import type { SamplerOverrides } from '@/lib/api-types'
+
 import { initialValues, type SamplerValues, toSamplerPayload } from '../profiles/samplerKnobs'
 
 // 画面に出す値は、いま pairvoice が渡している値（config.toml とモデル既定）にスタイルを重ねたもの

@@ -7,11 +7,11 @@ import { Button } from '@/components/ui/button'
 import { Kbd } from '@/components/ui/kbd'
 import { Textarea } from '@/components/ui/textarea'
 import { apiSend, toErrorMessage } from '@/lib/api'
+import type { DictRowData, DictTestResponse } from '@/lib/api-types'
 import { isTypingTarget } from '@/lib/hotkeys'
 import { createIdGenerator } from '@/lib/ids'
 import { useTransientStatus } from '@/lib/useTransientStatus'
 
-import type { DictRowData, DictTestResponse } from '../../../../shared/api-types'
 import { DictRow, type EditableDictRow, type Field } from './DictRow'
 import { dictQueryOptions } from './queries'
 

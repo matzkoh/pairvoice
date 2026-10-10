@@ -1,8 +1,7 @@
 import { queryOptions } from '@tanstack/react-query'
 
 import { apiGet } from '@/lib/api'
-
-import type { DictResponse } from '../../../../shared/api-types'
+import type { DictResponse } from '@/lib/api-types'
 
 export function dictQueryOptions() {
   return queryOptions({

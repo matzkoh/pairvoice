@@ -1,10 +1,10 @@
 import { useEffect, useRef, useState } from 'react'
 
 import { toErrorMessage } from '@/lib/api'
+import type { SamplerOverrides } from '@/lib/api-types'
 import { createIdGenerator } from '@/lib/ids'
 import { speakOnce } from '@/lib/speak'
 
-import type { SamplerOverrides } from '../../../../shared/api-types'
 import type { SamplerValues } from './samplerKnobs'
 
 // values はフォームの生の値（TOML に書き出すため）、sampler は送信用に変換した値。
