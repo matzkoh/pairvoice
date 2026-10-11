@@ -1,3 +1,4 @@
+import dataclasses
 import wave
 
 import numpy as np
@@ -5,7 +6,12 @@ import pytest
 
 from pairvoice.config import ProfileConfig, SamplerConfig, TTSConfig
 from pairvoice.profiles import ProfileNotFound, ProfileStore
-from pairvoice.tts import ANCHOR_TEXT, AudioNotFound, MlxAudioBackend
+from pairvoice.tts import (
+    ANCHOR_TEXT,
+    NON_FINAL_DURATION_SCALE,
+    AudioNotFound,
+    MlxAudioBackend,
+)
 
 
 class FakeResult:
@@ -587,6 +593,31 @@ def test_speak_with_mix_injects_weighted_speaker_state(no_ref_config, tmp_path, 
     assert backend._injected_speaker is None
 
 
+def test_speak_injects_the_profile_speaker_state_measured_once(config, tmp_path, monkeypatch):
+    import mlx.core as mx
+
+    model = MixModel(FakeResult(np.zeros(480, dtype=np.float32)))
+    backend = make_backend(config, model, tmp_path, monkeypatch)
+    measured = []
+
+    def speaker_state(path):
+        measured.append(path)
+        return mx.ones((1, 3, 2))
+
+    monkeypatch.setattr(backend, "_speaker_state", speaker_state)
+
+    list(backend.speak_sentences("一つ目。二つ目。"))
+
+    # 声は読み上げの最初に1回だけ決め、参照音声を文ごとに符号化し直さない
+    profile = ProfileStore(tmp_path / "profiles").active()
+    assert profile is not None
+    assert measured == [profile.reference]
+    assert model.encoded == []
+    assert [np.asarray(with_ref[2]).shape for _, with_ref, _ in model.seen] == [(1, 3, 2)] * 2
+    assert model.calls[0]["ref_audio"] == str(profile.reference)
+    assert backend._injected_speaker is None
+
+
 def test_resolve_audio_stays_inside_data_root(config, tmp_path):
     backend = MlxAudioBackend(config, data_dir=tmp_path)
     take = tmp_path / "generations" / "take.wav"
@@ -724,3 +755,62 @@ def test_speak_with_profile_name_uses_that_profile(no_ref_config, tmp_path, monk
 
     (call,) = model.calls
     assert call["ref_audio"] == str(other.reference)
+
+
+def test_speak_sentences_reads_text_without_end_marks_as_one_sentence(
+    config, tmp_path, monkeypatch
+):
+    model = FakeModel(FakeResult(np.zeros(480, dtype=np.float32)))
+    backend = make_backend(config, model, tmp_path, monkeypatch)
+
+    list(backend.speak_sentences("区切りなし"))
+
+    assert [(call["text"], call.get("duration_scale")) for call in model.calls] == [
+        ("区切りなし", None)
+    ]
+
+
+def test_speak_sentences_shortens_all_but_the_last_sentence(config, tmp_path, monkeypatch):
+    model = FakeModel(FakeResult(np.linspace(-0.5, 0.5, 4800, dtype=np.float32)))
+    backend = make_backend(config, model, tmp_path, monkeypatch)
+
+    parts = list(backend.speak_sentences("一つ目。二つ目。三つ目。"))
+
+    assert [call["text"] for call in model.calls] == ["一つ目。", "二つ目。", "三つ目。"]
+    assert [call.get("duration_scale") for call in model.calls] == [
+        NON_FINAL_DURATION_SCALE,
+        NON_FINAL_DURATION_SCALE,
+        None,
+    ]
+    assert len({part.path for part in parts}) == 3
+
+
+def test_speak_sentences_scales_the_configured_duration(config, tmp_path, monkeypatch):
+    config = dataclasses.replace(
+        config, sampler=dataclasses.replace(config.sampler, duration_scale=1.2)
+    )
+    model = FakeModel(FakeResult(np.zeros(480, dtype=np.float32)))
+    backend = make_backend(config, model, tmp_path, monkeypatch)
+
+    list(backend.speak_sentences("一つ目。二つ目。"))
+
+    assert [call["duration_scale"] for call in model.calls] == [
+        pytest.approx(1.2 * NON_FINAL_DURATION_SCALE),
+        1.2,
+    ]
+
+
+def test_join_concatenates_parts_into_one_wav(config, tmp_path, monkeypatch):
+    model = FakeModel(FakeResult(np.linspace(-0.5, 0.5, 48000, dtype=np.float32)))
+    backend = make_backend(config, model, tmp_path, monkeypatch)
+    parts = list(backend.speak_sentences("一つ目。二つ目。"))
+
+    joined = backend.join(parts)
+
+    assert joined.path not in {part.path for part in parts}
+    assert joined.relative_path == f"generations/{joined.path.name}"
+    assert joined.duration == pytest.approx(sum(part.duration for part in parts))
+    with wave.open(str(joined.path)) as wav:
+        frames = wav.getnframes()
+    assert frames == sum(round(part.duration * 48000) for part in parts)
+    assert backend.join(parts[:1]) == parts[0]

@@ -31,6 +31,9 @@ _log = logging.getLogger(__name__)
 
 # 鳴っている間に見張る間隔。1回の取得は約13ms
 WATCH_INTERVAL_SECONDS = 0.25
+# 鳴り終わりの近くで見張りを待つ最短の時間。読み上げは文ごとの音を続けて鳴らすので、
+# 見張りの間隔ぶん文の間が空かないよう、残りが間隔より短ければ鳴り終わりまでだけ待つ
+MIN_WATCH_SECONDS = 0.01
 STOP_FADE_SECONDS = 0.15
 DUCK_FADE_SECONDS = 0.2
 # 鳴らし始めるまでの上限。AVAudioPlayer.play() は CoreAudio が応答しないと戻らない
@@ -42,6 +45,8 @@ SOUND_CALL_TIMEOUT_SECONDS = 2.0
 
 class Sound(Protocol):
     def playing(self) -> bool: ...
+
+    def remaining(self) -> float: ...
 
     def set_volume(self, volume: float, fade_seconds: float) -> None: ...
 
@@ -57,6 +62,8 @@ class _AVSound:
     def __init__(self, player) -> None:
         self._player = player
         self._stalled = False
+        # 長さは鳴らしている間に変わらないので、見張りのたびに取り直さない
+        self._duration: float | None = None
 
     def _call(self, fn, *args):
         if self._stalled:
@@ -71,6 +78,14 @@ class _AVSound:
 
     def playing(self) -> bool:
         return bool(self._call(self._player.isPlaying))
+
+    def remaining(self) -> float:
+        if self._duration is None:
+            self._duration = self._call(self._player.duration)
+        current = self._call(self._player.currentTime)
+        if self._duration is None or current is None:
+            return WATCH_INTERVAL_SECONDS
+        return self._duration - current
 
     def set_volume(self, volume: float, fade_seconds: float) -> None:
         self._call(self._player.setVolume_fadeDuration_, volume, fade_seconds)
@@ -213,6 +228,8 @@ class Player:
                         self._config.duck_volume if duck else volume, DUCK_FADE_SECONDS
                     )
                     ducked = duck
-                await self._sleep(WATCH_INTERVAL_SECONDS)
+                await self._sleep(
+                    min(WATCH_INTERVAL_SECONDS, max(sound.remaining(), MIN_WATCH_SECONDS))
+                )
         finally:
             self._playing = False

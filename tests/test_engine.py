@@ -88,6 +88,13 @@ class FakeTTS(FakeBackend):
             peak_memory_gb=999,
         )
 
+    def speak_sentences(self, text, caption=None, profile_id=None, style=None):
+        # 文に分けるのは本物の役目。偽物は全文を1文として返す
+        yield self.speak(text, caption, None, False, profile_id, None, style)
+
+    def join(self, parts):
+        return parts[0]
+
 
 @pytest.fixture(autouse=True)
 def isolated_data_root(tmp_path, monkeypatch):
@@ -551,3 +558,62 @@ async def test_mlx_work_runs_on_one_dedicated_thread():
     assert set(llm.threads) == {"llm.load", "llm.generate", "llm.unload", "tts.load", "tts.speak"}
     assert len(set(llm.threads.values())) == 1
     assert threading.get_ident() not in llm.threads.values()
+
+
+class SentenceTTS(FakeTTS):
+    """文ごとに返す偽物。次の文を合成する前に、前の文が再生の列に積まれているかを記録する。"""
+
+    def __init__(self, stop_at=None, **kwargs):
+        super().__init__(**kwargs)
+        self.engine: Engine | None = None
+        self.queued_before = []
+        # この番号の文を合成している最中に「止める」が押される
+        self.stop_at = stop_at
+
+    def speak_sentences(self, text, caption=None, profile_id=None, style=None):
+        from pathlib import Path
+
+        from pairvoice.tts import SpeechResult
+
+        for index in range(text.count("。")):
+            assert self.engine is not None
+            self.queued_before.append(self.engine.player.describe()["waiting"])
+            if index == self.stop_at:
+                self.engine.player.stop()
+            yield SpeechResult(
+                path=Path(f"/tmp/pairvoice/generations/{index}.wav"),
+                relative_path=f"generations/{index}.wav",
+                duration=1.0,
+                peak_memory_gb=None,
+            )
+
+    def join(self, parts):
+        from dataclasses import replace
+
+        return replace(parts[0], relative_path="generations/joined.wav", duration=len(parts))
+
+
+def make_sentence_engine(stop_at=None):
+    tts = SentenceTTS(stop_at=stop_at)
+    tts.engine = make_engine(tts=tts)
+    return tts.engine, tts
+
+
+async def test_speak_queues_each_sentence_as_soon_as_it_is_made():
+    engine, tts = make_sentence_engine()
+
+    result = await engine.speak("一つ目。二つ目。三つ目。")
+
+    # 2文目を合成し始める時点で、1文目はもう再生の列にある
+    assert tts.queued_before == [0, 1, 2]
+    assert engine.player.describe()["waiting"] == 3
+    assert result.relative_path == "generations/joined.wav"
+    assert result.duration == 3
+
+
+async def test_speak_stopped_midway_queues_no_later_sentences():
+    engine, _ = make_sentence_engine(stop_at=1)
+
+    await engine.speak("一つ目。二つ目。")
+
+    assert engine.player.describe()["waiting"] == 0

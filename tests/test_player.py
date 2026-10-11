@@ -19,6 +19,9 @@ class FakeSound:
     def playing(self):
         return not self.stopped and self.ticks > 0
 
+    def remaining(self):
+        return self.ticks * WATCH_INTERVAL_SECONDS
+
     def set_volume(self, volume, fade_seconds):
         self.volumes.append(volume)
 
@@ -262,3 +265,33 @@ def test_a_hung_sound_counts_as_finished_and_is_left_alone(monkeypatch):
         assert HungPlayer.stops == 0
     finally:
         device.set()
+
+
+async def test_waits_only_until_the_sound_ends():
+    # 文ごとの音を続けて鳴らすので、見張りの間隔ぶん文の間を空けない
+    sleeps = []
+
+    class EndingSound(FakeSound):
+        def remaining(self):
+            return 0.1 if self.ticks > 0 else 0.0
+
+    async def sleep(seconds):
+        sleeps.append(seconds)
+        sound.ticks -= 1
+        await asyncio.sleep(0)
+
+    sound = EndingSound(Path("a.wav"), 0.8, ticks=1)
+    player = Player(
+        PlaybackConfig(volume=0.8),
+        MuteController(MuteConfig(), FakeProbe()),
+        opener=lambda path, volume: sound,
+        sleep=sleep,
+    )
+    player.enqueue(Path("a.wav"))
+    task = asyncio.create_task(player.run())
+    try:
+        await wait_until(lambda: sleeps and not player.describe()["playing"])
+    finally:
+        task.cancel()
+
+    assert sleeps == [0.1]

@@ -425,19 +425,26 @@ class Engine:
         wait_download: bool = True,
         style: str | None = None,
     ):
-        """合成した音声を Player の列に積んでから返す（鳴り終わるのは待たない）。"""
+        """文ごとに合成し、できた文から Player の列に積む。全文を積んだら、つないだ1本を返す。
+
+        最初の文を鳴らしている間に次の文を合成するので、全文の合成を待たずに鳴り始める。
+        鳴り終わるのは待たない。
+        """
         # 合成を待っている間に「止める」が押されたら、出来上がっても鳴らさない
         epoch = self.player.epoch
-        result = await self.synthesize(
-            text,
-            caption=caption,
-            profile_id=profile_id,
-            wait_download=wait_download,
-            style=style,
-            check_mute=not bypass_mute,
-        )
-        self.player.enqueue(result.path, bypass_mute=bypass_mute, epoch=epoch)
-        return result
+
+        async def work():
+            await self._tts.ensure_loaded(wait_download=wait_download)
+            sentences = self._tts_backend.speak_sentences(text, caption, profile_id, style)
+            parts = []
+            # 文の間に他の合成を挟まないよう、全文を1つの仕事で合成する
+            while (part := await on_mlx_thread(next, sentences, None)) is not None:
+                self.player.enqueue(part.path, bypass_mute=bypass_mute, epoch=epoch)
+                parts.append(part)
+            self._tts.touch()
+            return await asyncio.to_thread(self._tts_backend.join, parts)
+
+        return await self._run(work, check_mute=not bypass_mute, droppable=False)
 
     async def speaker_vector(self, audio: str) -> list[float]:
         """データの置き場所の wav の話者ベクトル。2択でもとの声どうしの位置を測る。"""

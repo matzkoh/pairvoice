@@ -24,6 +24,11 @@ sampler は項目ごとに speak() の引数 → スタイル → config.toml �
 決まる。studio の「2択で絞り込む」は、いくつかのもとの声の表現を重みで混ぜた声を合成し
 （mix）、もとの声どうしの位置関係を話者ベクトル（表現の時間平均）で測る。表現を差し込む
 公開の口は mlx-audio に無いので、encode_conditions_full を包んで差し替える。
+プロファイルの声も、参照音声から作った表現を取っておいて同じ口から差し込む（参照音声の
+符号化を合成のたびにやり直さない）。
+
+読み上げ（speak_sentences）は文ごとに合成し、できた文から返す。呼び手は最初の文を鳴らして
+いる間に次の文を合成できるので、全文の合成を待たずに鳴り始める。
 """
 
 from __future__ import annotations
@@ -33,19 +38,21 @@ import shutil
 import uuid
 import wave
 from collections import OrderedDict
-from collections.abc import Mapping, Sequence
-from contextlib import contextmanager
+from collections.abc import Iterator, Mapping, Sequence
+from contextlib import contextmanager, nullcontext
 from dataclasses import dataclass
 from pathlib import Path
 
 import mlx.core as mx
 import numpy as np
 
+from .checker import split_sentences
 from .config import TTSConfig
 from .postprocess import normalize, trim
 from .profiles import PROFILES_DIRNAME, Profile, ProfileNotFound, ProfileStore
 from .reading import DICT_FILENAME, apply_dict, load_dict
 from .styles import STYLES_FILENAME, StyleStore
+from .wav import concat_wavs
 
 DEFAULT_SAMPLE_RATE = 48000
 CAPTION_FILENAME = "caption.txt"
@@ -57,6 +64,11 @@ ANCHOR_TEXT = (
 AUTO_PROFILE_NAME = "既定の声"
 # もとの声の話者の表現を取っておく数。2択の1セッションのもとの声（数人）と、その間の行き来で足りる
 SPEAKER_STATE_CACHE_SIZE = 32
+# 最後の文以外は、見積もる長さをこれだけ縮めて合成する。文を1つだけ渡すとモデルは長さを
+# 中身より長く見積もり、余りを語尾に続く声で埋める。語尾との間が空かないので trim で
+# 落ちず、文の間に挟まって聞こえる。0.9 で余りは消え、話す速さは約6%上がる（0.8 だと
+# 速さが目立つ）。最後の文の余りは、全文を1回で合成するときと同じく trim が落とす
+NON_FINAL_DURATION_SCALE = 0.9
 
 
 class AudioNotFound(Exception):
@@ -80,6 +92,17 @@ class SpeechResult:
     peak_memory_gb: float | None
 
 
+@dataclass(frozen=True)
+class _Voice:
+    """1回の読み上げで使う声。文ごとに合成しても、途中で studio が切り替えた声が混ざらない。"""
+
+    ref_audio: Path | None
+    caption: str
+    sampler: Mapping[str, object]
+    # 差し込む話者の表現。None なら ref_audio を mlx-audio に符号化させる
+    speaker: mx.array | None = None
+
+
 class MlxAudioBackend:
     name = "tts"
     # studio のプロファイル作成も同じ文を候補に読ませる（/health で申告する）
@@ -92,7 +115,7 @@ class MlxAudioBackend:
         self._profiles = ProfileStore(self._data_dir / PROFILES_DIRNAME)
         self._styles = StyleStore(self._data_dir / STYLES_FILENAME)
         self._loaded = None
-        # 次の合成で差し込む話者の表現。mix の合成の間だけ立てる（_speaking_as）
+        # 次の合成で差し込む話者の表現。合成の間だけ立てる（_speaking_as）
         self._injected_speaker = None
         self._speaker_injection_ready = False
         self._speaker_states: OrderedDict[tuple[Path, int], mx.array] = OrderedDict()
@@ -309,39 +332,98 @@ class MlxAudioBackend:
         （2択で絞り込む）。プロファイルは使わない。
         text は読み辞書で読みに開いてから読む。
         """
+        voice = self._voice(caption, sampler, design, profile_id, mix, style)
+        return self._save(*self._generate(self._read(text), voice))
+
+    def speak_sentences(
+        self,
+        text: str,
+        caption: str | None = None,
+        profile_id: str | None = None,
+        style: str | None = None,
+    ) -> Iterator[SpeechResult]:
+        """文ごとに合成し、できた順に返す。引数は speak() と同じ意味。
+
+        声は最初の文の前に1回だけ決める。
+        """
+        voice = self._voice(caption=caption, profile_id=profile_id, style=style)
+        scale = voice.sampler.get("duration_scale")
+        scale = scale if isinstance(scale, int | float) else 1.0
+        shortened = dataclasses.replace(
+            voice, sampler={**voice.sampler, "duration_scale": scale * NON_FINAL_DURATION_SCALE}
+        )
+        *leading, last = split_sentences(self._read(text)) or [text]
+        for sentence in leading:
+            yield self._save(*self._generate(sentence, shortened))
+        yield self._save(*self._generate(last, voice))
+
+    def join(self, parts: Sequence[SpeechResult]) -> SpeechResult:
+        """文ごとの wav を1本につなぐ。記録（corpus）が1回の読み上げを1本の音声で指すため。"""
+        if len(parts) == 1:
+            return parts[0]
+        path = self._new_output_path()
+        path.write_bytes(concat_wavs([part.path.read_bytes() for part in parts], gap_seconds=0.0))
+        return self._result(
+            path,
+            duration=sum(part.duration for part in parts),
+            peak=max(
+                (part.peak_memory_gb for part in parts if part.peak_memory_gb is not None),
+                default=None,
+            ),
+        )
+
+    def _read(self, text: str) -> str:
+        return apply_dict(text, load_dict(self._data_dir / DICT_FILENAME))
+
+    def _voice(
+        self,
+        caption: str | None = None,
+        sampler: Mapping[str, object] | None = None,
+        design: bool = False,
+        profile_id: str | None = None,
+        mix: Sequence[tuple[Path, float]] | None = None,
+        style: str | None = None,
+    ) -> _Voice:
         self._require_loaded()
         # 合成の前に引く。名前の打ち間違いで、生成を済ませてから断ることのないように
         if style is not None:
             chosen = self._styles.get(style)
             caption = caption if caption is not None else chosen.caption
             sampler = {**chosen.sampler, **(sampler or {})}
-        text = apply_dict(text, load_dict(self._data_dir / DICT_FILENAME))
 
         if mix:
             # 参照音声は合成を参照つきの経路に入れるためだけに渡す。表現は差し込んだ方が使われる
-            with self._speaking_as(self._mixed_speaker_state(mix)):
-                samples, sample_rate, peak = self._generate(
-                    text, mix[0][0], (caption or "").strip(), self.resolve_sampler(sampler)
-                )
-            return self._save(samples, sample_rate, peak)
+            return _Voice(
+                mix[0][0],
+                (caption or "").strip(),
+                self.resolve_sampler(sampler),
+                self._mixed_speaker_state(mix),
+            )
 
         # 参照音声と caption は同じ1回の読みから取る。間で studio が切り替えても混ざらない
         profile = None if design else self._profile_for(profile_id)
         ref_audio = profile.reference if profile is not None else None
         resolved_caption, _ = self._resolve_caption(caption, profile)
-        samples, sample_rate, peak = self._generate(
-            text, ref_audio, resolved_caption, self.resolve_sampler(sampler)
+        speaker = (
+            self._speaker_state(ref_audio)
+            if ref_audio is not None and self._speaker_injection_ready
+            else None
         )
-        return self._save(samples, sample_rate, peak)
+        return _Voice(ref_audio, resolved_caption, self.resolve_sampler(sampler), speaker)
 
     def _save(self, samples: np.ndarray, sample_rate: int, peak: float | None) -> SpeechResult:
-        path = self._config.output_dir / f"{uuid.uuid4()}.wav"
+        path = self._new_output_path()
         self._write_wav(path, samples, sample_rate)
+        return self._result(path, duration=len(samples) / sample_rate, peak=peak)
 
+    def _new_output_path(self) -> Path:
+        return self._config.output_dir / f"{uuid.uuid4()}.wav"
+
+    def _result(self, path: Path, *, duration: float, peak: float | None) -> SpeechResult:
         return SpeechResult(
             path=path,
             relative_path=str(path.relative_to(self._data_dir)),
-            duration=len(samples) / sample_rate,
+            duration=duration,
             peak_memory_gb=peak,
         )
 
@@ -358,23 +440,19 @@ class MlxAudioBackend:
             raise RuntimeError("tts backend is not loaded")
         return self._loaded
 
-    def _generate(
-        self,
-        text: str,
-        ref_audio: Path | None,
-        caption: str,
-        sampler: Mapping[str, object],
-    ) -> tuple[np.ndarray, int, float | None]:
-        results = list(
-            self._require_loaded().generate(
-                text,
-                ref_audio=str(ref_audio) if ref_audio is not None else None,
-                caption=caption,
-                # サンプラーの解決は resolve_sampler() の1箇所に閉じる。項目を増やす
-                # ときに、ここへの配線を忘れて黙って効かないという事故を防ぐ
-                **sampler,
+    def _generate(self, text: str, voice: _Voice) -> tuple[np.ndarray, int, float | None]:
+        speaking = nullcontext() if voice.speaker is None else self._speaking_as(voice.speaker)
+        with speaking:
+            results = list(
+                self._require_loaded().generate(
+                    text,
+                    ref_audio=str(voice.ref_audio) if voice.ref_audio is not None else None,
+                    caption=voice.caption,
+                    # サンプラーの解決は resolve_sampler() の1箇所に閉じる。項目を増やす
+                    # ときに、ここへの配線を忘れて黙って効かないという事故を防ぐ
+                    **voice.sampler,
+                )
             )
-        )
         if not results:
             raise RuntimeError("tts backend produced no audio")
 
@@ -403,7 +481,7 @@ class MlxAudioBackend:
 
         # seed を固定するのは、同じ caption なら誰の環境でも同じ既定の声になるようにするため
         samples, sample_rate, _ = self._generate(
-            ANCHOR_TEXT, None, caption, self.resolve_sampler({"rng_seed": 0})
+            ANCHOR_TEXT, _Voice(None, caption, self.resolve_sampler({"rng_seed": 0}))
         )
         return self._profiles.create(
             name=AUTO_PROFILE_NAME,
