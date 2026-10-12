@@ -58,7 +58,7 @@ pairvoice の常駐サーバーの API。要約（mlx-lm）と音声合成（Iro
 
 - API はすべて `/api` の下にある（根の `/` は studio の画面）。この説明と各項目の説明では `/api` を省いて書く
 - 待ち受けは 127.0.0.1 だけ。ブラウザで開いた外部のページ（Host か Origin がループバックでない要求）は 403 で断る
-- ミュート中は `/speak`（鳴らす）と `respect_mute` 付きの `/llm` を 409 `{"error": "muted", "reason": ...}` で断る。`/speak` は `bypass_mute` で鳴らせる。`/synthesize` は wav を作るだけなのでミュートを見ない
+- ミュート中は `/speak`（鳴らす）と `respect_mute` 付きの `/llm`・`/warmup` を 409 `{"error": "muted", "reason": ...}` で断る。`/speak` は `bypass_mute` で鳴らせる。`/synthesize` は wav を作るだけなのでミュートを見ない
 - 声は `voice`（プロファイルの名前か ID）、話し方は `style`（studio の「スタイル」画面で作る名前）で選ぶ。選べる名前は `GET /profiles` と `GET /styles` で引ける
 """
 
@@ -146,6 +146,13 @@ class SummaryRequest(BaseModel):
         description="待っている間に後発の要約が来たら、これを捨てて 409 `dropped` を返す（読み上げの古い要約を飛ばすため）",
     )
     wait_download: WaitDownload = True
+
+
+class WarmupRequest(BaseModel):
+    respect_mute: bool = Field(
+        default=False,
+        description="ミュート中（ほかのアプリの音は除く）なら読み込まず 409 `muted` を返す（フックの先読みのため）",
+    )
 
 
 class SamplerOverrides(BaseModel):
@@ -485,10 +492,18 @@ def create_app(engine: Engine) -> FastAPI:
             },
         }
 
-    @api.post("/warmup", status_code=202, summary="モデルを読み込む", tags=["状態"])
-    async def warmup():
+    @api.post(
+        "/warmup",
+        status_code=202,
+        summary="モデルを読み込む",
+        tags=["状態"],
+        responses={
+            409: {"model": MutedResponse, "description": "ミュート中（`respect_mute` のとき）"}
+        },
+    )
+    async def warmup(request: Annotated[WarmupRequest, Body(default_factory=WarmupRequest)]):
         """要約と合成のモデルを読み込み、終わるまで待つ（初回はダウンロードも）。"""
-        return await engine.warmup()
+        return await engine.warmup(respect_mute=request.respect_mute)
 
     @api.get("/mute", summary="ミュートの状態", tags=["ミュート"])
     async def mute_state():

@@ -9,7 +9,7 @@ import pytest
 
 import pairvoice.lifecycle as lifecycle_module
 from pairvoice.config import Config, LLMConfig, MuteConfig, TTSConfig
-from pairvoice.lifecycle import Engine, MutedError, Superseded
+from pairvoice.lifecycle import Engine, ModelUnavailable, MutedError, Superseded
 from pairvoice.mute import MuteController
 from tests.fakes import FakeBackend, FakeProbe, gather_results
 
@@ -323,6 +323,79 @@ async def test_warmup_separates_started_and_already():
     assert first["already"] == []
     assert second["started"] == []
     assert sorted(second["already"]) == ["llm", "tts"]
+
+
+async def test_warmup_does_not_hold_the_queue_while_downloading():
+    # ダウンロード中に Runner を塞ぐと、待たずに断るはずのフックの要約が後ろで待たされる
+    llm = FakeLLM(downloaded=False, download_delay=0.3)
+    engine = make_engine(llm=llm)
+
+    warmup_task = asyncio.create_task(engine.warmup())
+    await asyncio.sleep(0.05)
+    started = time.monotonic()
+    with pytest.raises(ModelUnavailable) as error:
+        await engine.summarize(system="s", prompt="p", wait_download=False)
+
+    assert error.value.code == "model_downloading"
+    assert time.monotonic() - started < 0.1
+    result = await warmup_task
+    assert sorted(result["started"]) == ["llm", "tts"]
+    assert llm.download_calls == 1
+    assert llm.load_calls == 1
+
+
+async def test_waiting_for_a_download_does_not_hold_the_queue():
+    # 要約が初回のダウンロードを待つ間も、別のモデルの合成は先に進める
+    llm = FakeLLM(downloaded=False, download_delay=0.3)
+    engine = make_engine(llm=llm)
+
+    summary = asyncio.create_task(engine.summarize(system="s", prompt="p"))
+    await asyncio.sleep(0.05)
+    started = time.monotonic()
+    await engine.synthesize("先に進む")
+
+    assert time.monotonic() - started < 0.2
+    assert await summary == "やった、テスト全部通ったよ。"
+    assert llm.download_calls == 1
+
+
+async def test_warmup_reports_a_failed_download_without_retrying_it():
+    class FailingDownload(FakeLLM):
+        def download(self):
+            self.download_calls += 1
+            raise RuntimeError("network down")
+
+    llm = FailingDownload(downloaded=False)
+    tts = FakeTTS()
+    engine = make_engine(llm=llm, tts=tts)
+
+    result = await engine.warmup()
+
+    assert result["started"] == ["tts"]
+    assert llm.download_calls == 1
+    assert engine.health()["llm"]["state"] == "failed"
+
+
+async def test_warmup_respecting_mute_loads_nothing_while_muted():
+    llm = FakeLLM()
+    engine = make_engine(llm=llm, probe=FakeProbe(microphone=True))
+
+    with pytest.raises(MutedError) as error:
+        await engine.warmup(respect_mute=True)
+
+    assert error.value.reason == "microphone"
+    assert llm.load_calls == 0
+
+
+async def test_warmup_respecting_mute_ignores_other_audio():
+    # ほかのアプリの音は鳴り止むので、読み込みを見送る理由にしない
+    engine = make_engine(
+        probe=FakeProbe(output=True), mute_config=MuteConfig(audio_output_wait_seconds=0)
+    )
+
+    result = await engine.warmup(respect_mute=True)
+
+    assert sorted(result["started"]) == ["llm", "tts"]
 
 
 async def test_health_reports_states_and_mute_reason():

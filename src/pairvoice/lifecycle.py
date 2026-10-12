@@ -132,17 +132,10 @@ class ManagedModel:
             self._detail = ""
             return
 
-        if self._loading is None or self._loading.done():
-            self._loading_started = asyncio.Event()
-            self._loading = asyncio.create_task(self._load())
-        task = self._loading
+        task = self._start_loading()
 
         # _loading_started が立つまでは、ダウンロード中かこれから始まる（タスクがまだ走っていない）
-        if (
-            not wait_download
-            and not self._loading_started.is_set()
-            and (self._state is ModelState.DOWNLOADING or not self._backend.is_downloaded())
-        ):
+        if not wait_download and not self._loading_started.is_set() and self._needs_download():
             # 待たないので、背景のタスクの失敗はここでは受け取れない。state と detail に残る
             task.add_done_callback(_consume_exception)
             raise ModelUnavailable(
@@ -151,11 +144,7 @@ class ManagedModel:
 
         # asyncio.wait は待つのをやめても task を取り消さない。タイムアウトで呼び出し側に
         # 返した後もロードは背景で続き、後から来た呼び出しがそれに合流する
-        started = asyncio.ensure_future(self._loading_started.wait())
-        try:
-            await asyncio.wait({task, started}, return_when=asyncio.FIRST_COMPLETED)
-        finally:
-            started.cancel()
+        await self._wait_until_started(task)
         if not task.done():
             await asyncio.wait({task}, timeout=max(self._loading_deadline - self._clock(), 0))
         if not task.done():
@@ -165,11 +154,47 @@ class ManagedModel:
             self._detail = "load timeout"
             raise ModelUnavailable("model_load_failed", "ロードがタイムアウトしました")
 
+        self._raise_if_failed(task)
+
+    async def ensure_downloaded(self) -> None:
+        """ダウンロードが要るなら始め、終わるまで待つ。読み込みは待たない。
+
+        Runner の外で呼ぶ。数 GB のダウンロードの間 Runner を塞ぐと、待たずに断るはずの
+        フックの要求まで後ろで待たされる。ダウンロードが終わると読み込みは背景で続き、
+        後から ensure_loaded() が合流する。
+        """
+        # 設定の不備は ensure_loaded() が state と detail に載せて断る
+        if self._backend.preflight() or not self._needs_download():
+            return
+        task = self._start_loading()
+        await self._wait_until_started(task)
+        if task.done():
+            # ここで受け取らないと、次の ensure_loaded() がダウンロードからやり直して Runner を塞ぐ
+            self._raise_if_failed(task)
+
+    def _needs_download(self) -> bool:
+        return self._state is ModelState.DOWNLOADING or not self._backend.is_downloaded()
+
+    async def _wait_until_started(self, task: asyncio.Task) -> None:
+        """ダウンロードを終えて LOADING に入るか、task が終わるまで待つ。"""
+        started = asyncio.ensure_future(self._loading_started.wait())
+        try:
+            await asyncio.wait({task, started}, return_when=asyncio.FIRST_COMPLETED)
+        finally:
+            started.cancel()
+
+    def _raise_if_failed(self, task: asyncio.Task) -> None:
         error = task.exception()
         if error is not None:
             self._state = ModelState.FAILED
             self._detail = str(error)
             raise ModelUnavailable("model_load_failed", str(error))
+
+    def _start_loading(self) -> asyncio.Task:
+        if self._loading is None or self._loading.done():
+            self._loading_started = asyncio.Event()
+            self._loading = asyncio.create_task(self._load())
+        return self._loading
 
     async def _load(self) -> None:
         try:
@@ -340,11 +365,23 @@ class Engine:
         if state.active:
             raise MutedError(state.reason or "manual")
 
-    async def _run(self, fn: Callable, *, check_mute: bool, droppable: bool):
-        """Runner で fn を実行する。check_mute なら、キューに入れる前と実行する直前の2回ミュートを確かめる。"""
+    async def _run(
+        self,
+        fn: Callable,
+        *,
+        check_mute: bool,
+        droppable: bool,
+        download: ManagedModel | None = None,
+    ):
+        """Runner で fn を実行する。check_mute なら、キューに入れる前と実行する直前の2回ミュートを確かめる。
+
+        download のモデルは、ダウンロードが要ればキューに入れる前に待つ。
+        """
         if check_mute:
             # 通知音のような短い音なら止むのを待つ。キューの外なので Runner は塞がない
             self._raise_if_muted(await self.mute.wait_state())
+        if download is not None:
+            await download.ensure_downloaded()
 
         async def work():
             # キューで待っている間にミュートが有効化されうるので、実行直前にもう一度判定する。
@@ -377,7 +414,12 @@ class Engine:
             self._llm.touch()
             return text
 
-        return await self._run(work, check_mute=respect_mute, droppable=droppable)
+        return await self._run(
+            work,
+            check_mute=respect_mute,
+            droppable=droppable,
+            download=self._llm if wait_download else None,
+        )
 
     async def synthesize(
         self,
@@ -414,7 +456,12 @@ class Engine:
             self._tts.touch()
             return result
 
-        return await self._run(work, check_mute=check_mute, droppable=False)
+        return await self._run(
+            work,
+            check_mute=check_mute,
+            droppable=False,
+            download=self._tts if wait_download else None,
+        )
 
     async def speak(
         self,
@@ -444,7 +491,12 @@ class Engine:
             self._tts.touch()
             return await asyncio.to_thread(self._tts_backend.join, parts)
 
-        return await self._run(work, check_mute=not bypass_mute, droppable=False)
+        return await self._run(
+            work,
+            check_mute=not bypass_mute,
+            droppable=False,
+            download=self._tts if wait_download else None,
+        )
 
     async def speaker_vector(self, audio: str) -> list[float]:
         """データの置き場所の wav の話者ベクトル。2択でもとの声どうしの位置を測る。"""
@@ -457,9 +509,12 @@ class Engine:
             return vector
 
         # 測るのは studio の操作で、音は出さないのでミュートは効かせない
-        return await self._run(work, check_mute=False, droppable=False)
+        return await self._run(work, check_mute=False, droppable=False, download=self._tts)
 
-    async def warmup(self) -> dict:
+    async def warmup(self, respect_mute: bool = False) -> dict:
+        if respect_mute:
+            # 読み上げないなら載せる意味が無い。ほかのアプリの音は鳴り止むので見ない
+            self._raise_if_muted(self.mute.state(include_output=False))
         # ロードも直列キューを通し、llm と tts を順に読み込む（並行だとピークメモリが両方の合計になる）
         started, already = [], []
         for name, model in (("llm", self._llm), ("tts", self._tts)):
@@ -469,7 +524,9 @@ class Engine:
                 already.append(name)
         for name, model in (("llm", self._llm), ("tts", self._tts)):
             try:
-                await self._runner.run(model.ensure_loaded, droppable=False)
+                await self._run(
+                    model.ensure_loaded, check_mute=False, droppable=False, download=model
+                )
             except Exception as error:
                 # 失敗の中身は /health の state と detail にも残る
                 _log.warning("%s の読み込みに失敗しました: %s", name, error)

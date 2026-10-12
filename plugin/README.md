@@ -7,6 +7,10 @@ Claude Code の `MessageDisplay` フック。アシスタントの出力を pair
 フック本体は `hooks/speak-summary.sh`。`bash` `curl` `jq` `perl` を使う
 （`jq` 以外は macOS に最初からある）。
 
+プロンプトを送ったときにも `UserPromptSubmit` フックで常駐サーバーにモデルを読み込ませておく。
+常駐サーバーは使われないモデルを 10 分で解放するので、間が空いた次の返事の読み上げが読み込み待ちで遅れないようにするため。
+ミュート中は読み込まない。
+
 ## インストール
 
 ```
@@ -17,7 +21,8 @@ Claude Code の `MessageDisplay` フック。アシスタントの出力を pair
 手元の clone から入れるなら、`matzkoh/pairvoice` の代わりにリポジトリのパスを渡す。
 
 以前 `~/.claude/settings.json` の `hooks.MessageDisplay` に `speak-summary.sh` を直接登録
-していた場合は、そちらを外す（両方あると二重に読み上げる）。
+していた場合は、そちらを外す（両方あると二重に読み上げる）。`hooks.UserPromptSubmit` に `/api/warmup` を叩く
+フックを登録していた場合も、プラグインが同じことをするので外す。
 
 ## 要約を改善する
 

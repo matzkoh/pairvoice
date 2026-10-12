@@ -363,6 +363,17 @@ def test_health_reports_active_profile():
     assert client.get("/health").json()["tts"]["profile"] == tts.profile
 
 
+def test_warmup_respecting_mute_reports_mute_with_reason():
+    _, client = build(probe=FakeProbe(microphone=True))
+
+    response = client.post("/warmup", json={"respect_mute": True})
+
+    assert response.status_code == 409
+    assert response.json() == {"error": "muted", "reason": "microphone"}
+    # 本文を省いた呼び出し（CLI・メニュー）はミュートを見ない
+    assert client.post("/warmup").status_code == 202
+
+
 def test_warmup_returns_202_with_started_and_already():
     _, client = build()
 
