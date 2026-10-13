@@ -211,6 +211,10 @@ class StylesBody(BaseModel):
     items: list[StyleEntry] = Field(description="全件。名前は重ねられない")
 
 
+Order = Literal["random", "shuffle"]
+_ORDER_DESCRIPTION = "選び方。`random` は毎回ばらばらに選ぶ。`shuffle` は混ぜた順に、全員を一巡するまで同じ声を選ばない"
+
+
 class ProfileItem(BaseModel):
     id: str = Field(description="ID。`voice` に渡せる")
     name: str = Field(description="名前。`voice` に渡せる")
@@ -221,6 +225,7 @@ class ProfileItem(BaseModel):
     created_at: str = Field(description="作った日時（ISO 8601）")
     tone: str = Field(description="要約の口調。空なら既定の口調（`GET /tone`）で読む")
     members: list[str] = Field(description="`random` の声が選ぶ声の ID。ほかの声は空")
+    order: Order = Field(description="`random` の声の選び方。ほかの声は `random`")
 
 
 class ProfilesResponse(BaseModel):
@@ -270,6 +275,7 @@ class RandomProfileBody(BaseModel):
         description="選ぶ声の ID（2つ以上）。`random` の声は入れられない。"
         "選んだ声の caption と口調で読む",
     )
+    order: Order = Field(default="random", description=_ORDER_DESCRIPTION)
 
 
 class ActiveBody(BaseModel):
@@ -289,11 +295,12 @@ class PatchProfileBody(BaseModel):
     members: list[str] | None = Field(
         default=None, description="`random` の声が選ぶ声の ID（2つ以上）"
     )
+    order: Order | None = Field(default=None, description=f"`random` の声の{_ORDER_DESCRIPTION}")
 
     @model_validator(mode="after")
     def _something_to_change(self):
-        if all(v is None for v in (self.name, self.caption, self.tone, self.members)):
-            raise ValueError("name, caption, tone or members is required")
+        if all(v is None for v in (self.name, self.caption, self.tone, self.members, self.order)):
+            raise ValueError("name, caption, tone, members or order is required")
         return self
 
 
@@ -569,7 +576,7 @@ def data_router(data_root: Path, synthesize: Synthesize) -> APIRouter:
     )
     def create_random_profile(body: RandomProfileBody):
         """使用中にしたり `voice` に渡したりすると、要約・合成のたびにメンバーから1つを選んで読む。"""
-        created = profiles.create_random(name=body.name, members=body.members)
+        created = profiles.create_random(name=body.name, members=body.members, order=body.order)
         return ProfileItem.model_validate(created.describe())
 
     @router.put(
@@ -585,13 +592,14 @@ def data_router(data_root: Path, synthesize: Synthesize) -> APIRouter:
 
     @router.patch(
         "/profiles/{profile_id}",
-        summary="声の名前・caption・口調・メンバーを書き換える",
+        summary="声の名前・caption・口調・メンバー・選び方を書き換える",
         response_model=ProfileItem,
         tags=["声"],
         responses={
             **_PROFILE_NOT_FOUND,
             400: _error(
-                "`invalid_profile`（`random` の声の caption・口調、ほかの声のメンバー、メンバーの不備）"
+                "`invalid_profile`（`random` の声の caption・口調、ほかの声のメンバー・選び方、"
+                "メンバーの不備）"
             ),
         },
     )
@@ -603,6 +611,7 @@ def data_router(data_root: Path, synthesize: Synthesize) -> APIRouter:
             caption=body.caption,
             tone=body.tone,
             members=body.members,
+            order=body.order,
         )
         return ProfileItem.model_validate(updated.describe())
 

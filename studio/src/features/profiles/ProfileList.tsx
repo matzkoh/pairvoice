@@ -4,6 +4,8 @@ import { Plus } from 'lucide-react'
 import { Badge } from '@/components/ui/badge'
 import type { ProfileItem, ProfileSource } from '@/lib/api-types'
 
+import { ORDER_LABELS } from './MemberPicker'
+
 export const SOURCE_LABELS: Record<ProfileSource, string> = {
   design: '作った声',
   upload: '取り込み',
@@ -42,7 +44,7 @@ export function ProfileList({ items, active, selected, onSelect, onCreate }: Pro
               </span>
               <span className="mt-0.5 line-clamp-2 text-xs text-muted-foreground">
                 {item.source === 'random'
-                  ? `ランダム: ${item.members.map((id) => names.get(id) ?? id).join('・')}`
+                  ? `${ORDER_LABELS[item.order]}: ${item.members.map((id) => names.get(id) ?? id).join('・')}`
                   : item.caption}
               </span>
             </button>

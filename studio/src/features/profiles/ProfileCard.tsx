@@ -7,10 +7,10 @@ import { Badge } from '@/components/ui/badge'
 import { Button } from '@/components/ui/button'
 import { Input } from '@/components/ui/input'
 import { apiSend, apiUrl, toErrorMessage } from '@/lib/api'
-import type { ProfileItem } from '@/lib/api-types'
+import type { ProfileItem, ProfileOrder } from '@/lib/api-types'
 import { isImeConfirm } from '@/lib/hotkeys'
 
-import { MemberPicker, MIN_MEMBERS } from './MemberPicker'
+import { MemberPicker, MIN_MEMBERS, OrderPicker } from './MemberPicker'
 import { SOURCE_LABELS } from './ProfileList'
 import { invalidateProfiles, type ProfileStatus } from './queries'
 
@@ -129,10 +129,10 @@ export function ProfileCard({ item, voices, isActive, onPlay, onStatus, onDelete
           item={item}
           voices={voices}
           pending={pending}
-          onSave={(members) =>
+          onSave={(change) =>
             run(
-              () => apiSend(path, 'PATCH', { members }),
-              'メンバーを変えました（次の読み上げから効きます）',
+              () => apiSend(path, 'PATCH', change),
+              'メンバーと選び方を変えました（次の読み上げから効きます）',
             )
           }
         />
@@ -164,13 +164,16 @@ type MembersProps = {
   item: ProfileItem
   voices: readonly ProfileItem[]
   pending: boolean
-  onSave: (members: string[]) => void
+  onSave: (change: { members: string[]; order: ProfileOrder }) => void
 }
 
 function MembersEditor({ item, voices, pending, onSave }: MembersProps) {
   const [members, setMembers] = useState<string[]>(item.members)
+  const [order, setOrder] = useState<ProfileOrder>(item.order)
   const changed =
-    members.length !== item.members.length || members.some((id) => !item.members.includes(id))
+    order !== item.order ||
+    members.length !== item.members.length ||
+    members.some((id) => !item.members.includes(id))
 
   return (
     <div className="space-y-3 px-4 py-3">
@@ -178,12 +181,13 @@ function MembersEditor({ item, voices, pending, onSave }: MembersProps) {
         読み上げのたびに、この中から1つを選んで読みます。caption と口調はその声のものを使います。
       </p>
       <MemberPicker voices={voices} value={members} disabled={pending} onChange={setMembers} />
+      <OrderPicker value={order} disabled={pending} onChange={setOrder} />
       <Button
         size="sm"
         disabled={pending || !changed || members.length < MIN_MEMBERS}
-        onClick={() => onSave(members)}
+        onClick={() => onSave({ members, order })}
       >
-        メンバーを保存
+        保存
       </Button>
     </div>
   )

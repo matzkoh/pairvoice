@@ -27,6 +27,7 @@ const VOICE: ProfileItem = {
   created_at: '1',
   tone: '',
   members: [],
+  order: 'random',
 }
 const VOICES = [VOICE, { ...VOICE, id: 'p-b', name: '二つ目' }]
 
@@ -61,8 +62,28 @@ it('名前とメンバー2つを選ぶと作れる', async () => {
   expect(apiSend).toHaveBeenCalledWith('/profiles/random', 'POST', {
     name: 'ランダム',
     members: ['p-a', 'p-b'],
+    order: 'random',
   })
   expect(onCreated).toHaveBeenCalledWith('p-r')
+})
+
+it('シャッフルを選ぶと shuffle で作る', async () => {
+  vi.mocked(apiSend).mockResolvedValue({ ...VOICE, id: 'p-s', name: '順番' })
+  renderForm()
+
+  fireEvent.change(screen.getByLabelText('名前'), { target: { value: '順番' } })
+  fireEvent.click(screen.getByRole('checkbox', { name: '一つ目' }))
+  fireEvent.click(screen.getByRole('checkbox', { name: '二つ目' }))
+  fireEvent.click(screen.getByRole('radio', { name: /シャッフル/ }))
+  await act(async () => {
+    fireEvent.click(screen.getByRole('button', { name: 'プロファイルを作る' }))
+  })
+
+  expect(apiSend).toHaveBeenCalledWith('/profiles/random', 'POST', {
+    name: '順番',
+    members: ['p-a', 'p-b'],
+    order: 'shuffle',
+  })
 })
 
 it('声が2つに満たなければ先に作るよう促す', () => {

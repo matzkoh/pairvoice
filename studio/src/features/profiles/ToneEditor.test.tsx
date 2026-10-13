@@ -32,6 +32,7 @@ const item: ProfileItem = {
   created_at: '',
   tone: '元気な口調',
   members: [],
+  order: 'random',
 }
 
 async function renderTone(onStatus = vi.fn()) {

@@ -6,6 +6,7 @@
 
 ランダムの声（source が random）は参照音声を持たず、ほかの声（メンバー）を束ねる。
 使用中にも `voice` にもでき、要約・合成のたびにメンバーから1つを選んで読む（pick）。
+選び方（order）がシャッフルなら、混ぜた順に全員を一巡するまで同じ声を選ばない。
 """
 
 from __future__ import annotations
@@ -39,10 +40,18 @@ RANDOM_SOURCE = "random"
 SOURCES = ("design", "upload", "auto", "import", RANDOM_SOURCE)
 # 1つだけでは選ぶ意味が無い
 MIN_MEMBERS = 2
+# ランダムの声の選び方。random = 毎回ばらばらに選ぶ、shuffle = 混ぜた順に一巡ずつ選ぶ
+ORDERS = ("random", "shuffle")
 
 # 読んで書き戻す処理を1本の列で走らせる。重なると、後から書いた側が先の変更を読む前の
 # 内容で上書きして消す（名前と caption を続けて変えたとき、消した後に書き戻したとき等）
 _write_lock = threading.RLock()
+
+# シャッフルの声ごとの、この巡で残っている声と最後に選んだ声。巡の途中で常駐サーバーが
+# 再起動しても混ぜ直すだけなので、ファイルには書かない。ProfileStore はいくつも作られる
+# （合成と要約で別）ので、モジュールで持つ
+_shuffle_rounds: dict[Path, tuple[list[str], str | None]] = {}
+_shuffle_lock = threading.Lock()
 
 
 @dataclass(frozen=True)
@@ -56,8 +65,9 @@ class Profile:
     created_at: str = ""
     # 要約の口調。空なら既定の口調で読む
     tone: str = ""
-    # ランダムの声が選ぶ声の ID
+    # ランダムの声が選ぶ声の ID と、選び方（ORDERS）
     members: tuple[str, ...] = ()
+    order: str = "random"
 
     @property
     def is_random(self) -> bool:
@@ -73,6 +83,7 @@ class Profile:
             "created_at": self.created_at,
             "tone": self.tone,
             "members": list(self.members),
+            "order": self.order,
         }
 
 
@@ -125,6 +136,7 @@ class ProfileStore:
         if reference is not None and not reference.is_file():
             return None
         members = meta.get("members") if is_random else None
+        order = meta.get("order")
         return Profile(
             id=profile_id,
             name=str(meta.get("name", profile_id)),
@@ -134,6 +146,7 @@ class ProfileStore:
             created_at=str(meta.get("created_at", "")),
             tone="" if is_random else self.tone(profile_id).read(),
             members=tuple(str(m) for m in members) if isinstance(members, list) else (),
+            order=order if order in ORDERS else "random",
         )
 
     def require(self, profile_id: str) -> Profile:
@@ -165,11 +178,30 @@ class ProfileStore:
         """読む声。ランダムの声ならメンバーから1つを選び、読めるメンバーが無ければ ProfileNotFound。"""
         if not profile.is_random:
             return profile
-        # 混ぜた順に引き、最初に読めた声を使う。全員を読むと読み上げのたびにメンバーの数だけ読む
-        for member in random.sample(profile.members, len(profile.members)):
+        deck = random.sample(profile.members, len(profile.members))
+        if profile.order != "shuffle":
+            return self._first_readable(profile, deck)[1]
+        key = self.root / profile.id
+        with _shuffle_lock:
+            rest, last = _shuffle_rounds.get(key, ([], None))
+            # 外したメンバーは残りから除く。足したメンバーは次の巡から入る
+            rest = [m for m in rest if m in profile.members]
+            # 巡の変わり目で同じ声が続かないよう、前の巡の最後を後ろへ回す
+            if deck[0] == last:
+                deck.append(deck.pop(0))
+            # 残りを引き切ったら（読めない声しか残っていなければ）、混ぜた次の巡に移る
+            candidates = rest + deck
+            index, voice = self._first_readable(profile, candidates)
+            remaining = rest[index + 1 :] if index < len(rest) else candidates[index + 1 :]
+            _shuffle_rounds[key] = (remaining, candidates[index])
+        return voice
+
+    def _first_readable(self, profile: Profile, candidates: list[str]) -> tuple[int, Profile]:
+        """候補を順に読み、最初に読めた声とその位置。全員を読むと読み上げのたびにメンバーの数だけ読む。"""
+        for index, member in enumerate(candidates):
             voice = self.get(member)
             if voice is not None and not voice.is_random:
-                return voice
+                return index, voice
         raise ProfileNotFound(profile.id)
 
     def tone(self, profile_id: str) -> history.VersionedText:
@@ -227,15 +259,17 @@ class ProfileStore:
             created_at=meta["created_at"],
         )
 
-    def create_random(self, *, name: str, members: list[str]) -> Profile:
+    def create_random(self, *, name: str, members: list[str], order: str = "random") -> Profile:
         """メンバーから毎回1つを選ぶ声を作る。"""
         with _write_lock:
             members = self._check_members(members)
+            _check_order(order)
             profile_id, now = self._new_directory()
             meta = {
                 "name": name,
                 "source": RANDOM_SOURCE,
                 "members": members,
+                "order": order,
                 "created_at": now.isoformat(),
             }
             _write_meta(self.root / profile_id, meta)
@@ -273,19 +307,22 @@ class ProfileStore:
         caption: str | None = None,
         tone: str | None = None,
         members: list[str] | None = None,
+        order: str | None = None,
     ) -> Profile:
-        """名前・caption・口調・メンバーを書き換える。名前以外は次の読み上げから効き、caption と口調は版を残す。
+        """名前・caption・口調・メンバー・選び方を書き換える。名前以外は次の読み上げから効き、caption と口調は版を残す。
 
-        ランダムの声は名前とメンバーだけ、ほかの声はメンバー以外だけを書ける
+        ランダムの声は名前とメンバーと選び方だけ、ほかの声はそれ以外だけを書ける
         """
         with _write_lock:
             profile = self.require(profile_id)
             if profile.is_random and (caption is not None or tone is not None):
                 raise ProfileRejected("ランダムの声は caption と口調を持ちません")
-            if not profile.is_random and members is not None:
-                raise ProfileRejected("メンバーを持つのはランダムの声だけです")
+            if not profile.is_random and (members is not None or order is not None):
+                raise ProfileRejected("メンバーと選び方を持つのはランダムの声だけです")
             if members is not None:
                 members = self._check_members(members)
+            if order is not None:
+                _check_order(order)
             directory = self.root / profile.id
             meta = json.loads((directory / META_FILENAME).read_text(encoding="utf-8"))
             if name is not None:
@@ -294,6 +331,8 @@ class ProfileStore:
                 meta["caption"] = caption
             if members is not None:
                 meta["members"] = members
+            if order is not None:
+                meta["order"] = order
             _write_meta(directory, meta)
             if caption is not None:
                 history.snapshot("caption", directory / history.HISTORY_DIRNAME, caption)
@@ -305,6 +344,7 @@ class ProfileStore:
             caption=profile.caption if caption is None else caption,
             tone=profile.tone if tone is None else tone,
             members=profile.members if members is None else tuple(members),
+            order=profile.order if order is None else order,
         )
 
     def delete(self, profile_id: str) -> None:
@@ -340,6 +380,11 @@ class ProfileStore:
 
     def _history_dir(self, profile: Profile) -> Path:
         return self.root / profile.id / history.HISTORY_DIRNAME
+
+
+def _check_order(order: str) -> None:
+    if order not in ORDERS:
+        raise ProfileRejected(f"選び方は {'・'.join(ORDERS)} のどれかです")
 
 
 def _write_meta(directory: Path, meta: dict) -> None:

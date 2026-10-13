@@ -17,6 +17,7 @@ const ITEMS: ProfileItem[] = [
     created_at: '2',
     tone: '',
     members: [],
+    order: 'random',
   },
   {
     id: 'p-b',
@@ -26,6 +27,7 @@ const ITEMS: ProfileItem[] = [
     created_at: '1',
     tone: '',
     members: [],
+    order: 'random',
   },
 ]
 
@@ -62,7 +64,7 @@ it('「新しく作る」で作成フォームを開き、開いている間は�
   expect(onCreate).toHaveBeenCalled()
 })
 
-it('ランダムの声はメンバーの名前を並べる', () => {
+it('ランダムの声は選び方とメンバーの名前を並べる', () => {
   render(
     <ProfileList
       items={[
@@ -75,6 +77,7 @@ it('ランダムの声はメンバーの名前を並べる', () => {
           created_at: '3',
           tone: '',
           members: ['p-a', 'p-b'],
+          order: 'shuffle',
         },
       ]}
       active="p-r"
@@ -83,5 +86,5 @@ it('ランダムの声はメンバーの名前を並べる', () => {
       onCreate={vi.fn()}
     />,
   )
-  expect(screen.getByText('ランダム: 使用中の声・別の声')).toBeTruthy()
+  expect(screen.getByText('シャッフル: 使用中の声・別の声')).toBeTruthy()
 })

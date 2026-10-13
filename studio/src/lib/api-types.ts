@@ -84,6 +84,8 @@ export type HistoryResponse = { items: HistoryItem[] }
 // upload = 手持ちの wav を取り込んだ、auto / import = pairvoice が初回に作った
 // random は参照音声を持たず、読み上げのたびに members から1つを選ぶ
 export type ProfileSource = 'design' | 'upload' | 'auto' | 'import' | 'random'
+// random の声の選び方。shuffle は混ぜた順に、全員を一巡するまで同じ声を選ばない
+export type ProfileOrder = 'random' | 'shuffle'
 export type ProfileItem = {
   id: string
   name: string
@@ -94,6 +96,8 @@ export type ProfileItem = {
   tone: string
   // random の声が選ぶ声の ID。ほかの声は空
   members: string[]
+  // random の声の選び方。ほかの声は random
+  order: ProfileOrder
 }
 export type ProfilesResponse = { items: ProfileItem[]; active: string | null }
 

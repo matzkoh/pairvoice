@@ -26,6 +26,7 @@ const ITEM: ProfileItem = {
   created_at: '1',
   tone: '',
   members: [],
+  order: 'random',
 }
 
 const VOICES: ProfileItem[] = [
@@ -41,6 +42,7 @@ const RANDOM: ProfileItem = {
   caption: '',
   source: 'random',
   members: ['p-a', 'p-b'],
+  order: 'random',
 }
 
 function renderCard(isActive = false, item: ProfileItem = ITEM) {
@@ -149,7 +151,7 @@ it('ランダムの声は参照音声と caption の代わりにメンバーを�
   renderCard(false, RANDOM)
 
   expect(screen.queryByText('参照音声')).toBeNull()
-  const save = screen.getByRole('button', { name: 'メンバーを保存' })
+  const save = screen.getByRole('button', { name: '保存' })
   expect(save.hasAttribute('disabled')).toBe(true)
   // 1つに減らすと選ぶ意味が無いので保存させない
   fireEvent.click(screen.getByRole('checkbox', { name: '別の声' }))
@@ -160,5 +162,23 @@ it('ランダムの声は参照音声と caption の代わりにメンバーを�
     fireEvent.click(save)
   })
 
-  expect(apiSend).toHaveBeenCalledWith('/profiles/p-r', 'PATCH', { members: ['p-a', 'p-c'] })
+  expect(apiSend).toHaveBeenCalledWith('/profiles/p-r', 'PATCH', {
+    members: ['p-a', 'p-c'],
+    order: 'random',
+  })
+})
+
+it('ランダムの声は選び方だけを変えても保存できる', async () => {
+  vi.mocked(apiSend).mockResolvedValue(RANDOM)
+  renderCard(false, RANDOM)
+
+  fireEvent.click(screen.getByRole('radio', { name: /シャッフル/ }))
+  await act(async () => {
+    fireEvent.click(screen.getByRole('button', { name: '保存' }))
+  })
+
+  expect(apiSend).toHaveBeenCalledWith('/profiles/p-r', 'PATCH', {
+    members: ['p-a', 'p-b'],
+    order: 'shuffle',
+  })
 })

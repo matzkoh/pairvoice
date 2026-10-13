@@ -230,6 +230,7 @@ def test_patch_updates_name_and_snapshots_caption(client):
         "created_at": "",
         "tone": "",
         "members": [],
+        "order": "random",
     }
     (version,) = client.get(f"/profiles/{profile_id}/caption/history").json()["items"]
     assert version["name"].startswith("caption-")
@@ -401,6 +402,20 @@ def test_random_profile_is_listed_activated_and_edited(client):
     assert client.get(f"/profiles/{meta['id']}/audio").json()["error"] == "audio_not_found"
     in_use = client.delete(f"/profiles/{first}")
     assert in_use.status_code == 409
+
+
+def test_shuffle_order_is_created_and_switched(client):
+    first = upload(client, "一つ目").json()["id"]
+    second = upload(client, "二つ目").json()["id"]
+
+    created = client.post(
+        "/profiles/random", json={"name": "順番", "members": [first, second], "order": "shuffle"}
+    )
+    assert created.status_code == 201
+    assert created.json()["order"] == "shuffle"
+    patched = client.patch(f"/profiles/{created.json()['id']}", json={"order": "random"})
+    assert patched.json()["order"] == "random"
+    assert client.patch(f"/profiles/{first}", json={"order": "random"}).status_code == 400
 
 
 def test_random_profile_needs_two_voices(client):

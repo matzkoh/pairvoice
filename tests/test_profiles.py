@@ -209,3 +209,52 @@ def test_member_of_random_profile_cannot_be_deleted(tmp_path):
     store.delete(meta.id)
     store.delete(members[1])
     assert [p.id for p in store.all()] == [members[0]]
+
+
+def make_shuffle(store, names=("甲", "乙", "丙")):
+    members = [
+        store.create(name=name, caption="", source="design", write_reference=write_wav).id
+        for name in names
+    ]
+    return store.create_random(name="シャッフル", members=members, order="shuffle"), members
+
+
+def test_shuffle_profile_picks_every_member_once_per_round(tmp_path, monkeypatch):
+    store = ProfileStore(tmp_path / "profiles")
+    meta, members = make_shuffle(store)
+    assert store.get(meta.id).order == "shuffle"
+    # 1巡目は並びのまま、2巡目は前の巡の最後（丙）から始まる並びを混ぜた結果にする
+    rounds = iter([members] * 3 + [[members[2], members[0], members[1]]] * 3)
+    monkeypatch.setattr("pairvoice.profiles.random.sample", lambda seq, k: list(next(rounds)))
+
+    picked = [store.pick(meta).id for _ in range(6)]
+    # 2巡目は同じ声が続かないよう、丙を後ろへ回す
+    assert picked == [*members, members[0], members[1], members[2]]
+
+
+def test_shuffle_profile_follows_member_changes(tmp_path):
+    store = ProfileStore(tmp_path / "profiles")
+    meta, _ = make_shuffle(store, names=("甲", "乙"))
+    first = store.pick(meta).id
+
+    # 残りの声を外すと、次の巡に移る
+    third = store.create(name="丙", caption="", source="design", write_reference=write_wav)
+    meta = store.update(meta.id, members=[first, third.id])
+    assert store.pick(meta).id == third.id
+    shutil.rmtree(store.root / first)
+    shutil.rmtree(store.root / third.id)
+    with pytest.raises(ProfileNotFound):
+        store.pick(meta)
+
+
+def test_order_is_only_for_random_profiles(tmp_path):
+    store = ProfileStore(tmp_path / "profiles")
+    meta, members = make_random(store)
+
+    assert meta.order == "random"
+    assert store.update(meta.id, order="shuffle") == store.get(meta.id)
+    assert store.get(meta.id).order == "shuffle"
+    with pytest.raises(ProfileRejected):
+        store.update(meta.id, order="順番")
+    with pytest.raises(ProfileRejected):
+        store.update(members[0], order="shuffle")

@@ -42,6 +42,7 @@ const BASE: Props = {
         created_at: '',
         tone: '',
         members: [],
+        order: 'random',
       },
       {
         id: 'p-b',
@@ -51,6 +52,7 @@ const BASE: Props = {
         created_at: '',
         tone: '',
         members: [],
+        order: 'random',
       },
     ],
   },

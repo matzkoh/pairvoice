@@ -4,10 +4,10 @@ import { useState, useTransition } from 'react'
 import { Button } from '@/components/ui/button'
 import { Input } from '@/components/ui/input'
 import { apiSend, toErrorMessage } from '@/lib/api'
-import type { ProfileItem } from '@/lib/api-types'
+import type { ProfileItem, ProfileOrder } from '@/lib/api-types'
 
 import { Field } from './Field'
-import { MemberPicker, MIN_MEMBERS } from './MemberPicker'
+import { MemberPicker, MIN_MEMBERS, OrderPicker } from './MemberPicker'
 import { invalidateProfiles, type ProfileStatus } from './queries'
 
 type Props = {
@@ -21,6 +21,7 @@ export function RandomProfile({ voices, onStatus, onCreated }: Props) {
   const queryClient = useQueryClient()
   const [name, setName] = useState('')
   const [members, setMembers] = useState<string[]>([])
+  const [order, setOrder] = useState<ProfileOrder>('random')
   const [pending, startTransition] = useTransition()
   const canSave = name.trim() !== '' && members.length >= MIN_MEMBERS && !pending
 
@@ -31,6 +32,7 @@ export function RandomProfile({ voices, onStatus, onCreated }: Props) {
         const created = await apiSend<ProfileItem>('/profiles/random', 'POST', {
           name: name.trim(),
           members,
+          order,
         })
         await invalidateProfiles(queryClient)
         onStatus({ message: `「${created.name}」を作りました`, isError: false })
@@ -54,6 +56,9 @@ export function RandomProfile({ voices, onStatus, onCreated }: Props) {
         ) : (
           <MemberPicker voices={voices} value={members} disabled={pending} onChange={setMembers} />
         )}
+      </Field>
+      <Field label="選び方">
+        <OrderPicker value={order} disabled={pending} onChange={setOrder} />
       </Field>
       <Field label="名前" htmlFor="random-name">
         <Input id="random-name" value={name} onChange={(e) => setName(e.target.value)} />
