@@ -29,7 +29,7 @@ from .api_errors import fail as _fail
 from .profiles import TakeRejected
 from .prompt import SummaryPrompt
 from .styles import STYLES_FILENAME, StyleStore
-from .tts import ANCHOR_TEXT, SpeechResult, resolve_data_audio
+from .tts import ANCHOR_TEXT, AudioNotFound, SpeechResult, resolve_data_audio
 from .wav import concat_wavs, has_wav_header
 
 # 手持ちの wav を取り込むときの上限。数十秒の参照音声で足りる
@@ -215,9 +215,12 @@ class ProfileItem(BaseModel):
     id: str = Field(description="ID。`voice` に渡せる")
     name: str = Field(description="名前。`voice` に渡せる")
     caption: str = Field(description="話し方の指示。合成のたびに読む")
-    source: Literal["design", "upload", "auto", "import"] = Field(description="作り方")
+    source: Literal["design", "upload", "auto", "import", "random"] = Field(
+        description="作り方。`random` は参照音声を持たず、要約・合成のたびに `members` から1つを選んで読む"
+    )
     created_at: str = Field(description="作った日時（ISO 8601）")
     tone: str = Field(description="要約の口調。空なら既定の口調（`GET /tone`）で読む")
+    members: list[str] = Field(description="`random` の声が選ぶ声の ID。ほかの声は空")
 
 
 class ProfilesResponse(BaseModel):
@@ -261,6 +264,14 @@ class DesignProfileBody(BaseModel):
     )
 
 
+class RandomProfileBody(BaseModel):
+    name: ProfileName = Field(description="声の名前")
+    members: list[str] = Field(
+        description="選ぶ声の ID（2つ以上）。`random` の声は入れられない。"
+        "選んだ声の caption と口調で読む",
+    )
+
+
 class ActiveBody(BaseModel):
     id: str = Field(description="使用中にする声の ID")
 
@@ -275,11 +286,14 @@ class PatchProfileBody(BaseModel):
         description="要約の口調（口調の指示と入出力の例）。共通のプロンプトの後ろに足す。"
         "空文字は既定の口調で読む。書くたびに版を残す",
     )
+    members: list[str] | None = Field(
+        default=None, description="`random` の声が選ぶ声の ID（2つ以上）"
+    )
 
     @model_validator(mode="after")
     def _something_to_change(self):
-        if self.name is None and self.caption is None and self.tone is None:
-            raise ValueError("name, caption or tone is required")
+        if all(v is None for v in (self.name, self.caption, self.tone, self.members)):
+            raise ValueError("name, caption, tone or members is required")
         return self
 
 
@@ -542,6 +556,22 @@ def data_router(data_root: Path, synthesize: Synthesize) -> APIRouter:
         )
         return ProfileItem.model_validate(created.describe())
 
+    @router.post(
+        "/profiles/random",
+        status_code=201,
+        response_model=ProfileItem,
+        summary="ほかの声から毎回1つを選ぶ声を作る",
+        tags=["声"],
+        responses={
+            **_PROFILE_NOT_FOUND,
+            400: _error("`invalid_profile`（メンバーが2つに満たない・`random` の声を含む）"),
+        },
+    )
+    def create_random_profile(body: RandomProfileBody):
+        """使用中にしたり `voice` に渡したりすると、要約・合成のたびにメンバーから1つを選んで読む。"""
+        created = profiles.create_random(name=body.name, members=body.members)
+        return ProfileItem.model_validate(created.describe())
+
     @router.put(
         "/profiles/active",
         summary="使用中の声を切り替える",
@@ -555,21 +585,35 @@ def data_router(data_root: Path, synthesize: Synthesize) -> APIRouter:
 
     @router.patch(
         "/profiles/{profile_id}",
-        summary="声の名前・caption・口調を書き換える",
+        summary="声の名前・caption・口調・メンバーを書き換える",
         response_model=ProfileItem,
         tags=["声"],
-        responses=_PROFILE_NOT_FOUND,
+        responses={
+            **_PROFILE_NOT_FOUND,
+            400: _error(
+                "`invalid_profile`（`random` の声の caption・口調、ほかの声のメンバー、メンバーの不備）"
+            ),
+        },
     )
     def patch_profile(profile_id: str, body: PatchProfileBody):
         """caption と口調は次の読み上げから効き、書くたびに版を残す。"""
-        updated = profiles.update(profile_id, name=body.name, caption=body.caption, tone=body.tone)
+        updated = profiles.update(
+            profile_id,
+            name=body.name,
+            caption=body.caption,
+            tone=body.tone,
+            members=body.members,
+        )
         return ProfileItem.model_validate(updated.describe())
 
     @router.delete(
         "/profiles/{profile_id}",
         summary="声を消す",
         tags=["声"],
-        responses={**_PROFILE_NOT_FOUND, 409: _error("`profile_in_use`（使用中の声）")},
+        responses={
+            **_PROFILE_NOT_FOUND,
+            409: _error("`profile_in_use`（使用中の声・`random` の声のメンバー）"),
+        },
     )
     def delete_profile(profile_id: str) -> Ok:
         profiles.delete(profile_id)
@@ -580,10 +624,17 @@ def data_router(data_root: Path, synthesize: Synthesize) -> APIRouter:
         summary="声の参照音声",
         tags=["声"],
         response_class=FileResponse,
-        responses={**_PROFILE_NOT_FOUND, 200: {"content": {"audio/wav": {}}}},
+        responses={
+            **_PROFILE_NOT_FOUND,
+            200: {"content": {"audio/wav": {}}},
+            404: _error("`profile_not_found`、`audio_not_found`（`random` の声）"),
+        },
     )
     def profile_audio(profile_id: str):
-        return FileResponse(profiles.require(profile_id).reference, media_type="audio/wav")
+        reference = profiles.require(profile_id).reference
+        if reference is None:
+            raise AudioNotFound(profile_id)
+        return FileResponse(reference, media_type="audio/wav")
 
     @router.get(
         "/profiles/{profile_id}/caption/history",

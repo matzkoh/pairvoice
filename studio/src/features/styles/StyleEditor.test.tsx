@@ -34,8 +34,24 @@ const BASE: Props = {
   profiles: {
     active: 'p-a',
     items: [
-      { id: 'p-a', name: '声A', caption: '', source: 'design', created_at: '', tone: '' },
-      { id: 'p-b', name: '声B', caption: '', source: 'design', created_at: '', tone: '' },
+      {
+        id: 'p-a',
+        name: '声A',
+        caption: '',
+        source: 'design',
+        created_at: '',
+        tone: '',
+        members: [],
+      },
+      {
+        id: 'p-b',
+        name: '声B',
+        caption: '',
+        source: 'design',
+        created_at: '',
+        tone: '',
+        members: [],
+      },
     ],
   },
   baseSampler: { cfg_scale_speaker: 3 },

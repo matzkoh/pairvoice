@@ -60,6 +60,7 @@ pairvoice の常駐サーバーの API。要約（mlx-lm）と音声合成（Iro
 - 待ち受けは 127.0.0.1 だけ。ブラウザで開いた外部のページ（Host か Origin がループバックでない要求）は 403 で断る
 - ミュート中は `/speak`（鳴らす）と `respect_mute` 付きの `/llm`・`/warmup` を 409 `{"error": "muted", "reason": ...}` で断る。`/speak` は `bypass_mute` で鳴らせる。`/synthesize` は wav を作るだけなのでミュートを見ない
 - 声は `voice`（プロファイルの名前か ID）、話し方は `style`（studio の「スタイル」画面で作る名前）で選ぶ。選べる名前は `GET /profiles` と `GET /styles` で引ける
+- ランダムの声（`source` が `random` のプロファイル）は、要約・合成のたびにメンバーから1つを選ぶ。`/llm` が返す `voice` を `/speak` に渡すと、要約の口調と同じ声で読む
 """
 
 # /docs の「Try it out」の初期値。例が無いと Swagger UI はすべての項目を 0 で埋めた本文を出し、
@@ -107,8 +108,8 @@ class MutedResponse(BaseModel):
 class SummaryResponse(BaseModel):
     text: str = Field(description="要約した文")
     voice: str | None = Field(
-        description="口調を足した声（プロファイル）の ID。`system` を渡したときと、"
-        "声がまだ無いときは null"
+        description="口調を足した声（プロファイル）の ID。ランダムの声なら選んだメンバー。"
+        "`system` を渡したときと、声がまだ無いときは null"
     )
 
 
@@ -214,7 +215,7 @@ class SynthesisRequest(BaseModel):
     voice: str | None = Field(
         default=None,
         description="声（プロファイル）の名前か ID。同じ名前が複数あれば、いちばん新しく作ったもの。"
-        "省くと使用中のプロファイル",
+        "省くと使用中のプロファイル。ランダムの声なら、合成のたびにメンバーから1つを選ぶ",
     )
     style: str | None = Field(
         default=None,

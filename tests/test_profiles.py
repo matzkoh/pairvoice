@@ -3,7 +3,7 @@ import shutil
 
 import pytest
 
-from pairvoice.profiles import ProfileStore
+from pairvoice.profiles import ProfileInUse, ProfileNotFound, ProfileRejected, ProfileStore
 
 
 def write_wav(path):
@@ -21,8 +21,8 @@ def test_create_writes_profile_and_activates_it(tmp_path):
         name="既定の声", caption="やわらかい声。", source="auto", write_reference=write_wav
     )
 
-    assert profile.reference.read_bytes().startswith(b"RIFF")
-    meta = json.loads((profile.reference.parent / "profile.json").read_text(encoding="utf-8"))
+    assert (store.root / profile.id / "reference.wav").read_bytes().startswith(b"RIFF")
+    meta = json.loads((store.root / profile.id / "profile.json").read_text(encoding="utf-8"))
     assert meta["name"] == "既定の声"
     assert meta["caption"] == "やわらかい声。"
     assert meta["source"] == "auto"
@@ -35,7 +35,7 @@ def test_active_reads_caption_on_every_call(tmp_path):
     # studio が profile.json を書き換えたら、再起動なしで次の合成から効く
     store = ProfileStore(tmp_path / "profiles")
     profile = store.create(name="a", caption="一つ目。", source="auto", write_reference=write_wav)
-    meta_path = profile.reference.parent / "profile.json"
+    meta_path = (store.root / profile.id) / "profile.json"
     meta = json.loads(meta_path.read_text(encoding="utf-8"))
     meta["caption"] = "二つ目。"
     meta_path.write_text(json.dumps(meta, ensure_ascii=False), encoding="utf-8")
@@ -56,7 +56,7 @@ def test_active_is_none_when_pointing_at_broken_profile(tmp_path):
 def test_active_is_none_when_reference_is_missing(tmp_path):
     store = ProfileStore(tmp_path / "profiles")
     profile = store.create(name="a", caption="声。", source="auto", write_reference=write_wav)
-    profile.reference.unlink()
+    (store.root / profile.id / "reference.wav").unlink()
 
     assert store.active() is None
 
@@ -81,7 +81,7 @@ def test_active_is_none_when_active_file_is_not_utf8(tmp_path):
 def test_get_is_none_when_profile_json_is_not_an_object(tmp_path, meta):
     store = ProfileStore(tmp_path / "profiles")
     profile = store.create(name="a", caption="声。", source="auto", write_reference=write_wav)
-    (profile.reference.parent / "profile.json").write_text(meta, encoding="utf-8")
+    (store.root / profile.id / "profile.json").write_text(meta, encoding="utf-8")
 
     assert store.get(profile.id) is None
 
@@ -103,7 +103,7 @@ def test_get_rejects_id_with_trailing_newline(tmp_path):
     store = ProfileStore(tmp_path / "profiles")
     profile = store.create(name="a", caption="声。", source="auto", write_reference=write_wav)
     # 末尾に改行を持つ名前のディレクトリも作れてしまうので、形の判定で弾く
-    shutil.copytree(profile.reference.parent, tmp_path / "profiles" / (profile.id + "\n"))
+    shutil.copytree((store.root / profile.id), tmp_path / "profiles" / (profile.id + "\n"))
 
     assert store.get(profile.id + "\n") is None
 
@@ -128,3 +128,84 @@ def test_find_by_id_or_name_prefers_newest_of_same_name(tmp_path):
 
 def test_list_is_empty_without_directory(tmp_path):
     assert ProfileStore(tmp_path / "profiles").all() == []
+
+
+def make_random(store, members=None):
+    if members is None:
+        members = [
+            store.create(
+                name=name, caption=f"{name}。", source="design", write_reference=write_wav
+            ).id
+            for name in ("甲", "乙")
+        ]
+    return store.create_random(name="ランダム", members=members), members
+
+
+def test_random_profile_picks_a_member_each_time(tmp_path, monkeypatch):
+    store = ProfileStore(tmp_path / "profiles")
+    meta, members = make_random(store)
+    store.activate(meta.id)
+
+    assert store.get(meta.id) == meta
+    assert meta.reference is None
+    monkeypatch.setattr("pairvoice.profiles.random.sample", lambda seq, k: list(reversed(seq)))
+    # 使用中でも、名前で選んでも、読むのはメンバーの声
+    picked = [store.resolve(key) for key in (None, "ランダム")]
+    assert [p.id if p is not None else None for p in picked] == [members[1], members[1]]
+    # 使用中の表示はランダムの声のまま
+    assert store.active() == meta
+
+
+def test_random_profile_skips_members_that_are_gone(tmp_path):
+    store = ProfileStore(tmp_path / "profiles")
+    meta, members = make_random(store)
+    shutil.rmtree(store.root / members[0])
+
+    assert store.pick(meta).id == members[1]
+    shutil.rmtree(store.root / members[1])
+    with pytest.raises(ProfileNotFound):
+        store.pick(meta)
+
+
+@pytest.mark.parametrize("bad", ["one", "duplicate", "nested", "missing"])
+def test_random_profile_rejects_invalid_members(tmp_path, bad):
+    store = ProfileStore(tmp_path / "profiles")
+    nested, members = make_random(store)
+    members = {
+        "one": members[:1],
+        "duplicate": [members[0], members[0]],
+        "nested": [members[0], nested.id],
+        "missing": [members[0], "p-missing"],
+    }[bad]
+
+    error = ProfileNotFound if bad == "missing" else ProfileRejected
+    with pytest.raises(error):
+        store.create_random(name="不正", members=members)
+
+
+def test_update_keeps_random_and_voice_fields_apart(tmp_path):
+    store = ProfileStore(tmp_path / "profiles")
+    meta, members = make_random(store)
+    third = store.create(name="丙", caption="", source="design", write_reference=write_wav)
+
+    updated = store.update(meta.id, name="気まぐれ", members=[*members, third.id])
+    assert store.get(meta.id) == updated
+    assert updated.members == (*members, third.id)
+    with pytest.raises(ProfileRejected):
+        store.update(meta.id, caption="早口")
+    with pytest.raises(ProfileRejected):
+        store.update(meta.id, tone="口調")
+    with pytest.raises(ProfileRejected):
+        store.update(members[0], members=members)
+
+
+def test_member_of_random_profile_cannot_be_deleted(tmp_path):
+    store = ProfileStore(tmp_path / "profiles")
+    meta, members = make_random(store)
+    store.activate(members[0])
+
+    with pytest.raises(ProfileInUse, match="ランダム"):
+        store.delete(members[1])
+    store.delete(meta.id)
+    store.delete(members[1])
+    assert [p.id for p in store.all()] == [members[0]]

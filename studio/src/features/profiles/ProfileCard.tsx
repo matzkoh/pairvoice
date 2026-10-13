@@ -10,19 +10,22 @@ import { apiSend, apiUrl, toErrorMessage } from '@/lib/api'
 import type { ProfileItem } from '@/lib/api-types'
 import { isImeConfirm } from '@/lib/hotkeys'
 
+import { MemberPicker, MIN_MEMBERS } from './MemberPicker'
 import { SOURCE_LABELS } from './ProfileList'
 import { invalidateProfiles, type ProfileStatus } from './queries'
 
 type Props = {
   item: ProfileItem
+  // ランダムの声のメンバーにできる声
+  voices: readonly ProfileItem[]
   isActive: boolean
   onPlay: (url: string) => void
   onStatus: (status: ProfileStatus) => void
   onDeleted: () => void
 }
 
-// 選んだプロファイルの中身（参照音声 + caption）と、名前・使用中・削除の操作
-export function ProfileCard({ item, isActive, onPlay, onStatus, onDeleted }: Props) {
+// 選んだプロファイルの中身（参照音声 + caption、ランダムの声はメンバー）と、名前・使用中・削除の操作
+export function ProfileCard({ item, voices, isActive, onPlay, onStatus, onDeleted }: Props) {
   const queryClient = useQueryClient()
   const [pending, startTransition] = useTransition()
   const [renaming, setRenaming] = useState(false)
@@ -121,24 +124,67 @@ export function ProfileCard({ item, isActive, onPlay, onStatus, onDeleted }: Pro
           </div>
         )}
       </div>
-      <dl className="grid grid-cols-[5rem_minmax(0,1fr)] items-baseline gap-x-4 gap-y-2 px-4 py-3">
-        <dt className="text-xs text-muted-foreground">参照音声</dt>
-        <dd>
-          <Button
-            variant="outline"
-            size="xs"
-            aria-label={`${item.name} の参照音声を再生`}
-            onClick={() => onPlay(apiUrl(`${path}/audio`))}
-          >
-            <Play />
-            再生
-          </Button>
-        </dd>
-        <dt className="text-xs text-muted-foreground">caption</dt>
-        <dd className="text-sm whitespace-pre-wrap">
-          {item.caption || <span className="text-muted-foreground">（なし）</span>}
-        </dd>
-      </dl>
+      {item.source === 'random' ? (
+        <MembersEditor
+          item={item}
+          voices={voices}
+          pending={pending}
+          onSave={(members) =>
+            run(
+              () => apiSend(path, 'PATCH', { members }),
+              'メンバーを変えました（次の読み上げから効きます）',
+            )
+          }
+        />
+      ) : (
+        <dl className="grid grid-cols-[5rem_minmax(0,1fr)] items-baseline gap-x-4 gap-y-2 px-4 py-3">
+          <dt className="text-xs text-muted-foreground">参照音声</dt>
+          <dd>
+            <Button
+              variant="outline"
+              size="xs"
+              aria-label={`${item.name} の参照音声を再生`}
+              onClick={() => onPlay(apiUrl(`${path}/audio`))}
+            >
+              <Play />
+              再生
+            </Button>
+          </dd>
+          <dt className="text-xs text-muted-foreground">caption</dt>
+          <dd className="text-sm whitespace-pre-wrap">
+            {item.caption || <span className="text-muted-foreground">（なし）</span>}
+          </dd>
+        </dl>
+      )}
     </section>
+  )
+}
+
+type MembersProps = {
+  item: ProfileItem
+  voices: readonly ProfileItem[]
+  pending: boolean
+  onSave: (members: string[]) => void
+}
+
+function MembersEditor({ item, voices, pending, onSave }: MembersProps) {
+  const [members, setMembers] = useState<string[]>(item.members)
+  const changed =
+    members.length !== item.members.length || members.some((id) => !item.members.includes(id))
+
+  return (
+    <div className="space-y-3 px-4 py-3">
+      <p className="text-xs text-muted-foreground">
+        読み上げのたびに、この中から1つを選んで読みます。caption と口調はその声のものを使います。
+      </p>
+      <MemberPicker voices={voices} value={members} disabled={pending} onChange={setMembers} />
+      <Button
+        size="sm"
+        disabled={pending || !changed || members.length < MIN_MEMBERS}
+        onClick={() => onSave(members)}
+      >
+        メンバーを保存
+      </Button>
+    </div>
   )
 }

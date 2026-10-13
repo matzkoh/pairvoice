@@ -49,7 +49,7 @@ import numpy as np
 from .checker import split_sentences
 from .config import TTSConfig
 from .postprocess import normalize, trim
-from .profiles import PROFILES_DIRNAME, Profile, ProfileNotFound, ProfileStore
+from .profiles import PROFILES_DIRNAME, Profile, ProfileStore
 from .reading import DICT_FILENAME, apply_dict, load_dict
 from .styles import STYLES_FILENAME, StyleStore
 from .wav import concat_wavs
@@ -428,12 +428,8 @@ class MlxAudioBackend:
         )
 
     def _profile_for(self, profile_id: str | None) -> Profile:
-        if profile_id is None:
-            return self._profiles.active() or self._bootstrap()
-        profile = self._profiles.find(profile_id)
-        if profile is None:
-            raise ProfileNotFound(profile_id)
-        return profile
+        # ランダムの声は、ここでメンバーから1つを選ぶ
+        return self._profiles.resolve(profile_id) or self._bootstrap()
 
     def _require_loaded(self):
         if self._loaded is None:

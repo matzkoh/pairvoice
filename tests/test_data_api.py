@@ -229,6 +229,7 @@ def test_patch_updates_name_and_snapshots_caption(client):
         "source": "upload",
         "created_at": "",
         "tone": "",
+        "members": [],
     }
     (version,) = client.get(f"/profiles/{profile_id}/caption/history").json()["items"]
     assert version["name"].startswith("caption-")
@@ -376,3 +377,37 @@ def test_design_makes_voice_from_caption_then_extends_it(tmp_path):
 
 def test_design_requires_caption(client):
     assert client.post("/profiles/design", json={"name": "a", "caption": " "}).status_code == 422
+
+
+def test_random_profile_is_listed_activated_and_edited(client):
+    first = upload(client, "一つ目").json()["id"]
+    second = upload(client, "二つ目").json()["id"]
+
+    created = client.post("/profiles/random", json={"name": "ランダム", "members": [first, second]})
+    assert created.status_code == 201
+    meta = created.json()
+    assert meta["source"] == "random"
+    assert meta["members"] == [first, second]
+    assert client.put("/profiles/active", json={"id": meta["id"]}).json() == {"ok": True}
+    listed = client.get("/profiles").json()
+    assert listed["active"] == meta["id"]
+    assert listed["items"][0] == meta
+
+    patched = client.patch(f"/profiles/{meta['id']}", json={"members": [second, first]})
+    assert patched.json()["members"] == [second, first]
+    caption = client.patch(f"/profiles/{meta['id']}", json={"caption": "早口"})
+    assert caption.status_code == 400
+    assert caption.json()["error"] == "invalid_profile"
+    assert client.get(f"/profiles/{meta['id']}/audio").json()["error"] == "audio_not_found"
+    in_use = client.delete(f"/profiles/{first}")
+    assert in_use.status_code == 409
+
+
+def test_random_profile_needs_two_voices(client):
+    first = upload(client, "一つ目").json()["id"]
+
+    response = client.post("/profiles/random", json={"name": "ランダム", "members": [first]})
+    assert response.status_code == 400
+    assert response.json()["error"] == "invalid_profile"
+    missing = client.post("/profiles/random", json={"name": "ランダム", "members": [first, "p-x"]})
+    assert missing.status_code == 404

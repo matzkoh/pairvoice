@@ -9,8 +9,24 @@ import { ProfileList } from './ProfileList'
 afterEach(cleanup)
 
 const ITEMS: ProfileItem[] = [
-  { id: 'p-a', name: '使用中の声', caption: 'A の声。', source: 'auto', created_at: '2', tone: '' },
-  { id: 'p-b', name: '別の声', caption: 'B の声。', source: 'design', created_at: '1', tone: '' },
+  {
+    id: 'p-a',
+    name: '使用中の声',
+    caption: 'A の声。',
+    source: 'auto',
+    created_at: '2',
+    tone: '',
+    members: [],
+  },
+  {
+    id: 'p-b',
+    name: '別の声',
+    caption: 'B の声。',
+    source: 'design',
+    created_at: '1',
+    tone: '',
+    members: [],
+  },
 ]
 
 function renderList(selected: string | null) {
@@ -44,4 +60,28 @@ it('「新しく作る」で作成フォームを開き、開いている間は�
   expect(create.getAttribute('aria-current')).toBe('true')
   fireEvent.click(create)
   expect(onCreate).toHaveBeenCalled()
+})
+
+it('ランダムの声はメンバーの名前を並べる', () => {
+  render(
+    <ProfileList
+      items={[
+        ...ITEMS,
+        {
+          id: 'p-r',
+          name: 'ランダム',
+          caption: '',
+          source: 'random',
+          created_at: '3',
+          tone: '',
+          members: ['p-a', 'p-b'],
+        },
+      ]}
+      active="p-r"
+      selected="p-r"
+      onSelect={vi.fn()}
+      onCreate={vi.fn()}
+    />,
+  )
+  expect(screen.getByText('ランダム: 使用中の声・別の声')).toBeTruthy()
 })

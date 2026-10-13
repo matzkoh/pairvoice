@@ -208,10 +208,12 @@ get_summary() {
 }
 
 # 音声を生成して pairvoice に鳴らしてもらい、データディレクトリからの相対パスを返す。
-# 鳴り終わるのは待たない（再生の順番待ちとミュートの見張りは pairvoice がする）
+# 鳴り終わるのは待たない（再生の順番待ちとミュートの見張りは pairvoice がする）。
+# 声は要約が口調を使った声（SUMMARY_VOICE）にそろえる。ランダムの声は要約と合成で
+# 別々に選ぶので、VOICE のまま渡すと口調と声が食い違う
 request_speech() {
-  local text="$1" payload response status body
-  payload=$(jq -n --arg text "$text" --arg voice "$VOICE" --arg style "$STYLE" \
+  local text="$1" voice="${SUMMARY_VOICE:-$VOICE}" payload response status body
+  payload=$(jq -n --arg text "$text" --arg voice "$voice" --arg style "$STYLE" \
     '{text: $text, wait_download: false}
       + (if $voice == "" then {} else {voice: $voice} end)
       + (if $style == "" then {} else {style: $style} end)')

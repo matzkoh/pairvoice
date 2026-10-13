@@ -168,3 +168,19 @@ def test_current_since_is_the_later_of_common_and_tone(tmp_path):
     # 口調を API を通さず書き換えると、いつからか分からないので境界を引かない
     prompt.default_tone.path.write_text("書き換えた")
     assert prompt.current_since(None) is None
+
+
+def test_random_voice_summarizes_with_the_member_it_picked(setup, monkeypatch):
+    client, llm, data_root = setup
+    client.put("/prompt", json={"text": "共通\n"})
+    calm = make_voice(data_root, "落ち着いた声")
+    bright = make_voice(data_root, "明るい声")
+    client.patch(f"/profiles/{bright.id}", json={"tone": "明るい口調\n"})
+    store = ProfileStore(data_root / "profiles")
+    meta = store.create_random(name="ランダム", members=[calm.id, bright.id])
+    store.activate(meta.id)
+    monkeypatch.setattr("pairvoice.profiles.random.sample", lambda seq, k: list(reversed(seq)))
+
+    # 返した声を /speak に渡せば、口調と声がそろう
+    assert summarize(client).json()["voice"] == bright.id
+    assert llm.calls[-1]["system"] == "共通\n\n明るい口調\n"

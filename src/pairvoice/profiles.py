@@ -3,12 +3,16 @@
 データの置き場所の profiles/ に置き、常駐サーバーだけが書く（studio の画面は API を呼ぶ）。
 合成のたびに active と profile.json を読むので、API で切り替えた・書き換えた版が
 再起動なしに効く。
+
+ランダムの声（source が random）は参照音声を持たず、ほかの声（メンバー）を束ねる。
+使用中にも `voice` にもでき、要約・合成のたびにメンバーから1つを選んで読む（pick）。
 """
 
 from __future__ import annotations
 
 import dataclasses
 import json
+import random
 import re
 import secrets
 import shutil
@@ -30,8 +34,11 @@ TONE_FILENAME = "tone.txt"
 # active や URL の ID でディレクトリの外へ出ないよう、読むときもこの形だけを受ける
 _ID_PATTERN = re.compile(r"p-[0-9A-Za-z-]+")
 # design = caption や合成した声から作った、upload = 手持ちの wav を取り込んだ、
-# auto / import = 初回に常駐サーバーが作った
-SOURCES = ("design", "upload", "auto", "import")
+# auto / import = 初回に常駐サーバーが作った、random = ほかの声から毎回1つを選ぶ
+RANDOM_SOURCE = "random"
+SOURCES = ("design", "upload", "auto", "import", RANDOM_SOURCE)
+# 1つだけでは選ぶ意味が無い
+MIN_MEMBERS = 2
 
 # 読んで書き戻す処理を1本の列で走らせる。重なると、後から書いた側が先の変更を読む前の
 # 内容で上書きして消す（名前と caption を続けて変えたとき、消した後に書き戻したとき等）
@@ -44,12 +51,19 @@ class Profile:
     name: str
     caption: str
     source: str
-    reference: Path
+    # ランダムの声は持たない
+    reference: Path | None
     created_at: str = ""
     # 要約の口調。空なら既定の口調で読む
     tone: str = ""
+    # ランダムの声が選ぶ声の ID
+    members: tuple[str, ...] = ()
 
-    def describe(self) -> dict[str, str]:
+    @property
+    def is_random(self) -> bool:
+        return self.source == RANDOM_SOURCE
+
+    def describe(self) -> dict[str, object]:
         """API が返す形。参照音声のパスは見せない。"""
         return {
             "id": self.id,
@@ -58,6 +72,7 @@ class Profile:
             "source": self.source,
             "created_at": self.created_at,
             "tone": self.tone,
+            "members": list(self.members),
         }
 
 
@@ -73,6 +88,10 @@ class TakeRejected(ValueError):
     """他の声の参照音声はテイクにできない。"""
 
 
+class ProfileRejected(ValueError):
+    """その声には書けない（ランダムの声の caption・口調、メンバーにできない声）。"""
+
+
 class ProfileStore:
     def __init__(self, root: Path) -> None:
         self.root = root
@@ -86,7 +105,10 @@ class ProfileStore:
         return self.get(profile_id)
 
     def get(self, profile_id: str) -> Profile | None:
-        """ID のプロファイル。形が違う・壊れている・参照音声が無いなら None。"""
+        """ID のプロファイル。形が違う・壊れている・参照音声が無いなら None。
+
+        ランダムの声はそのまま返す。読む声が要るときは pick を通す
+        """
         # match + $ は末尾の改行を通すので fullmatch にする
         if not _ID_PATTERN.fullmatch(profile_id):
             return None
@@ -97,18 +119,21 @@ class ProfileStore:
             return None
         if not isinstance(meta, dict):
             return None
-        reference = directory / REFERENCE_FILENAME
-        if not reference.is_file():
-            return None
         source = meta.get("source")
+        is_random = source == RANDOM_SOURCE
+        reference = None if is_random else directory / REFERENCE_FILENAME
+        if reference is not None and not reference.is_file():
+            return None
+        members = meta.get("members") if is_random else None
         return Profile(
             id=profile_id,
             name=str(meta.get("name", profile_id)),
-            caption=str(meta.get("caption", "")),
+            caption="" if is_random else str(meta.get("caption", "")),
             source=source if source in SOURCES else "upload",
             reference=reference,
             created_at=str(meta.get("created_at", "")),
-            tone=self.tone(profile_id).read(),
+            tone="" if is_random else self.tone(profile_id).read(),
+            members=tuple(str(m) for m in members) if isinstance(members, list) else (),
         )
 
     def require(self, profile_id: str) -> Profile:
@@ -125,13 +150,27 @@ class ProfileStore:
         return [profile for profile in found if profile is not None]
 
     def resolve(self, key: str | None) -> Profile | None:
-        """API で選ばれた声。省けば使用中の声（まだ無ければ None）、名前か ID が無ければ ProfileNotFound。"""
-        if key is None:
-            return self.active()
-        profile = self.find(key)
+        """API で選ばれた声で読む声。省けば使用中の声（まだ無ければ None）、名前か ID が無ければ ProfileNotFound。
+
+        ランダムの声なら、メンバーから1つを選んで返す
+        """
+        profile = self.active() if key is None else self.find(key)
         if profile is None:
+            if key is None:
+                return None
             raise ProfileNotFound(key)
-        return profile
+        return self.pick(profile)
+
+    def pick(self, profile: Profile) -> Profile:
+        """読む声。ランダムの声ならメンバーから1つを選び、読めるメンバーが無ければ ProfileNotFound。"""
+        if not profile.is_random:
+            return profile
+        # 混ぜた順に引き、最初に読めた声を使う。全員を読むと読み上げのたびにメンバーの数だけ読む
+        for member in random.sample(profile.members, len(profile.members)):
+            voice = self.get(member)
+            if voice is not None and not voice.is_random:
+                return voice
+        raise ProfileNotFound(profile.id)
 
     def tone(self, profile_id: str) -> history.VersionedText:
         """その声の要約の口調（版つき）。空なら既定の口調で読む。"""
@@ -161,10 +200,8 @@ class ProfileStore:
         使用中のプロファイルがまだ無ければ、作ったものを使用中にする。放っておくと次の
         読み上げで既定の声が自動で作られ、作った声が使われない
         """
-        now = datetime.now(UTC)
-        profile_id = f"p-{now.strftime('%Y%m%dT%H%M%SZ')}-{secrets.token_hex(2)}"
+        profile_id, now = self._new_directory()
         directory = self.root / profile_id
-        directory.mkdir(parents=True)
         try:
             write_reference(directory / REFERENCE_FILENAME)
         except BaseException:
@@ -190,6 +227,38 @@ class ProfileStore:
             created_at=meta["created_at"],
         )
 
+    def create_random(self, *, name: str, members: list[str]) -> Profile:
+        """メンバーから毎回1つを選ぶ声を作る。"""
+        with _write_lock:
+            members = self._check_members(members)
+            profile_id, now = self._new_directory()
+            meta = {
+                "name": name,
+                "source": RANDOM_SOURCE,
+                "members": members,
+                "created_at": now.isoformat(),
+            }
+            _write_meta(self.root / profile_id, meta)
+            return self.require(profile_id)
+
+    def _new_directory(self) -> tuple[str, datetime]:
+        """新しい ID のディレクトリを作り、ID と作った時刻を返す。"""
+        now = datetime.now(UTC)
+        profile_id = f"p-{now.strftime('%Y%m%dT%H%M%SZ')}-{secrets.token_hex(2)}"
+        (self.root / profile_id).mkdir(parents=True)
+        return profile_id, now
+
+    def _check_members(self, members: list[str]) -> list[str]:
+        """重なりを除いて、ランダムでない声だけが MIN_MEMBERS 以上あることを確かめる。"""
+        unique = list(dict.fromkeys(members))
+        for member in unique:
+            # ランダムの声を入れ子にすると、消したときの扱いや循環を考えることになる
+            if self.require(member).is_random:
+                raise ProfileRejected("ランダムの声はメンバーにできません")
+        if len(unique) < MIN_MEMBERS:
+            raise ProfileRejected(f"メンバーは {MIN_MEMBERS} つ以上選びます")
+        return unique
+
     def activate(self, profile_id: str) -> Profile:
         with _write_lock:
             profile = self.require(profile_id)
@@ -203,16 +272,28 @@ class ProfileStore:
         name: str | None = None,
         caption: str | None = None,
         tone: str | None = None,
+        members: list[str] | None = None,
     ) -> Profile:
-        """名前・caption・口調を書き換える。caption と口調は次の読み上げから効き、版を残す。"""
+        """名前・caption・口調・メンバーを書き換える。名前以外は次の読み上げから効き、caption と口調は版を残す。
+
+        ランダムの声は名前とメンバーだけ、ほかの声はメンバー以外だけを書ける
+        """
         with _write_lock:
             profile = self.require(profile_id)
+            if profile.is_random and (caption is not None or tone is not None):
+                raise ProfileRejected("ランダムの声は caption と口調を持ちません")
+            if not profile.is_random and members is not None:
+                raise ProfileRejected("メンバーを持つのはランダムの声だけです")
+            if members is not None:
+                members = self._check_members(members)
             directory = self.root / profile.id
             meta = json.loads((directory / META_FILENAME).read_text(encoding="utf-8"))
             if name is not None:
                 meta["name"] = name
             if caption is not None:
                 meta["caption"] = caption
+            if members is not None:
+                meta["members"] = members
             _write_meta(directory, meta)
             if caption is not None:
                 history.snapshot("caption", directory / history.HISTORY_DIRNAME, caption)
@@ -223,6 +304,7 @@ class ProfileStore:
             name=profile.name if name is None else name,
             caption=profile.caption if caption is None else caption,
             tone=profile.tone if tone is None else tone,
+            members=profile.members if members is None else tuple(members),
         )
 
     def delete(self, profile_id: str) -> None:
@@ -231,6 +313,10 @@ class ProfileStore:
             active = self.active()
             if active is not None and active.id == profile.id:
                 raise ProfileInUse("使用中のプロファイルは削除できません")
+            # 消すと、ランダムの声が選べる声が黙って減る
+            holders = [p.name for p in self.all() if profile.id in p.members]
+            if holders:
+                raise ProfileInUse(f"ランダムの声（{'、'.join(holders)}）から外してから削除します")
             shutil.rmtree(self.root / profile.id, ignore_errors=True)
 
     def caption_versions(self, profile_id: str) -> list[dict[str, str]]:

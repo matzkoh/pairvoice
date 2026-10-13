@@ -9,6 +9,7 @@ export const SOURCE_LABELS: Record<ProfileSource, string> = {
   upload: '取り込み',
   auto: '自動で作成',
   import: '設定から移行',
+  random: 'ランダム',
 }
 
 type Props = {
@@ -23,6 +24,7 @@ type Props = {
 const ROW = 'w-full rounded-md px-3 py-2 text-left transition-colors hover:bg-muted'
 
 export function ProfileList({ items, active, selected, onSelect, onCreate }: Props) {
+  const names = new Map(items.map((item) => [item.id, item.name]))
   return (
     <nav aria-label="プロファイル一覧" className="space-y-1">
       <ul className="space-y-1">
@@ -39,7 +41,9 @@ export function ProfileList({ items, active, selected, onSelect, onCreate }: Pro
                 {item.id === active && <Badge className="ml-auto">使用中</Badge>}
               </span>
               <span className="mt-0.5 line-clamp-2 text-xs text-muted-foreground">
-                {item.caption}
+                {item.source === 'random'
+                  ? `ランダム: ${item.members.map((id) => names.get(id) ?? id).join('・')}`
+                  : item.caption}
               </span>
             </button>
           </li>

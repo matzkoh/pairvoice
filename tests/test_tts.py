@@ -184,6 +184,7 @@ def test_bootstrap_imports_configured_reference_as_copy(config, tmp_path, monkey
     assert profile.name == "テスト"
     # 旧来の採用済み caption を引き継ぐ
     assert profile.caption == "採用済みの声。"
+    assert profile.reference is not None
     assert profile.reference.read_bytes() == config.profile.ref_audio.read_bytes()
     assert profile.reference != config.profile.ref_audio
     assert len(model.calls) == 1

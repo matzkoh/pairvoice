@@ -31,6 +31,7 @@ const item: ProfileItem = {
   source: 'design',
   created_at: '',
   tone: '元気な口調',
+  members: [],
 }
 
 async function renderTone(onStatus = vi.fn()) {

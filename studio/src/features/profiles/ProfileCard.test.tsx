@@ -25,16 +25,33 @@ const ITEM: ProfileItem = {
   source: 'design',
   created_at: '1',
   tone: '',
+  members: [],
 }
 
-function renderCard(isActive = false) {
+const VOICES: ProfileItem[] = [
+  { ...ITEM, id: 'p-a', name: '一つ目' },
+  ITEM,
+  { ...ITEM, id: 'p-c', name: '三つ目' },
+]
+
+const RANDOM: ProfileItem = {
+  ...ITEM,
+  id: 'p-r',
+  name: 'ランダム',
+  caption: '',
+  source: 'random',
+  members: ['p-a', 'p-b'],
+}
+
+function renderCard(isActive = false, item: ProfileItem = ITEM) {
   const onPlay = vi.fn()
   const onStatus = vi.fn()
   const onDeleted = vi.fn()
   render(
     <QueryClientProvider client={new QueryClient()}>
       <ProfileCard
-        item={ITEM}
+        item={item}
+        voices={VOICES}
         isActive={isActive}
         onPlay={onPlay}
         onStatus={onStatus}
@@ -125,4 +142,23 @@ it('Escape の後に blur が来ても保存しない。Enter の後に blur が
     fireEvent.blur(input)
   })
   expect(apiSend).toHaveBeenCalledTimes(1)
+})
+
+it('ランダムの声は参照音声と caption の代わりにメンバーを見せ、変えたら保存できる', async () => {
+  vi.mocked(apiSend).mockResolvedValue(RANDOM)
+  renderCard(false, RANDOM)
+
+  expect(screen.queryByText('参照音声')).toBeNull()
+  const save = screen.getByRole('button', { name: 'メンバーを保存' })
+  expect(save.hasAttribute('disabled')).toBe(true)
+  // 1つに減らすと選ぶ意味が無いので保存させない
+  fireEvent.click(screen.getByRole('checkbox', { name: '別の声' }))
+  expect(save.hasAttribute('disabled')).toBe(true)
+
+  fireEvent.click(screen.getByRole('checkbox', { name: '三つ目' }))
+  await act(async () => {
+    fireEvent.click(save)
+  })
+
+  expect(apiSend).toHaveBeenCalledWith('/profiles/p-r', 'PATCH', { members: ['p-a', 'p-c'] })
 })
