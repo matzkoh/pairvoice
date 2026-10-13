@@ -11,7 +11,10 @@ from fastapi.responses import JSONResponse
 from pydantic import BaseModel, Field
 
 from .history import InvalidVersion, VersionNotFound
+from .lifecycle import Superseded
+from .narration import NoJapaneseSummary, NothingToSay
 from .profiles import ProfileInUse, ProfileNotFound, ProfileRejected, TakeRejected
+from .prompt import PromptMissing
 from .styles import StyleInvalid, StyleNotFound, StyleRejected
 from .tts import AudioNotFound
 from .wav import WavFormatError
@@ -45,6 +48,10 @@ _ERRORS: dict[type[Exception], tuple[int, str, bool]] = {
     VersionNotFound: (404, "version_not_found", False),
     WavFormatError: (400, "invalid_take", True),
     TakeRejected: (400, "invalid_take", True),
+    NothingToSay: (400, "no_speakable_text", False),
+    PromptMissing: (503, "prompt_missing", True),
+    Superseded: (409, "dropped", False),
+    NoJapaneseSummary: (503, "no_japanese_summary", False),
 }
 
 

@@ -15,6 +15,11 @@ from .profiles import PROFILES_DIRNAME, TONE_FILENAME, Profile, ProfileStore
 PROMPT_FILENAME = "prompt.txt"
 
 
+class PromptMissing(Exception):
+    def __init__(self) -> None:
+        super().__init__("prompt.txt が無いか空")
+
+
 class SummaryPrompt:
     """要約に渡すシステムプロンプトを、声ごとに組む。"""
 
@@ -52,6 +57,15 @@ class SummaryPrompt:
         """声の名前か ID（省けば使用中の声）で組む。無い声は ProfileNotFound。"""
         profile = self.profiles.resolve(voice)
         return self.compose(profile, common, tone), profile
+
+    def compose_summary(
+        self, voice: str | None, common: str | None = None, tone: str | None = None
+    ) -> tuple[str, Profile | None]:
+        """要約に渡すプロンプト。compose_for と同じく組み、空なら PromptMissing。"""
+        system, profile = self.compose_for(voice, common, tone)
+        if not system.strip():
+            raise PromptMissing
+        return system, profile
 
     def current_since(self, profile: Profile | None) -> datetime | None:
         """その声で組むプロンプトが、いまの中身で動き出した時刻（共通と口調の遅い方）。

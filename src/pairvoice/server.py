@@ -22,9 +22,10 @@ from .audio_state import AudioProbe
 from .config import API_PREFIX, Config
 from .corpus_api import corpus_router
 from .data_api import data_router
-from .lifecycle import Engine, ModelUnavailable, MutedError, Superseded, limit_mlx_cache
+from .lifecycle import Engine, ModelUnavailable, MutedError, limit_mlx_cache
 from .llm import MlxLmBackend
 from .mute import MAX_MINUTES, MIN_MINUTES, InvalidMinutes, MuteController
+from .narration import NarrateResponse, narrate
 from .prompt import SummaryPrompt
 from .studio_web import mount_studio, open_studio
 from .tts import MlxAudioBackend
@@ -60,7 +61,7 @@ pairvoice の常駐サーバーの API。要約（mlx-lm）と音声合成（Iro
 - 待ち受けは 127.0.0.1 だけ。ブラウザで開いた外部のページ（Host か Origin がループバックでない要求）は 403 で断る
 - ミュート中は `/speak`（鳴らす）と `respect_mute` 付きの `/llm`・`/warmup` を 409 `{"error": "muted", "reason": ...}` で断る。`/speak` は `bypass_mute` で鳴らせる。`/synthesize` は wav を作るだけなのでミュートを見ない
 - 声は `voice`（プロファイルの名前か ID）、話し方は `style`（studio の「スタイル」画面で作る名前）で選ぶ。選べる名前は `GET /profiles` と `GET /styles` で引ける
-- ランダムの声（`source` が `random` のプロファイル）は、要約・合成のたびにメンバーから1つを選ぶ。`/llm` が返す `voice` を `/speak` に渡すと、要約の口調と同じ声で読む
+- ランダムの声（`source` が `random` のプロファイル）は、要約・合成のたびにメンバーから1つを選ぶ。`/llm` が返す `voice` を `/speak` に渡すと、要約の口調と同じ声で読む（`/narrate` はこれを1回で行う）
 """
 
 # /docs の「Try it out」の初期値。例が無いと Swagger UI はすべての項目を 0 で埋めた本文を出し、
@@ -146,6 +147,17 @@ class SummaryRequest(BaseModel):
         default=True,
         description="待っている間に後発の要約が来たら、これを捨てて 409 `dropped` を返す（読み上げの古い要約を飛ばすため）",
     )
+    wait_download: WaitDownload = True
+
+
+class NarrateRequest(BaseModel):
+    text: str = Field(description="読み上げる返事。要約してから読む")
+    message_id: str = Field(description="読み上げの記録（corpus.jsonl）の ID")
+    voice: str | None = Field(
+        default=None,
+        description="声（プロファイル）の名前か ID。要約の口調もこの声のもの。省くと使用中のプロファイル",
+    )
+    style: str | None = Field(default=None, description="スタイルの名前（`/speak` と同じ）")
     wait_download: WaitDownload = True
 
 
@@ -386,20 +398,15 @@ def create_app(engine: Engine) -> FastAPI:
         if request.system is not None:
             system, profile = request.system, None
         else:
-            system, profile = summary_prompt.compose_for(request.voice)
-            if not system.strip():
-                return fail(503, "prompt_missing", "prompt.txt が無いか空")
-        try:
-            text = await engine.summarize(
-                system=system,
-                prompt=request.prompt,
-                max_tokens=request.max_tokens,
-                respect_mute=request.respect_mute,
-                droppable=request.droppable,
-                wait_download=request.wait_download,
-            )
-        except Superseded:
-            return JSONResponse(status_code=409, content={"error": "dropped"})
+            system, profile = summary_prompt.compose_summary(request.voice)
+        text = await engine.summarize(
+            system=system,
+            prompt=request.prompt,
+            max_tokens=request.max_tokens,
+            respect_mute=request.respect_mute,
+            droppable=request.droppable,
+            wait_download=request.wait_download,
+        )
         return {"text": text, "voice": None if profile is None else profile.id}
 
     _VOICE_NOT_FOUND = (
@@ -437,6 +444,41 @@ def create_app(engine: Engine) -> FastAPI:
             style=request.style,
         )
         return speech_response(result)
+
+    @api.post(
+        "/narrate",
+        dependencies=[Depends(note_plugin_version)],
+        summary="要約して鳴らす",
+        tags=["読み上げ"],
+        response_model=NarrateResponse,
+        responses={
+            400: _error("`no_speakable_text`（閉じタグやコードフェンスだけで、読む中身が無い）"),
+            409: {
+                "model": MutedResponse | ErrorResponse,
+                "description": "ミュート中か、後発の読み上げに追い越されて捨てた（`error` は `dropped`）",
+            },
+            **_SYNTHESIS_ERRORS,
+            503: _error(
+                f"{_MODEL_UNAVAILABLE['description']}。プロンプトが空なら `prompt_missing`、"
+                "何度要約させても日本語にならなければ `no_japanese_summary`"
+            ),
+        },
+    )
+    async def narrate_reply(request: NarrateRequest):
+        """Claude Code のフックが返事ごとに叩く。要約を、その口調の声で鳴らし、corpus.jsonl に記録する。
+
+        要約できて鳴らせなかったときも記録する。鳴り終わるのは待たない。
+        """
+        return await narrate(
+            engine,
+            summary_prompt,
+            data_root,
+            text=request.text,
+            message_id=request.message_id,
+            voice=request.voice,
+            style=request.style,
+            wait_download=request.wait_download,
+        )
 
     @api.post(
         "/synthesize",
@@ -552,7 +594,7 @@ def create_app(engine: Engine) -> FastAPI:
         return {"url": open_studio(f"http://127.0.0.1:{engine.config.port}")}
 
     def load_eval_inputs(request: EvalRequest) -> tuple[str, list[evaluation.Case]]:
-        system, _ = summary_prompt.compose_for(request.voice, request.prompt, request.tone)
+        system, _ = summary_prompt.compose_summary(request.voice, request.prompt, request.tone)
         if request.cases is not None:
             cases = [evaluation.Case(id=c.id, input=c.input) for c in request.cases]
         else:
@@ -577,8 +619,6 @@ def create_app(engine: Engine) -> FastAPI:
         """
         # corpus.jsonl は伸び続けるので、ファイルを読むのはイベントループの外で行う
         system, cases = await asyncio.to_thread(load_eval_inputs, request)
-        if not system.strip():
-            return fail(503, "prompt_missing", "prompt.txt が無いか空")
         results = []
         for case in cases:
             output = await engine.summarize(system, case.input, droppable=False)

@@ -4,7 +4,7 @@ Claude Code の `MessageDisplay` フック。アシスタントの出力を pair
 （`127.0.0.1:17495`）で要約・音声化し、常駐サーバーが再生する。サーバー本体はこのプラグインに含まれないので、
 先にリポジトリの README に沿って起動しておく。
 
-フック本体は `hooks/speak-summary.sh`。`bash` `curl` `jq` `perl` を使う
+フック本体は `hooks/speak-summary.sh`。`bash` `curl` `jq` を使う
 （`jq` 以外は macOS に最初からある）。
 
 プロンプトを送ったときにも `UserPromptSubmit` フックで常駐サーバーにモデルを読み込ませておく。
@@ -67,6 +67,8 @@ tail -30 ~/Library/Logs/speak-summary.log
 | `model loading` | モデルの読み込みが長引き、待ちきれなかった |
 | `timeout` | サーバーは生きているが、要約か音声合成が時間内に終わらなかった |
 | `no speakable text` | 閉じタグやコードフェンスだけの断片で、読み上げる中身が無い |
+| `no Japanese summary after retries` | 何度要約させても日本語にならなかった |
+| `superseded` | 要約を待っている間に次の返事が来たので、古い方を捨てた |
 | `model load failed` | モデルのロードに失敗、または設定不備 |
 | `profile missing` | `ref_audio` に指定した参照音声が無い |
 | `voice not found` / `style not found` | `PAIRVOICE_VOICE` / `PAIRVOICE_STYLE` の名前のプロファイル・スタイルが無い |

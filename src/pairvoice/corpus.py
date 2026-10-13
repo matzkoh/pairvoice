@@ -1,7 +1,7 @@
 """読み上げの記録（コーパス）と、それへのレビュー・アーカイブ。
 
 どれもデータの置き場所の追記専用の JSONL で、後の行ほど新しい。
-- corpus.jsonl: フックが読み上げのたびに書く（入力・要約・音声）
+- corpus.jsonl: フックの読み上げ（/narrate）のたびに書く（入力・要約・音声）
 - reviews.jsonl: studio の 👍 / 👎 と理想の出力。verdict "none" は取り消し
 - archives.jsonl: アーカイブと、その解除
 
@@ -98,7 +98,7 @@ def archived_ids(data_root: Path) -> set[str]:
 
 
 def corpus_time(ts: object) -> datetime | None:
-    """corpus.jsonl の ts（フックが date で書いたローカル時刻 "2026-07-28 14:01:59"）。"""
+    """corpus.jsonl の ts（オフセットの無いローカル時刻 "2026-07-28 14:01:59"）。"""
     if not isinstance(ts, str):
         return None
     try:
