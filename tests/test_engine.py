@@ -24,6 +24,16 @@ class FakeLLM(FakeBackend):
         return "やった、テスト全部通ったよ。"
 
 
+class FakeSTT(FakeBackend):
+    def __init__(self, **kwargs):
+        super().__init__(name="stt", model="fake/stt", **kwargs)
+        self.calls = []
+
+    def transcribe(self, path):
+        self.calls.append(path.read_bytes())
+        return "テスト全部通ったよ。"
+
+
 class FakeTTS(FakeBackend):
     def __init__(self, caption=("フェイクの声。", "config"), sampler=None, **kwargs):
         super().__init__(name="tts", model="fake/tts", **kwargs)
@@ -102,7 +112,7 @@ def isolated_data_root(tmp_path, monkeypatch):
     monkeypatch.setenv("PAIRVOICE_DATA_ROOT", str(tmp_path))
 
 
-def make_engine(*, probe=None, mute_config=None, llm=None, tts=None):
+def make_engine(*, probe=None, mute_config=None, llm=None, tts=None, stt=None):
     config = Config(
         llm=LLMConfig(model="fake/llm", idle_unload_seconds=60, load_timeout_seconds=1),
         tts=TTSConfig(model="fake/tts", idle_unload_seconds=60, load_timeout_seconds=1),
@@ -112,6 +122,7 @@ def make_engine(*, probe=None, mute_config=None, llm=None, tts=None):
         config=config,
         llm_backend=llm or FakeLLM(),
         tts_backend=tts or FakeTTS(),
+        stt_backend=stt or FakeSTT(),
         mute=MuteController(config.mute, probe or FakeProbe()),
     )
 
@@ -690,3 +701,17 @@ async def test_speak_stopped_midway_queues_no_later_sentences():
     await engine.speak("一つ目。二つ目。")
 
     assert engine.player.describe()["waiting"] == 0
+
+
+async def test_transcribe_loads_once_and_ignores_mute(tmp_path):
+    stt = FakeSTT()
+    engine = make_engine(stt=stt, probe=FakeProbe(microphone=True))
+    audio = tmp_path / "a.wav"
+    audio.write_bytes(b"wav")
+
+    first = await engine.transcribe(audio)
+    await engine.transcribe(audio)
+
+    assert first == "テスト全部通ったよ。"
+    assert stt.load_calls == 1
+    assert engine.health()["stt"]["state"] == "loaded"

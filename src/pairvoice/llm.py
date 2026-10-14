@@ -8,6 +8,7 @@ import mlx.core as mx
 from mlx_lm import generate as mlx_generate
 from mlx_lm import load as mlx_load
 
+from . import hub
 from .config import LLMConfig
 
 _log = logging.getLogger(__name__)
@@ -26,19 +27,10 @@ class MlxLmBackend:
         return None
 
     def is_downloaded(self) -> bool:
-        from huggingface_hub import snapshot_download
-        from huggingface_hub.errors import LocalEntryNotFoundError
-
-        try:
-            snapshot_download(self.model, local_files_only=True)
-        except (LocalEntryNotFoundError, FileNotFoundError, OSError):
-            return False
-        return True
+        return hub.is_downloaded(self.model)
 
     def download(self) -> None:
-        from huggingface_hub import snapshot_download
-
-        snapshot_download(self.model)
+        hub.download(self.model)
 
     def _load_model(self):
         return mlx_load(self.model)

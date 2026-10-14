@@ -46,6 +46,7 @@ from pathlib import Path
 import mlx.core as mx
 import numpy as np
 
+from . import hub
 from .checker import split_sentences
 from .config import TTSConfig
 from .postprocess import normalize, trim
@@ -191,19 +192,10 @@ class MlxAudioBackend:
         return None
 
     def is_downloaded(self) -> bool:
-        from huggingface_hub import snapshot_download
-        from huggingface_hub.errors import LocalEntryNotFoundError
-
-        try:
-            snapshot_download(self.model, local_files_only=True)
-        except (LocalEntryNotFoundError, FileNotFoundError, OSError):
-            return False
-        return True
+        return hub.is_downloaded(self.model)
 
     def download(self) -> None:
-        from huggingface_hub import snapshot_download
-
-        snapshot_download(self.model)
+        hub.download(self.model)
 
     def _load_model(self):
         from mlx_audio.tts.utils import load_model

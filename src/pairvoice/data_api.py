@@ -13,7 +13,7 @@ from typing import Annotated, Literal, Protocol
 
 from fastapi import APIRouter, Body, Query, Request
 from fastapi.openapi.models import Example
-from fastapi.responses import FileResponse
+from fastapi.responses import FileResponse, JSONResponse
 from pydantic import (
     BaseModel,
     ConfigDict,
@@ -32,8 +32,27 @@ from .styles import STYLES_FILENAME, StyleStore
 from .tts import ANCHOR_TEXT, AudioNotFound, SpeechResult, resolve_data_audio
 from .wav import concat_wavs, has_wav_header
 
-# 手持ちの wav を取り込むときの上限。数十秒の参照音声で足りる
+# 本文で wav を受けるとき（声の取り込みと聞き取り）の上限。48kHz モノラルで9分ほど
 UPLOAD_MAX_BYTES = 50 * 1024 * 1024
+
+
+async def read_wav_body(request: Request) -> bytearray | JSONResponse:
+    """本文の wav を読む。大きすぎる・wav でないなら、そのまま返す失敗の応答を返す。"""
+    declared = request.headers.get("content-length")
+    if declared is not None and declared.isdigit() and int(declared) > UPLOAD_MAX_BYTES:
+        return _fail(413, "body_too_large")
+    audio = bytearray()
+    # 申告の無い chunked も読みながら数える
+    async for chunk in request.stream():
+        audio += chunk
+        if len(audio) > UPLOAD_MAX_BYTES:
+            return _fail(413, "body_too_large")
+    # 中身の妥当性は使う側（mlx-audio）が判断する
+    if not has_wav_header(audio):
+        return _fail(400, "invalid_audio", "body must be a wav file")
+    return audio
+
+
 # テイクをつなぐときの数の上限と、間に挟む無音
 MAX_TAKES = 8
 TAKE_GAP_SECONDS = 0.3
@@ -541,18 +560,9 @@ def data_router(data_root: Path, synthesize: Synthesize) -> APIRouter:
         caption: Annotated[Caption, Query(description="話し方の指示")] = "",
     ):
         """本文に wav をそのまま送る。使用中の声がまだ無ければ、作った声を使用中にする。"""
-        declared = request.headers.get("content-length")
-        if declared is not None and declared.isdigit() and int(declared) > UPLOAD_MAX_BYTES:
-            return _fail(413, "body_too_large")
-        audio = bytearray()
-        # 申告の無い chunked も読みながら数える
-        async for chunk in request.stream():
-            audio += chunk
-            if len(audio) > UPLOAD_MAX_BYTES:
-                return _fail(413, "body_too_large")
-        # 中身の妥当性は合成時に mlx-audio が判断する
-        if not has_wav_header(audio):
-            return _fail(400, "invalid_audio", "body must be a wav file")
+        audio = await read_wav_body(request)
+        if isinstance(audio, JSONResponse):
+            return audio
         # 数十 MB を書くので、イベントループの外で行う
         created = await asyncio.to_thread(
             profiles.create,

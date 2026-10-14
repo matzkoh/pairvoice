@@ -98,6 +98,18 @@ def test_eval_style_reads_from_toml(tmp_path):
     assert load_config(path).eval.style == "casual"
 
 
+def test_stt_reads_from_toml(tmp_path):
+    path = tmp_path / "config.toml"
+    path.write_text(
+        '[stt]\nmodel = "mlx-community/Qwen3-ASR-1.7B-8bit"\nlanguage = "Japanese"\n',
+        encoding="utf-8",
+    )
+
+    stt = load_config(path).stt
+
+    assert (stt.model, stt.language) == ("mlx-community/Qwen3-ASR-1.7B-8bit", "Japanese")
+
+
 def test_empty_ref_audio_means_no_reference(tmp_path):
     path = tmp_path / "config.toml"
     path.write_text('[tts.profile]\nref_audio = ""\n', encoding="utf-8")

@@ -14,6 +14,7 @@ from collections.abc import Callable
 from concurrent.futures import ThreadPoolExecutor
 from datetime import datetime
 from enum import StrEnum
+from pathlib import Path
 from typing import Protocol
 
 from . import generations
@@ -333,10 +334,13 @@ class Engine:
         mute,
         clock: Callable[[], float] = time.monotonic,
         player: Player | None = None,
+        *,
+        stt_backend,
     ) -> None:
         self._config = config
         self._llm_backend = llm_backend
         self._tts_backend = tts_backend
+        self._stt_backend = stt_backend
         self.mute = mute
         self.player = player or Player(config.playback, mute)
         self._clock = clock
@@ -351,6 +355,12 @@ class Engine:
             backend=tts_backend,
             idle_unload_seconds=config.tts.idle_unload_seconds,
             load_timeout_seconds=config.tts.load_timeout_seconds,
+            clock=clock,
+        )
+        self._stt = ManagedModel(
+            backend=stt_backend,
+            idle_unload_seconds=config.stt.idle_unload_seconds,
+            load_timeout_seconds=config.stt.load_timeout_seconds,
             clock=clock,
         )
         self._tasks: list[asyncio.Task] = []
@@ -511,6 +521,18 @@ class Engine:
         # 測るのは studio の操作で、音は出さないのでミュートは効かせない
         return await self._run(work, check_mute=False, droppable=False, download=self._tts)
 
+    async def transcribe(self, path: Path) -> str:
+        """wav を聞き取った文。合成した音声が原稿どおりに読めているかを確かめるのに使う。"""
+
+        async def work():
+            await self._stt.ensure_loaded()
+            text = await on_mlx_thread(self._stt_backend.transcribe, path)
+            self._stt.touch()
+            return text
+
+        # 音は出さないのでミュートは効かせない
+        return await self._run(work, check_mute=False, droppable=False, download=self._stt)
+
     async def warmup(self, respect_mute: bool = False) -> dict:
         if respect_mute:
             # 読み上げないなら載せる意味が無い。ほかのアプリの音は鳴り止むので見ない
@@ -562,6 +584,7 @@ class Engine:
                 # 初期値にするために要る。モデル既定は studio 側の表が持つ
                 "sampler": self._tts_backend.resolve_sampler(),
             },
+            "stt": self._describe(self._stt),
             "mute": mute_state.describe(),
             "queue": {"running": self._runner.running, "waiting": self._runner.waiting},
             "playback": self.player.describe(),
@@ -582,7 +605,7 @@ class Engine:
         return snapshot
 
     async def maintain(self) -> None:
-        for model in (self._llm, self._tts):
+        for model in (self._llm, self._tts, self._stt):
             await self._runner.run(model.unload_if_idle, droppable=False)
         # 合成音声の掃除は MLX を使わないので Runner を通さない。1日1回で足りる
         if self._last_prune is None or self._clock() - self._last_prune >= PRUNE_INTERVAL_SECONDS:

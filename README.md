@@ -121,6 +121,7 @@ pairvoice say --voice 落ち着いた声 --style ささやき "テスト"
 ```
 
 `caption` はスタイルより優先する。鳴らさずに wav だけ作る `/api/synthesize` は、ミュートを見ず、`sampler` も受け付ける。
+作った wav は `/api/transcribe` に本文で送ると聞き取った文が返るので、原稿と比べて読み違いを確かめられる（聞き取りのモデルは初めて使うときに読み込む）。
 選べる名前は `GET /api/profiles` と `GET /api/styles` で引ける。
 API はすべて `/api` の下にあり、エンドポイントと項目は、常駐サーバーが動いている間 http://127.0.0.1:17495/docs で引ける。
 studio の画面でできること（プロンプト・辞書・スタイル・声の編集、読み上げのレビュー）と、CLI でできること（再起動・終了・studio の起動・`eval`）も、同じ API で行える。
@@ -181,6 +182,7 @@ studio は常駐サーバーが `http://127.0.0.1:17495/` で配っている。�
 | `[llm]` | `model`（要約のモデル） |
 | `[tts]` | `model`（音声合成のモデル）、`output_max_age_days`（合成した wav を消すまでの日数。既定 7、0 で消さない） |
 | `[tts.profile]` | 最初の声を作るときだけ使う。`ref_audio`（取り込む wav）、`caption`（声の描写） |
+| `[stt]` | `model`（`/api/transcribe` の聞き取りのモデル。既定は whisper-large-v3-turbo）、`language`（モデルに渡す言語。既定 `ja`） |
 | `[tts.sampler]` | 音声合成の細かい調整。studio の「声」画面で試して、表示される設定を写す |
 | `[mute]` | `auto_microphone`（既定 true）、`auto_audio_output`（既定 true）、`audio_output_wait_seconds`（既定 5） |
 | `[playback]` | `volume`（既定 1.0）、`duck_volume`（ほかのアプリの音が鳴っている間の音量。既定 0.3）、`max_wait_seconds`（順番待ちがこれを超えたら捨てる。既定 60） |

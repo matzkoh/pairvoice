@@ -11,10 +11,10 @@ from pairvoice.mute import MuteController
 from pairvoice.profiles import ProfileNotFound
 from pairvoice.server import LEGACY_PLUGIN, PLUGIN_HEADER, create_app, is_local_request
 from tests.fakes import FakeProbe
-from tests.test_engine import FakeLLM, FakeTTS
+from tests.test_engine import FakeLLM, FakeSTT, FakeTTS
 
 
-def build(*, probe=None, llm=None, tts=None, mute_config=None, data_root=None):
+def build(*, probe=None, llm=None, tts=None, stt=None, mute_config=None, data_root=None):
     config = Config(
         llm=LLMConfig(model="fake/llm", load_timeout_seconds=1),
         # 既定の置き場所（利用者のデータ）を書き換えないよう、テストごとに空の場所を渡す
@@ -29,6 +29,7 @@ def build(*, probe=None, llm=None, tts=None, mute_config=None, data_root=None):
         config=config,
         llm_backend=llm or FakeLLM(),
         tts_backend=tts or FakeTTS(),
+        stt_backend=stt or FakeSTT(),
         mute=MuteController(config.mute, probe or FakeProbe()),
     )
     # API はすべて /api の下にあるので、テストの道筋は /api を省いて書く
@@ -299,6 +300,7 @@ def test_health_shape():
         "ok",
         "llm",
         "tts",
+        "stt",
         "mute",
         "queue",
         "playback",
@@ -683,3 +685,28 @@ def test_eval_defaults_to_saved_prompt(tmp_path):
     client.post("/eval", json={"cases": [{"id": "c1", "input": "ログ"}]})
 
     assert llm.calls[0]["system"] == "保存したルール"
+
+
+WAV = b"RIFF\x00\x00\x00\x00WAVEfmt "
+
+
+def test_transcribe_returns_heard_text():
+    stt = FakeSTT()
+    _, client = build(stt=stt)
+
+    response = client.post("/transcribe", content=WAV, headers={"Content-Type": "audio/wav"})
+
+    assert response.status_code == 200
+    assert response.json() == {"text": "テスト全部通ったよ。"}
+    assert stt.calls == [WAV]
+
+
+def test_transcribe_rejects_non_wav():
+    stt = FakeSTT()
+    _, client = build(stt=stt)
+
+    response = client.post("/transcribe", content=b"ID3 mp3", headers={"Content-Type": "audio/wav"})
+
+    assert response.status_code == 400
+    assert response.json()["error"] == "invalid_audio"
+    assert stt.calls == []

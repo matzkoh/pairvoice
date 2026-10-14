@@ -5,8 +5,10 @@ from __future__ import annotations
 import asyncio
 import os
 import signal
+import tempfile
 from contextlib import asynccontextmanager
 from importlib.metadata import version
+from pathlib import Path
 from typing import Annotated, Literal
 from urllib.parse import urlsplit
 
@@ -21,12 +23,13 @@ from .api_errors import error_doc as _error
 from .audio_state import AudioProbe
 from .config import API_PREFIX, Config
 from .corpus_api import corpus_router
-from .data_api import data_router
+from .data_api import data_router, read_wav_body
 from .lifecycle import Engine, ModelUnavailable, MutedError, limit_mlx_cache
 from .llm import MlxLmBackend
 from .mute import MAX_MINUTES, MIN_MINUTES, InvalidMinutes, MuteController
 from .narration import NarrateResponse, narrate
 from .prompt import SummaryPrompt
+from .stt import MlxSttBackend
 from .studio_web import mount_studio, open_studio
 from .tts import MlxAudioBackend
 
@@ -268,6 +271,10 @@ class SynthesizeRequest(SynthesisRequest):
         return self
 
 
+class TranscriptionResponse(BaseModel):
+    text: str = Field(description="聞き取った文")
+
+
 class SpeakerVectorRequest(BaseModel):
     audio: DataAudioPath
 
@@ -308,6 +315,7 @@ def build_engine(config: Config) -> Engine:
         config=config,
         llm_backend=MlxLmBackend(config.llm),
         tts_backend=MlxAudioBackend(config.tts),
+        stt_backend=MlxSttBackend(config.stt),
         mute=MuteController(config.mute, probe),
     )
 
@@ -522,6 +530,37 @@ def create_app(engine: Engine) -> FastAPI:
     )
     async def speaker_vector(request: SpeakerVectorRequest):
         return {"vector": await engine.speaker_vector(request.audio)}
+
+    @api.post(
+        "/transcribe",
+        summary="聞き取る",
+        tags=["読み上げ"],
+        response_model=TranscriptionResponse,
+        openapi_extra={
+            "requestBody": {
+                "required": True,
+                "content": {"audio/wav": {"schema": {"type": "string", "format": "binary"}}},
+            }
+        },
+        responses={
+            400: _error("`invalid_audio`（wav でない）"),
+            413: _error("`body_too_large`（50MB まで）"),
+            503: _MODEL_UNAVAILABLE,
+        },
+    )
+    async def transcribe(request: Request):
+        """本文に wav をそのまま送る。合成した音声が原稿どおりに読めているかを確かめるのに使う。
+
+        聞き取りのモデルは `[stt]` の設定で、初めて使うときに読み込む（初回はダウンロードも）。
+        合成と同じ列に並ぶ。
+        """
+        audio = await read_wav_body(request)
+        if isinstance(audio, JSONResponse):
+            return audio
+        with tempfile.TemporaryDirectory() as directory:
+            path = Path(directory) / "audio.wav"
+            await asyncio.to_thread(path.write_bytes, audio)
+            return {"text": await engine.transcribe(path)}
 
     @api.get("/health", summary="状態", tags=["状態"])
     async def health():

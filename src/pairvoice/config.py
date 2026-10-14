@@ -104,6 +104,17 @@ class TTSConfig:
 
 
 @dataclass(frozen=True)
+class STTConfig:
+    """`/transcribe` の聞き取り。合成した音声が原稿どおりに読めているかを確かめるのに使う。"""
+
+    model: str = "mlx-community/whisper-large-v3-turbo-asr-fp16"
+    # モデルの generate() にそのまま渡す。言語の書き方はモデルごとに違う（Qwen3-ASR は "Japanese"）
+    language: str = "ja"
+    idle_unload_seconds: int = 600
+    load_timeout_seconds: int = 120
+
+
+@dataclass(frozen=True)
 class MuteConfig:
     auto_microphone: bool = True
     auto_audio_output: bool = True
@@ -139,6 +150,7 @@ class Config:
     port: int = 17495
     llm: LLMConfig = field(default_factory=LLMConfig)
     tts: TTSConfig = field(default_factory=TTSConfig)
+    stt: STTConfig = field(default_factory=STTConfig)
     mute: MuteConfig = field(default_factory=MuteConfig)
     playback: PlaybackConfig = field(default_factory=PlaybackConfig)
     eval: EvalConfig = field(default_factory=EvalConfig)
@@ -217,7 +229,7 @@ def _build(cls, raw: dict, section: str, base: Path, *, nested: tuple[str, ...] 
     return cls(**kwargs)
 
 
-_SECTIONS = ("port", "llm", "tts", "mute", "playback", "eval")
+_SECTIONS = ("port", "llm", "tts", "stt", "mute", "playback", "eval")
 
 
 def load_config(path: Path | None = None) -> Config:
@@ -249,6 +261,7 @@ def load_config(path: Path | None = None) -> Config:
         port=typing.cast(int, _coerce("port", port, int)),
         llm=_build(LLMConfig, _section(raw, "llm"), "llm", base),
         tts=tts,
+        stt=_build(STTConfig, _section(raw, "stt"), "stt", base),
         mute=_build(MuteConfig, _section(raw, "mute"), "mute", base),
         playback=_build(PlaybackConfig, _section(raw, "playback"), "playback", base),
         eval=_build(EvalConfig, _section(raw, "eval"), "eval", base),
