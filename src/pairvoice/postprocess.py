@@ -1,4 +1,4 @@
-"""合成した音声の後処理。頭と末尾のゴミを切り（trim）、音量を揃える（normalize）。
+"""合成した音声の後処理。前置きを切り（cut_lead）、頭と末尾のゴミを切り（trim）、音量を揃える（normalize）。
 
 頭と末尾には「んぁ」「ふぅ」のような声や息、プツッという音が付くことがある。
 
@@ -12,6 +12,8 @@ Irodori-TTS は文から見積もった長さを埋めるまで生成するの�
 """
 
 from __future__ import annotations
+
+from itertools import pairwise
 
 import numpy as np
 
@@ -88,6 +90,30 @@ def trim(samples: np.ndarray, sample_rate: int) -> np.ndarray:
             trimmed[:fade] *= ramp
         trimmed[-fade:] *= ramp[::-1]
     return trimmed
+
+
+# 前置き（tts.LEAD_TEXT）の後の間を探す範囲。前置きは 0.2〜1.1 秒で読み終わり、本文は
+# 0.3〜1.2 秒から始まった（corpus の 40 文）。本文の中の間で切らないよう、探すのは
+# 本文の始まりが CUT_LEAD_MAX_SECONDS までの間だけにする
+CUT_LEAD_MIN_SECONDS = 0.15
+CUT_LEAD_GAP_SECONDS = 0.1
+CUT_LEAD_MAX_SECONDS = 1.5
+
+
+def cut_lead(samples: np.ndarray, sample_rate: int) -> np.ndarray | None:
+    """前置きと、その後の間を切り落とす。間が見つからなければ None（前置きなしで合成し直す）。"""
+    hop = max(1, int(sample_rate * FRAME_SECONDS))
+    segments = _segments(samples, hop)
+    for (_, lead_end), (start, _) in pairwise(segments):
+        if start * FRAME_SECONDS > CUT_LEAD_MAX_SECONDS:
+            break
+        if (
+            lead_end * FRAME_SECONDS >= CUT_LEAD_MIN_SECONDS
+            and (start - lead_end) * FRAME_SECONDS >= CUT_LEAD_GAP_SECONDS
+        ):
+            # 本文の弱い語頭（息・無声子音）を残すため、trim と同じだけ手前から残す
+            return samples[max(0, start * hop - int(sample_rate * HEAD_PAD_SECONDS)) :]
+    return None
 
 
 # 声の部分の RMS をこの値に揃え、ピークは PEAK_CEILING_DB を超えないように抑える。

@@ -49,7 +49,7 @@ import numpy as np
 from . import hub
 from .checker import split_sentences
 from .config import TTSConfig
-from .postprocess import normalize, trim
+from .postprocess import cut_lead, normalize, trim
 from .profiles import PROFILES_DIRNAME, Profile, ProfileStore
 from .reading import DICT_FILENAME, apply_dict, load_dict
 from .styles import STYLES_FILENAME, StyleStore
@@ -70,6 +70,10 @@ SPEAKER_STATE_CACHE_SIZE = 32
 # 落ちず、文の間に挟まって聞こえる。0.9 で余りは消え、話す速さは約6%上がる（0.8 だと
 # 速さが目立つ）。最後の文の余りは、全文を1回で合成するときと同じく trim が落とす
 NON_FINAL_DURATION_SCALE = 0.9
+# 本文の前に読ませて切り落とす前置き。Irodori-TTS は頭に間を置かずに話し始め、最初の語を
+# よく崩す（ノーション → 山さん、コグニート → アブミート）。前置きの後の間から本文を
+# 始めさせると崩れない（文頭の語が合った率: 前置きなし 15/30、「ええ。」30/30、「はい。」27/30）
+LEAD_TEXT = "ええ。"
 
 
 class AudioNotFound(Exception):
@@ -429,6 +433,15 @@ class MlxAudioBackend:
         return self._loaded
 
     def _generate(self, text: str, voice: _Voice) -> tuple[np.ndarray, int, float | None]:
+        samples, sample_rate, peak = self._generate_raw(LEAD_TEXT + text, voice)
+        body = cut_lead(samples, sample_rate)
+        if body is None:
+            # 前置きの後に間が無いと、前置きを残さずには切れない
+            samples, sample_rate, peak = self._generate_raw(text, voice)
+            body = samples
+        return normalize(trim(body, sample_rate), sample_rate), sample_rate, peak
+
+    def _generate_raw(self, text: str, voice: _Voice) -> tuple[np.ndarray, int, float | None]:
         speaking = nullcontext() if voice.speaker is None else self._speaking_as(voice.speaker)
         with speaking:
             results = list(
@@ -449,7 +462,6 @@ class MlxAudioBackend:
         samples = np.asarray(result.audio, dtype=np.float32).reshape(-1)
         # NaN が1つでも混ざると trim / normalize の計算が NaN になって素通しになる
         samples = np.nan_to_num(samples, nan=0.0, posinf=0.0, neginf=0.0)
-        samples = normalize(trim(samples, sample_rate), sample_rate)
         return samples, sample_rate, getattr(result, "peak_memory_usage", None)
 
     def _bootstrap(self) -> Profile:

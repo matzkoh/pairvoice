@@ -1,6 +1,6 @@
 import numpy as np
 
-from pairvoice.postprocess import normalize, trim
+from pairvoice.postprocess import cut_lead, normalize, trim
 
 SR = 1000
 
@@ -112,3 +112,24 @@ def test_normalize_leaves_silence_alone():
     samples = np.zeros(SR, dtype=np.float32)
 
     assert np.array_equal(normalize(samples, SR), samples)
+
+
+def test_cut_lead_keeps_body_from_just_before_it():
+    samples = _signal((0.3, 0.5), (0.3, 0.0), (2.0, 0.5))
+
+    body = cut_lead(samples, SR)
+
+    # 本文の手前 0.05 秒（弱い語頭の分）から残す
+    assert body is not None
+    assert len(body) == int(2.05 * SR)
+
+
+def test_cut_lead_gives_up_without_a_gap():
+    assert cut_lead(_signal((2.0, 0.5)), SR) is None
+
+
+def test_cut_lead_does_not_cut_at_a_pause_inside_the_body():
+    # 本文が始まるはずの範囲（1.5 秒）を過ぎた間では切らない
+    samples = _signal((1.6, 0.5), (0.3, 0.0), (1.0, 0.5))
+
+    assert cut_lead(samples, SR) is None

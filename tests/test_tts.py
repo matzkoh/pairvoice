@@ -8,6 +8,7 @@ from pairvoice.config import ProfileConfig, SamplerConfig, TTSConfig
 from pairvoice.profiles import ProfileNotFound, ProfileStore
 from pairvoice.tts import (
     ANCHOR_TEXT,
+    LEAD_TEXT,
     NON_FINAL_DURATION_SCALE,
     AudioNotFound,
     MlxAudioBackend,
@@ -22,13 +23,35 @@ class FakeResult:
 
 
 class FakeModel:
-    def __init__(self, result):
+    """前置き（LEAD_TEXT）が付いた文には、本物と同じく前置きの声と間を足して返す。
+
+    calls の text は前置きを除いた本文で記録し、前置きを渡したかは lead に残す。
+    speaks_lead=False は、前置きの後に間を置かないモデル（切れずに合成し直す）を真似る。
+    """
+
+    def __init__(self, result, speaks_lead=True):
         self.result = result
+        self.speaks_lead = speaks_lead
         self.calls = []
 
     def generate(self, text, **kwargs):
-        self.calls.append({"text": text, **kwargs})
-        return iter([self.result])
+        lead = text.startswith(LEAD_TEXT)
+        self.calls.append({"text": text.removeprefix(LEAD_TEXT), "lead": lead, **kwargs})
+        if not lead:
+            return iter([self.result])
+        sample_rate = getattr(self.result, "sample_rate", 48000)
+        body = np.asarray(self.result.audio, dtype=np.float32)
+        # 本物の本文は声で始まる。無音の本文（多くのテストの既定）では切れ目が見えないので声を足す
+        if not np.any(body):
+            body = np.concatenate([_tone(0.05, sample_rate), body])
+        gap = np.zeros(int(0.3 * sample_rate) if self.speaks_lead else 0, dtype=np.float32)
+        audio = np.concatenate([_tone(0.3, sample_rate), gap, body])
+        return iter([FakeResult(audio, sample_rate, self.result.peak_memory_usage)])
+
+
+def _tone(seconds, sample_rate):
+    t = np.arange(int(seconds * sample_rate)) / sample_rate
+    return (0.3 * np.sin(2 * np.pi * 200 * t)).astype(np.float32)
 
 
 @pytest.fixture
@@ -90,14 +113,15 @@ def test_speak_writes_48khz_wav_and_returns_relative_path(config, tmp_path, monk
 
     assert result.path.exists()
     assert result.relative_path == f"generations/{result.path.name}"
-    assert result.duration == pytest.approx(1.0, abs=0.01)
+    # 前置きを切った後、本文の手前に HEAD_PAD_SECONDS（0.05 秒）の間が残る
+    assert result.duration == pytest.approx(1.05, abs=0.01)
     assert result.peak_memory_gb == 1234
 
     with wave.open(str(result.path)) as wav:
         assert wav.getframerate() == 48000
         assert wav.getnchannels() == 1
         assert wav.getsampwidth() == 2
-        assert wav.getnframes() == 48000
+        assert wav.getnframes() == 50400
 
 
 def test_speak_passes_ref_audio_caption_and_sampler_only(config, tmp_path, monkeypatch):
@@ -116,7 +140,7 @@ def test_speak_passes_ref_audio_caption_and_sampler_only(config, tmp_path, monke
     # sampler は項目を増やしても配線漏れが起きないよう丸ごと渡す。None は
     # 「モデル既定に任せる」なのでキーごと落ちる。余分な引数も渡らないこと
     assert {
-        k: v for k, v in call.items() if k not in ("text", "ref_audio", "caption")
+        k: v for k, v in call.items() if k not in ("text", "lead", "ref_audio", "caption")
     } == backend.resolve_sampler()
     assert "ref_text" not in call  # Irodori-TTS に参照テキストのパラメータは無い
     assert "stream" not in call
@@ -494,7 +518,7 @@ def test_speak_without_sampler_keeps_config_values(config, tmp_path, monkeypatch
     backend.speak("テスト")
 
     call = model.calls[0]
-    assert {k: v for k, v in call.items() if k not in ("text", "ref_audio", "caption")} == {
+    assert {k: v for k, v in call.items() if k not in ("text", "lead", "ref_audio", "caption")} == {
         "cfg_guidance_mode": "alternating",
         "cfg_scale_speaker": 2.5,
     }
@@ -815,3 +839,28 @@ def test_join_concatenates_parts_into_one_wav(config, tmp_path, monkeypatch):
         frames = wav.getnframes()
     assert frames == sum(round(part.duration * 48000) for part in parts)
     assert backend.join(parts[:1]) == parts[0]
+
+
+def test_speak_reads_a_lead_and_cuts_it_off(config, tmp_path, monkeypatch):
+    # 文頭の語を崩さないよう前置きを読ませ、その後の間から本文だけを残す
+    body = 0.3 * np.sin(np.linspace(0, 400 * np.pi, 48000, dtype=np.float32))
+    model = FakeModel(FakeResult(body))
+    backend = make_backend(config, model, tmp_path, monkeypatch)
+
+    result = backend.speak("テスト")
+
+    assert [(call["text"], call["lead"]) for call in model.calls] == [("テスト", True)]
+    assert result.duration == pytest.approx(1.05, abs=0.01)
+
+
+def test_speak_resynthesizes_without_lead_when_no_gap_follows_it(config, tmp_path, monkeypatch):
+    # 間が無ければ前置きを残さずには切れないので、前置きなしで合成し直す
+    model = FakeModel(FakeResult(np.zeros(480, dtype=np.float32)), speaks_lead=False)
+    backend = make_backend(config, model, tmp_path, monkeypatch)
+
+    backend.speak("テスト")
+
+    assert [(call["text"], call["lead"]) for call in model.calls] == [
+        ("テスト", True),
+        ("テスト", False),
+    ]
