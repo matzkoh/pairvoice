@@ -222,7 +222,7 @@ def make_shuffle(store, names=("甲", "乙", "丙")):
 def test_shuffle_profile_picks_every_member_once_per_round(tmp_path, monkeypatch):
     store = ProfileStore(tmp_path / "profiles")
     meta, members = make_shuffle(store)
-    assert store.get(meta.id).order == "shuffle"
+    assert store.require(meta.id).order == "shuffle"
     # 1巡目は並びのまま、2巡目は前の巡の最後（丙）から始まる並びを混ぜた結果にする
     rounds = iter([members] * 3 + [[members[2], members[0], members[1]]] * 3)
     monkeypatch.setattr("pairvoice.profiles.random.sample", lambda seq, k: list(next(rounds)))
@@ -253,7 +253,7 @@ def test_order_is_only_for_random_profiles(tmp_path):
 
     assert meta.order == "random"
     assert store.update(meta.id, order="shuffle") == store.get(meta.id)
-    assert store.get(meta.id).order == "shuffle"
+    assert store.require(meta.id).order == "shuffle"
     with pytest.raises(ProfileRejected):
         store.update(meta.id, order="順番")
     with pytest.raises(ProfileRejected):
