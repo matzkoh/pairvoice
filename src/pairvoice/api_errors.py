@@ -10,6 +10,7 @@ from fastapi import FastAPI, Request
 from fastapi.responses import JSONResponse
 from pydantic import BaseModel, Field
 
+from .curate import FfmpegMissing, InvalidAudio, TooLittleSpeech
 from .history import InvalidVersion, VersionNotFound
 from .lifecycle import Superseded
 from .narration import NoJapaneseSummary, NothingToSay
@@ -52,6 +53,9 @@ _ERRORS: dict[type[Exception], tuple[int, str, bool]] = {
     PromptMissing: (503, "prompt_missing", True),
     Superseded: (409, "dropped", False),
     NoJapaneseSummary: (503, "no_japanese_summary", False),
+    InvalidAudio: (400, "invalid_audio", True),
+    TooLittleSpeech: (422, "too_little_speech", True),
+    FfmpegMissing: (503, "ffmpeg_missing", True),
 }
 
 

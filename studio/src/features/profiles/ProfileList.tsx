@@ -9,6 +9,7 @@ import { ORDER_LABELS } from './MemberPicker'
 export const SOURCE_LABELS: Record<ProfileSource, string> = {
   design: '作った声',
   upload: '取り込み',
+  curate: '素材から',
   auto: '自動で作成',
   import: '設定から移行',
   random: 'ランダム',

@@ -1,10 +1,14 @@
+import io
 import struct
+import wave
 from pathlib import Path
 
 import pytest
 
 from pairvoice.data_api import MASTER_STEPS, REFERENCE_TEXTS, TAKE_GAP_SECONDS
 from pairvoice.tts import ANCHOR_TEXT, SpeechResult, resolve_data_audio
+from pairvoice.wav import write_mono
+from tests.test_curate import needs_ffmpeg, synth
 from tests.test_engine import FakeTTS
 from tests.test_server import build
 
@@ -177,6 +181,69 @@ def test_upload_rejects_non_wav(client):
 
     assert response.status_code == 400
     assert response.json()["error"] == "invalid_audio"
+
+
+def curate_upload(client, files, name="素材の声"):
+    return client.post(
+        "/profiles/curate",
+        params={"name": name, "caption": " 落ち着いて "},
+        files=[("files", (filename, body, "application/octet-stream")) for filename, body in files],
+    )
+
+
+def speech_wav(tmp_path, plan, rate=44100):
+    path = tmp_path / "speech.wav"
+    write_mono(path, synth(plan, rate), rate)
+    return path.read_bytes()
+
+
+@needs_ffmpeg
+def test_curate_creates_profile_from_loudest_speaker(client, tmp_path):
+    first = speech_wav(tmp_path, [(1, 6, 0.5, 220), (7, 9, 0.2, 330), (10, 16, 0.5, 220)])
+    second = speech_wav(tmp_path, [(1, 6, 0.5, 220)], rate=22050)
+
+    response = curate_upload(client, [("対談.wav", first), ("配信.wav", second)])
+
+    assert response.status_code == 201
+    body = response.json()
+    assert body["profile"]["source"] == "curate"
+    assert body["profile"]["caption"] == "落ち着いて"
+    report = body["report"]
+    assert [f["name"] for f in report["files"]] == ["対談.wav", "配信.wav"]
+    assert report["speakers"][0]["chosen"]
+    assert [p["file"] for p in report["pieces"]] == ["対談.wav", "対談.wav", "配信.wav"]
+    assert [p["start"] for p in report["pieces"]] == pytest.approx([1.0, 10.0, 1.0], abs=0.05)
+    audio = client.get(f"/profiles/{body['profile']['id']}/audio")
+    with wave.open(io.BytesIO(audio.content)) as reader:
+        assert reader.getframerate() == 48000
+        assert reader.getnchannels() == 1
+    assert client.get("/profiles").json()["active"] == body["profile"]["id"]
+
+
+def test_curate_requires_files(client):
+    response = client.post("/profiles/curate", params={"name": "空"}, data={"other": "x"})
+
+    assert response.status_code == 400
+    assert response.json()["error"] == "invalid_audio"
+
+
+@needs_ffmpeg
+def test_curate_names_the_unreadable_file(client):
+    response = curate_upload(client, [("壊れた.mp3", b"ID3 not audio")])
+
+    assert response.status_code == 400
+    assert response.json()["error"] == "invalid_audio"
+    assert "壊れた.mp3" in response.json()["detail"]
+    assert client.get("/profiles").json()["items"] == []
+
+
+@needs_ffmpeg
+def test_curate_refuses_too_little_speech(client, tmp_path):
+    response = curate_upload(client, [("短い.wav", speech_wav(tmp_path, [(1, 3, 0.5, 220)]))])
+
+    assert response.status_code == 422
+    assert response.json()["error"] == "too_little_speech"
+    assert client.get("/profiles").json()["items"] == []
 
 
 def test_create_from_takes_joins_with_silence(client, tmp_path):

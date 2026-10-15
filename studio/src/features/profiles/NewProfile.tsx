@@ -3,6 +3,7 @@ import type { ComponentProps } from 'react'
 import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs'
 import type { ProfileItem } from '@/lib/api-types'
 
+import { CurateProfile } from './CurateProfile'
 import { DesignProfile } from './DesignProfile'
 import { PickProfile } from './PickProfile'
 import { RandomProfile } from './RandomProfile'
@@ -25,6 +26,7 @@ export function NewProfile({ voices, onStatus, onCreated, ...design }: Props) {
           <TabsTrigger value="design">caption から声を作る</TabsTrigger>
           <TabsTrigger value="pick">2択で絞り込む</TabsTrigger>
           <TabsTrigger value="upload">wav を取り込む</TabsTrigger>
+          <TabsTrigger value="curate">素材から作る</TabsTrigger>
           <TabsTrigger value="random">ランダムに選ぶ</TabsTrigger>
         </TabsList>
         <TabsContent value="design" keepMounted>
@@ -41,6 +43,9 @@ export function NewProfile({ voices, onStatus, onCreated, ...design }: Props) {
         </TabsContent>
         <TabsContent value="upload" keepMounted>
           <UploadProfile onStatus={onStatus} onCreated={onCreated} />
+        </TabsContent>
+        <TabsContent value="curate" keepMounted>
+          <CurateProfile onStatus={onStatus} onCreated={onCreated} />
         </TabsContent>
         <TabsContent value="random" keepMounted>
           <RandomProfile voices={voices} onStatus={onStatus} onCreated={onCreated} />

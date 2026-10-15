@@ -1,15 +1,14 @@
 import { useQueryClient } from '@tanstack/react-query'
-import { cn } from 'cn'
-import { FileAudio } from 'lucide-react'
 import { useState, useTransition } from 'react'
 
-import { Button, buttonVariants } from '@/components/ui/button'
+import { Button } from '@/components/ui/button'
 import { Input } from '@/components/ui/input'
 import { Textarea } from '@/components/ui/textarea'
 import { apiUpload, toErrorMessage } from '@/lib/api'
 import type { ProfileItem } from '@/lib/api-types'
 
 import { Field } from './Field'
+import { FilePicker } from './FilePicker'
 import { invalidateProfiles, type ProfileStatus } from './queries'
 
 type Props = {
@@ -51,32 +50,16 @@ export function UploadProfile({ onStatus, onCreated }: Props) {
   return (
     <div className="max-w-xl space-y-5">
       <Field label="参照音声" hint="声そのもの。数秒〜十数秒の wav を、この声で読み上げます。">
-        <div className="flex items-center gap-3">
-          <label
-            className={cn(
-              buttonVariants({ variant: 'outline', size: 'sm' }),
-              // 本体の input は隠れているので、キーボードで当たったときの印をラベルに出す
-              'cursor-pointer has-focus-visible:ring-3 has-focus-visible:ring-ring/50',
-            )}
-          >
-            <FileAudio />
-            wav を選ぶ
-            <input
-              key={inputKey}
-              type="file"
-              accept=".wav,audio/wav"
-              className="sr-only"
-              onChange={(e) => {
-                const picked = e.target.files?.[0] ?? null
-                setFile(picked)
-                if (picked && name === '') setName(picked.name.replace(/\.wav$/i, ''))
-              }}
-            />
-          </label>
-          <span className="truncate text-sm text-muted-foreground">
-            {file ? file.name : '選ばれていません'}
-          </span>
-        </div>
+        <FilePicker
+          label="wav を選ぶ"
+          accept=".wav,audio/wav"
+          resetKey={inputKey}
+          summary={file ? file.name : '選ばれていません'}
+          onPick={([picked]) => {
+            setFile(picked ?? null)
+            if (picked && name === '') setName(picked.name.replace(/\.wav$/i, ''))
+          }}
+        />
       </Field>
       <Field
         label="caption"

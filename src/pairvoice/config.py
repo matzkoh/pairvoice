@@ -115,6 +115,17 @@ class STTConfig:
 
 
 @dataclass(frozen=True)
+class CurateConfig:
+    """`/profiles/curate` の、素材から参照音声を作る話者分離と雑音除去のモデル。"""
+
+    diarize_model: str = "mlx-community/diar_streaming_sortformer_4spk-v2.1-fp16"
+    # 重みは curate.ENHANCE_WEIGHTS の1ファイルだけを使う
+    enhance_model: str = "starkdmi/MossFormer2_SE_48K_MLX"
+    idle_unload_seconds: int = 600
+    load_timeout_seconds: int = 120
+
+
+@dataclass(frozen=True)
 class MuteConfig:
     auto_microphone: bool = True
     auto_audio_output: bool = True
@@ -151,6 +162,7 @@ class Config:
     llm: LLMConfig = field(default_factory=LLMConfig)
     tts: TTSConfig = field(default_factory=TTSConfig)
     stt: STTConfig = field(default_factory=STTConfig)
+    curate: CurateConfig = field(default_factory=CurateConfig)
     mute: MuteConfig = field(default_factory=MuteConfig)
     playback: PlaybackConfig = field(default_factory=PlaybackConfig)
     eval: EvalConfig = field(default_factory=EvalConfig)
@@ -229,7 +241,7 @@ def _build(cls, raw: dict, section: str, base: Path, *, nested: tuple[str, ...] 
     return cls(**kwargs)
 
 
-_SECTIONS = ("port", "llm", "tts", "stt", "mute", "playback", "eval")
+_SECTIONS = ("port", "llm", "tts", "stt", "curate", "mute", "playback", "eval")
 
 
 def load_config(path: Path | None = None) -> Config:
@@ -262,6 +274,7 @@ def load_config(path: Path | None = None) -> Config:
         llm=_build(LLMConfig, _section(raw, "llm"), "llm", base),
         tts=tts,
         stt=_build(STTConfig, _section(raw, "stt"), "stt", base),
+        curate=_build(CurateConfig, _section(raw, "curate"), "curate", base),
         mute=_build(MuteConfig, _section(raw, "mute"), "mute", base),
         playback=_build(PlaybackConfig, _section(raw, "playback"), "playback", base),
         eval=_build(EvalConfig, _section(raw, "eval"), "eval", base),

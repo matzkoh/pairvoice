@@ -11,7 +11,9 @@ import pairvoice.lifecycle as lifecycle_module
 from pairvoice.config import Config, LLMConfig, MuteConfig, TTSConfig
 from pairvoice.lifecycle import Engine, ModelUnavailable, MutedError, Superseded
 from pairvoice.mute import MuteController
-from tests.fakes import FakeBackend, FakeProbe, gather_results
+from pairvoice.wav import write_mono
+from tests.fakes import FakeBackend, FakeCurate, FakeProbe, gather_results
+from tests.test_curate import needs_ffmpeg, synth
 
 
 class FakeLLM(FakeBackend):
@@ -112,7 +114,7 @@ def isolated_data_root(tmp_path, monkeypatch):
     monkeypatch.setenv("PAIRVOICE_DATA_ROOT", str(tmp_path))
 
 
-def make_engine(*, probe=None, mute_config=None, llm=None, tts=None, stt=None):
+def make_engine(*, probe=None, mute_config=None, llm=None, tts=None, stt=None, curate=None):
     config = Config(
         llm=LLMConfig(model="fake/llm", idle_unload_seconds=60, load_timeout_seconds=1),
         tts=TTSConfig(model="fake/tts", idle_unload_seconds=60, load_timeout_seconds=1),
@@ -123,6 +125,7 @@ def make_engine(*, probe=None, mute_config=None, llm=None, tts=None, stt=None):
         llm_backend=llm or FakeLLM(),
         tts_backend=tts or FakeTTS(),
         stt_backend=stt or FakeSTT(),
+        curate_backend=curate or FakeCurate(),
         mute=MuteController(config.mute, probe or FakeProbe()),
     )
 
@@ -715,3 +718,20 @@ async def test_transcribe_loads_once_and_ignores_mute(tmp_path):
     assert first == "テスト全部通ったよ。"
     assert stt.load_calls == 1
     assert engine.health()["stt"]["state"] == "loaded"
+
+
+@needs_ffmpeg
+async def test_curate_queues_each_chunk_and_ignores_mute(tmp_path):
+    curate = FakeCurate()
+    engine = make_engine(curate=curate, probe=FakeProbe(microphone=True))
+    audio = tmp_path / "a.wav"
+    # 話者分離の1チャンク（60 秒）より長い素材
+    write_mono(audio, synth([(1 + 7 * k, 7 + 7 * k, 0.5, 220) for k in range(10)], 16000), 16000)
+
+    outcome = await engine.curate([("a.wav", audio)])
+
+    # 6 秒の区間を TARGET_SECONDS に届くまで（4つ）選ぶ
+    assert outcome.report["seconds"] == pytest.approx(24, abs=0.3)
+    assert curate.load_calls == 1
+    assert curate.diarize_calls == 2
+    assert engine.health()["curate"]["state"] == "loaded"

@@ -1,9 +1,12 @@
-"""PCM の wav をつなぐ。合成した wav（同じ形式）を1本の参照音声にまとめるのに使う。"""
+"""PCM の wav を書く・つなぐ。合成した wav（同じ形式）を1本の参照音声にまとめるのに使う。"""
 
 from __future__ import annotations
 
 import io
 import wave
+from pathlib import Path
+
+import numpy as np
 
 
 class WavFormatError(ValueError):
@@ -37,3 +40,14 @@ def concat_wavs(buffers: list[bytes], gap_seconds: float) -> bytes:
         writer.setframerate(rate)
         writer.writeframes(gap.join(frames for _, frames in pieces))
     return out.getvalue()
+
+
+def write_mono(path: Path, samples: np.ndarray, sample_rate: int) -> None:
+    """-1〜1 の float を 16bit モノラルの wav に書く。"""
+    path.parent.mkdir(parents=True, exist_ok=True)
+    pcm = (np.clip(samples, -1.0, 1.0) * 32767.0).astype("<i2")
+    with wave.open(str(path), "wb") as writer:
+        writer.setnchannels(1)
+        writer.setsampwidth(2)
+        writer.setframerate(sample_rate)
+        writer.writeframes(pcm.tobytes())

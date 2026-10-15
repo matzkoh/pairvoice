@@ -125,18 +125,24 @@ PEAK_CEILING_DB = -1.0
 MAX_GAIN_DB = 12.0
 
 
-def normalize(samples: np.ndarray, sample_rate: int) -> np.ndarray:
+def voiced_rms_db(samples: np.ndarray, sample_rate: int) -> float | None:
+    """声の部分（音のあるかたまり）の RMS（dBFS）。音が無ければ None。"""
     hop = max(1, int(sample_rate * FRAME_SECONDS))
     segments = _segments(samples, hop)
     if not segments:
-        return samples
+        return None
     voiced = np.concatenate([samples[start * hop : end * hop] for start, end in segments])
     rms = float(np.sqrt(np.mean(voiced**2)))
+    return 20 * float(np.log10(rms)) if rms > 0.0 else None
+
+
+def normalize(samples: np.ndarray, sample_rate: int) -> np.ndarray:
+    rms_db = voiced_rms_db(samples, sample_rate)
     peak = float(np.abs(samples).max())
-    if rms == 0.0 or peak == 0.0:
+    if rms_db is None or peak == 0.0:
         return samples
     gain_db = min(
-        TARGET_RMS_DB - 20 * np.log10(rms),
+        TARGET_RMS_DB - rms_db,
         PEAK_CEILING_DB - 20 * np.log10(peak),
         MAX_GAIN_DB,
     )

@@ -35,9 +35,10 @@ TONE_FILENAME = "tone.txt"
 # active や URL の ID でディレクトリの外へ出ないよう、読むときもこの形だけを受ける
 _ID_PATTERN = re.compile(r"p-[0-9A-Za-z-]+")
 # design = caption や合成した声から作った、upload = 手持ちの wav を取り込んだ、
-# auto / import = 初回に常駐サーバーが作った、random = ほかの声から毎回1つを選ぶ
+# curate = 雑多な音声ファイルから選り分けた、auto / import = 初回に常駐サーバーが作った、
+# random = ほかの声から毎回1つを選ぶ
 RANDOM_SOURCE = "random"
-SOURCES = ("design", "upload", "auto", "import", RANDOM_SOURCE)
+SOURCES = ("design", "upload", "curate", "auto", "import", RANDOM_SOURCE)
 # 1つだけでは選ぶ意味が無い
 MIN_MEMBERS = 2
 # ランダムの声の選び方。random = 毎回ばらばらに選ぶ、shuffle = 混ぜた順に一巡ずつ選ぶ

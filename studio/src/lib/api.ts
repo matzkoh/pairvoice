@@ -183,3 +183,10 @@ export async function apiUpload<T>(path: string, file: Blob, opts?: ApiOptions):
   })
   return unwrap<T>(res, path, opts)
 }
+
+// 複数のファイルを1回で送る（POST /profiles/curate）。Content-Type は境界を含めて
+// ブラウザが付けるので、ここでは決めない
+export async function apiSendForm<T>(path: string, form: FormData, opts?: ApiOptions): Promise<T> {
+  const res = await send(path, { method: 'POST', body: form, signal: opts?.signal })
+  return unwrap<T>(res, path, opts)
+}

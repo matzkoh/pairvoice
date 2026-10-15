@@ -28,6 +28,7 @@ dependencies = [
     "mlx-audio==0.5.7",
     "pyobjc-framework-Cocoa>=12,<13",
     "pyobjc-framework-avfoundation>=12,<13",
+    "python-multipart>=0.0.32,<0.1",
 ]
 
 [project.urls]

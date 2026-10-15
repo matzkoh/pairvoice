@@ -9,6 +9,7 @@ from __future__ import annotations
 import asyncio
 import contextlib
 import logging
+import tempfile
 import time
 from collections.abc import Callable
 from concurrent.futures import ThreadPoolExecutor
@@ -17,8 +18,9 @@ from enum import StrEnum
 from pathlib import Path
 from typing import Protocol
 
-from . import generations
+from . import curate, generations
 from .config import Config
+from .curate import Outcome
 from .player import Player
 
 _log = logging.getLogger(__name__)
@@ -336,11 +338,13 @@ class Engine:
         player: Player | None = None,
         *,
         stt_backend,
+        curate_backend,
     ) -> None:
         self._config = config
         self._llm_backend = llm_backend
         self._tts_backend = tts_backend
         self._stt_backend = stt_backend
+        self._curate_backend = curate_backend
         self.mute = mute
         self.player = player or Player(config.playback, mute)
         self._clock = clock
@@ -361,6 +365,12 @@ class Engine:
             backend=stt_backend,
             idle_unload_seconds=config.stt.idle_unload_seconds,
             load_timeout_seconds=config.stt.load_timeout_seconds,
+            clock=clock,
+        )
+        self._curate = ManagedModel(
+            backend=curate_backend,
+            idle_unload_seconds=config.curate.idle_unload_seconds,
+            load_timeout_seconds=config.curate.load_timeout_seconds,
             clock=clock,
         )
         self._tasks: list[asyncio.Task] = []
@@ -508,30 +518,47 @@ class Engine:
             download=self._tts if wait_download else None,
         )
 
+    async def _measure(self, model: ManagedModel, fn: Callable, *args):
+        """音を出さずにモデルで測る仕事を1つ列に並べる。音は出さないのでミュートは効かせない。"""
+
+        async def work():
+            await model.ensure_loaded()
+            result = await on_mlx_thread(fn, *args)
+            model.touch()
+            return result
+
+        return await self._run(work, check_mute=False, droppable=False, download=model)
+
     async def speaker_vector(self, audio: str) -> list[float]:
         """データの置き場所の wav の話者ベクトル。2択でもとの声どうしの位置を測る。"""
         path = self._tts_backend.resolve_audio(audio)
-
-        async def work():
-            await self._tts.ensure_loaded()
-            vector = await on_mlx_thread(self._tts_backend.speaker_vector, path)
-            self._tts.touch()
-            return vector
-
-        # 測るのは studio の操作で、音は出さないのでミュートは効かせない
-        return await self._run(work, check_mute=False, droppable=False, download=self._tts)
+        return await self._measure(self._tts, self._tts_backend.speaker_vector, path)
 
     async def transcribe(self, path: Path) -> str:
         """wav を聞き取った文。合成した音声が原稿どおりに読めているかを確かめるのに使う。"""
+        return await self._measure(self._stt, self._stt_backend.transcribe, path)
 
-        async def work():
-            await self._stt.ensure_loaded()
-            text = await on_mlx_thread(self._stt_backend.transcribe, path)
-            self._stt.touch()
-            return text
+    async def curate(self, files: list[tuple[str, Path]]) -> Outcome:
+        """(名前, パス) の素材から参照音声を作る。作れなければ curate.CurateError。
 
-        # 音は出さないのでミュートは効かせない
-        return await self._run(work, check_mute=False, droppable=False, download=self._stt)
+        話者分離はチャンクごと、雑音除去は区間ごとに列に並べる。素材が長くても、その合間に
+        読み上げが割り込める。
+        """
+        state = None
+
+        async def diarize(chunk):
+            nonlocal state
+            segments, state = await self._measure(
+                self._curate, self._curate_backend.diarize, chunk, state
+            )
+            return segments
+
+        async def enhance(samples):
+            return await self._measure(self._curate, self._curate_backend.enhance, samples)
+
+        with tempfile.TemporaryDirectory() as directory:
+            material = await asyncio.to_thread(curate.decode, files, Path(directory))
+            return await curate.build(material, diarize, enhance, asyncio.to_thread)
 
     async def warmup(self, respect_mute: bool = False) -> dict:
         if respect_mute:
@@ -585,6 +612,7 @@ class Engine:
                 "sampler": self._tts_backend.resolve_sampler(),
             },
             "stt": self._describe(self._stt),
+            "curate": self._describe(self._curate),
             "mute": mute_state.describe(),
             "queue": {"running": self._runner.running, "waiting": self._runner.waiting},
             "playback": self.player.describe(),
@@ -605,7 +633,7 @@ class Engine:
         return snapshot
 
     async def maintain(self) -> None:
-        for model in (self._llm, self._tts, self._stt):
+        for model in (self._llm, self._tts, self._stt, self._curate):
             await self._runner.run(model.unload_if_idle, droppable=False)
         # 合成音声の掃除は MLX を使わないので Runner を通さない。1日1回で足りる
         if self._last_prune is None or self._clock() - self._last_prune >= PRUNE_INTERVAL_SECONDS:

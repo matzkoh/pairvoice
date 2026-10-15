@@ -23,6 +23,7 @@ from .api_errors import error_doc as _error
 from .audio_state import AudioProbe
 from .config import API_PREFIX, Config
 from .corpus_api import corpus_router
+from .curate import MlxCurateBackend
 from .data_api import data_router, read_wav_body
 from .lifecycle import Engine, ModelUnavailable, MutedError, limit_mlx_cache
 from .llm import MlxLmBackend
@@ -316,6 +317,7 @@ def build_engine(config: Config) -> Engine:
         llm_backend=MlxLmBackend(config.llm),
         tts_backend=MlxAudioBackend(config.tts),
         stt_backend=MlxSttBackend(config.stt),
+        curate_backend=MlxCurateBackend(config.curate),
         mute=MuteController(config.mute, probe),
     )
 
@@ -664,7 +666,7 @@ def create_app(engine: Engine) -> FastAPI:
             results.append(evaluation.judge(case, output, engine.config.eval.style))
         return {"summary": evaluation.format_summary(results), "results": results}
 
-    api.include_router(data_router(data_root, engine.synthesize))
+    api.include_router(data_router(data_root, engine.synthesize, engine.curate))
     api.include_router(corpus_router(data_root))
     app.include_router(api, prefix=API_PREFIX)
     # 画面はどの道筋にも index.html を返すので、API のあとに足す

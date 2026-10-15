@@ -81,9 +81,10 @@ export type HistoryItem = { name: string; ts: string }
 export type HistoryResponse = { items: HistoryItem[] }
 
 // 声のプロファイル（参照音声 + caption）。design = caption や合成した声から作った、
-// upload = 手持ちの wav を取り込んだ、auto / import = pairvoice が初回に作った
+// upload = 手持ちの wav を取り込んだ、curate = 雑多な音声ファイルから選り分けた、
+// auto / import = pairvoice が初回に作った
 // random は参照音声を持たず、読み上げのたびに members から1つを選ぶ
-export type ProfileSource = 'design' | 'upload' | 'auto' | 'import' | 'random'
+export type ProfileSource = 'design' | 'upload' | 'curate' | 'auto' | 'import' | 'random'
 // random の声の選び方。shuffle は混ぜた順に、全員を一巡するまで同じ声を選ばない
 export type ProfileOrder = 'random' | 'shuffle'
 export type ProfileItem = {
@@ -100,6 +101,19 @@ export type ProfileItem = {
   order: ProfileOrder
 }
 export type ProfilesResponse = { items: ProfileItem[]; active: string | null }
+
+// POST /profiles/curate の応答。report はどの区間を参照音声に使ったか
+export type CurateReport = {
+  files: { name: string; seconds: number }[]
+  // 長すぎるので後ろを使わなかった
+  truncated: boolean
+  // 話す長さの多い順。chosen がいちばん多く話す人
+  speakers: { speaker: number; seconds: number; chosen: boolean }[]
+  candidates: number
+  seconds: number
+  pieces: { file: string; start: number; end: number; snr_db: number }[]
+}
+export type CurateResponse = { profile: ProfileItem; report: CurateReport }
 
 // /synthesize が wav を作れたときの応答。鳴らさないのでミュートでは断られない
 export type SpeakResponse = { relative_path: string; duration: number }

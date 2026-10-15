@@ -36,7 +36,6 @@ from __future__ import annotations
 import dataclasses
 import shutil
 import uuid
-import wave
 from collections import OrderedDict
 from collections.abc import Iterator, Mapping, Sequence
 from contextlib import contextmanager, nullcontext
@@ -53,7 +52,7 @@ from .postprocess import cut_lead, normalize, trim
 from .profiles import PROFILES_DIRNAME, Profile, ProfileStore
 from .reading import DICT_FILENAME, apply_dict, load_dict
 from .styles import STYLES_FILENAME, StyleStore
-from .wav import concat_wavs
+from .wav import concat_wavs, write_mono
 
 DEFAULT_SAMPLE_RATE = 48000
 CAPTION_FILENAME = "caption.txt"
@@ -409,7 +408,7 @@ class MlxAudioBackend:
 
     def _save(self, samples: np.ndarray, sample_rate: int, peak: float | None) -> SpeechResult:
         path = self._new_output_path()
-        self._write_wav(path, samples, sample_rate)
+        write_mono(path, samples, sample_rate)
         return self._result(path, duration=len(samples) / sample_rate, peak=peak)
 
     def _new_output_path(self) -> Path:
@@ -487,16 +486,5 @@ class MlxAudioBackend:
             name=AUTO_PROFILE_NAME,
             caption=caption,
             source="auto",
-            write_reference=lambda path: self._write_wav(path, samples, sample_rate),
+            write_reference=lambda path: write_mono(path, samples, sample_rate),
         )
-
-    @staticmethod
-    def _write_wav(path: Path, samples: np.ndarray, sample_rate: int) -> None:
-        path.parent.mkdir(parents=True, exist_ok=True)
-        pcm = np.clip(samples, -1.0, 1.0)
-        pcm = (pcm * 32767.0).astype("<i2")
-        with wave.open(str(path), "wb") as wav:
-            wav.setnchannels(1)
-            wav.setsampwidth(2)
-            wav.setframerate(sample_rate)
-            wav.writeframes(pcm.tobytes())

@@ -75,3 +75,32 @@ class FakeProbe:
         if self.error is not None:
             raise self.error
         return AudioActivity(microphone=self.microphone, output=self.output)
+
+
+class FakeCurate(FakeBackend):
+    """音の大きさで話者を分ける（0.3 より大きい所は 0 番、それより小さい声は 1 番）。雑音は除かない。"""
+
+    def __init__(self, **kwargs):
+        super().__init__(name="curate", model="fake/curate", **kwargs)
+        self.diarize_calls = 0
+        self.enhance_calls = 0
+
+    def diarize(self, chunk, state):
+        import numpy as np
+
+        from pairvoice.curate import DIARIZE_RATE, Segment
+
+        self.diarize_calls += 1
+        offset = state or 0.0
+        hop = DIARIZE_RATE // 100
+        frames = len(chunk) // hop
+        peak = np.abs(chunk[: frames * hop]).reshape(frames, hop).max(axis=1)
+        segments = []
+        for speaker, voiced in ((0, peak > 0.3), (1, (peak > 0.05) & (peak <= 0.3))):
+            edges = np.flatnonzero(np.diff(np.r_[0, voiced.astype(np.int8), 0])).reshape(-1, 2)
+            segments += [Segment(offset + a / 100, offset + b / 100, speaker) for a, b in edges]
+        return segments, offset + len(chunk) / DIARIZE_RATE
+
+    def enhance(self, samples):
+        self.enhance_calls += 1
+        return samples * 0.999
