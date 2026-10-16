@@ -15,7 +15,7 @@ from typing import Annotated, Literal, Protocol
 
 from fastapi import APIRouter, Body, Query, Request
 from fastapi.openapi.models import Example
-from fastapi.responses import FileResponse, JSONResponse
+from fastapi.responses import FileResponse, JSONResponse, Response
 from pydantic import (
     BaseModel,
     ConfigDict,
@@ -26,15 +26,17 @@ from pydantic import (
 )
 from starlette.datastructures import UploadFile
 
-from . import reading
+from . import curate, reading
+from .api_errors import BodyTooLarge
 from .api_errors import error_doc as _error
 from .api_errors import fail as _fail
-from .curate import Outcome
+from .curate import Analysis, InvalidAudio, Outcome
+from .curate_jobs import CurateJobs
 from .profiles import TakeRejected
 from .prompt import SummaryPrompt
 from .styles import STYLES_FILENAME, StyleStore
 from .tts import ANCHOR_TEXT, AudioNotFound, SpeechResult, resolve_data_audio
-from .wav import concat_wavs, has_wav_header, write_mono
+from .wav import concat_wavs, has_wav_header, mono_wav, write_mono
 
 # 本文で wav を受けるとき（声の取り込みと聞き取り）の上限。48kHz モノラルで9分ほど
 UPLOAD_MAX_BYTES = 50 * 1024 * 1024
@@ -90,10 +92,16 @@ REFERENCE_TEXTS = (
 )
 
 
-class Curate(Protocol):
-    """Engine.curate。(ファイル名, パス) の素材から参照音声を作る。"""
+class CurateAnalyze(Protocol):
+    """Engine.curate_analyze。(ファイル名, パス) の素材を directory にデコードして区間を採点する。"""
 
-    async def __call__(self, files: list[tuple[str, Path]]) -> Outcome: ...
+    async def __call__(self, files: list[tuple[str, Path]], directory: Path) -> Analysis: ...
+
+
+class CurateRender(Protocol):
+    """Engine.curate_render。解析した区間から参照音声を作る。selection が None なら自動で選ぶ。"""
+
+    async def __call__(self, analysis: Analysis, selection: list[int] | None) -> Outcome: ...
 
 
 class Synthesize(Protocol):
@@ -115,6 +123,26 @@ _VERSION_ERRORS: dict[int | str, dict] = {
     404: _error("`version_not_found`"),
 }
 _PROFILE_NOT_FOUND: dict[int | str, dict] = {404: _error("`profile_not_found`")}
+_CURATE_JOB_NOT_FOUND: dict[int | str, dict] = {
+    404: _error("`curate_job_not_found`（解析が消えた。素材を送り直す）")
+}
+# 素材のファイルを multipart で受ける本文
+_FILES_BODY = {
+    "requestBody": {
+        "required": True,
+        "content": {
+            "multipart/form-data": {
+                "schema": {
+                    "type": "object",
+                    "required": ["files"],
+                    "properties": {
+                        "files": {"type": "array", "items": {"type": "string", "format": "binary"}}
+                    },
+                }
+            }
+        },
+    }
+}
 _DESIGN_CAPTION = "落ち着いた低めの男性の声。ゆっくり穏やかに話す。"
 _CREATE_EXAMPLES: dict[str, Example] = {
     "takes": {
@@ -284,6 +312,7 @@ class CuratedSpeaker(BaseModel):
 
 
 class CuratedPiece(BaseModel):
+    index: int = Field(description="候補の番号（`POST /curate` の `candidates` の `index`）")
     file: str = Field(description="切り出したファイル")
     start: float = Field(description="ファイルの中の始まり（秒）")
     end: float = Field(description="ファイルの中の終わり（秒）")
@@ -302,6 +331,71 @@ class CurateReport(BaseModel):
 class CurateResponse(BaseModel):
     profile: ProfileItem = Field(description="作った声")
     report: CurateReport = Field(description="どの区間を選んだか")
+
+
+class CurateSource(BaseModel):
+    name: str = Field(description="ファイル名")
+    offset: float = Field(description="流れの中での始まり（秒）")
+    seconds: float = Field(description="長さ（秒）")
+
+
+class CurateSegment(BaseModel):
+    start: float = Field(description="始まり（流れの秒）")
+    end: float = Field(description="終わり（流れの秒）")
+    speaker: int = Field(description="話者分離が付けた番号")
+
+
+class CurateCandidate(BaseModel):
+    index: int = Field(description="番号。`POST /curate/{job_id}/profile` の `pieces` に渡す")
+    file: int = Field(description="`files` の何番目のファイルか")
+    start: float = Field(description="始まり（流れの秒）")
+    end: float = Field(description="終わり（流れの秒）")
+    snr_db: float = Field(description="隙間の音と比べた S/N（dB）")
+    loudness_db: float | None = Field(description="声の大きさ（dBFS）")
+    pitch_hz: float | None = Field(description="声の高さ（F0 の中央値）。測れなければ null")
+    brightness_hz: float | None = Field(description="声の明るさ（スペクトルの重心）")
+    deviation: float | None = Field(
+        description="ふだんの声からの離れ。大きいほど張り上げた・特徴的な声。"
+        "S/N が低すぎて自動では使わない区間は null"
+    )
+
+
+class CurateEnvelope(BaseModel):
+    step: float = Field(description="1点の秒数")
+    levels: list[int] = Field(description="音の大きさ（0〜100。0 が -60 dBFS 以下、100 が 0 dBFS）")
+
+
+class CurateLimits(BaseModel):
+    min_seconds: float = Field(description="参照音声の声の長さの下限（秒）")
+    target_seconds: float = Field(description="自動で選ぶときに集める長さ（秒）")
+    max_seconds: float = Field(description="参照音声の声の長さの上限（秒）")
+
+
+class CurateAnalysisResponse(BaseModel):
+    job_id: str = Field(description="解析の ID。区間を選んで声を作るときに使う")
+    files: list[CurateSource] = Field(
+        description="送った順の素材。ファイルの間に無音を挟んで1本の流れにつないである"
+    )
+    truncated: bool = Field(description="長すぎるので後ろを使わなかった")
+    speakers: list[CuratedSpeaker] = Field(description="話す長さの多い順")
+    segments: list[CurateSegment] = Field(description="話者分離の区間（全員）")
+    candidates: list[CurateCandidate] = Field(
+        description="いちばん多く話す人だけが話している区間（流れの順）"
+    )
+    preselected: list[int] = Field(
+        description="自動で選ぶ見込みの候補の番号。雑音を除いた結果で入れ替わることがある"
+    )
+    envelope: CurateEnvelope = Field(description="素材全体の音の大きさ")
+    limits: CurateLimits = Field(description="参照音声の声の長さの決まり")
+
+
+class CurateProfileBody(BaseModel):
+    name: ProfileName = Field(description="声の名前")
+    caption: Caption = Field(default="", description="話し方の指示")
+    pieces: list[int] | None = Field(
+        default=None,
+        description="使う候補の番号。省くか null なら自動で選ぶ（`POST /profiles/curate` と同じ）",
+    )
 
 
 class ProfilesResponse(BaseModel):
@@ -380,8 +474,14 @@ class PatchProfileBody(BaseModel):
         return self
 
 
-def data_router(data_root: Path, synthesize: Synthesize, curate: Curate) -> APIRouter:
+def data_router(
+    data_root: Path,
+    synthesize: Synthesize,
+    curate_analyze: CurateAnalyze,
+    curate_render: CurateRender,
+) -> APIRouter:
     router = APIRouter()
+    curate_jobs = CurateJobs()
     dict_path = data_root / reading.DICT_FILENAME
     styles = StyleStore(data_root / STYLES_FILENAME)
     summary_prompt = SummaryPrompt(data_root)
@@ -636,25 +736,7 @@ def data_router(data_root: Path, synthesize: Synthesize, curate: Curate) -> APIR
         response_model=CurateResponse,
         summary="雑多な音声ファイルから声を作る",
         tags=["声"],
-        openapi_extra={
-            "requestBody": {
-                "required": True,
-                "content": {
-                    "multipart/form-data": {
-                        "schema": {
-                            "type": "object",
-                            "required": ["files"],
-                            "properties": {
-                                "files": {
-                                    "type": "array",
-                                    "items": {"type": "string", "format": "binary"},
-                                }
-                            },
-                        }
-                    }
-                },
-            }
-        },
+        openapi_extra=_FILES_BODY,
         responses={
             400: _error("`invalid_audio`（ファイルが無い・読めない）"),
             413: _error(f"`body_too_large`（{CURATE_MAX_BYTES // 1024**3}GB まで）"),
@@ -669,25 +751,18 @@ def data_router(data_root: Path, synthesize: Synthesize, curate: Curate) -> APIR
     ):
         """`files` に音声・動画のファイルをいくつでも送る（形式は ffmpeg が読めるもの）。
 
-        いちばん多く話す人の声から、BGM や雑音の少ない区間を合わせて 20 秒ほど選び、雑音を
-        除いてつなぐ。ファイルをまたいでも同じ人は同じ人とみなす（全体で4人まで）。
-        1時間の素材で数分かかり、その間も読み上げは合間に割り込む。使用中の声がまだ無ければ、
-        作った声を使用中にする。
+        いちばん多く話す人の声から、BGM や雑音が少なく、その人のふだんの話し方に近い区間を
+        合わせて 20 秒ほど選び、雑音を除いてつなぐ。ファイルをまたいでも同じ人は同じ人と
+        みなす（全体で4人まで）。1時間の素材で数分かかり、その間も読み上げは合間に割り込む。
+        使用中の声がまだ無ければ、作った声を使用中にする。区間を自分で選ぶなら `POST /curate`。
         """
-        if declares_too_large(request, CURATE_MAX_BYTES):
-            return _fail(413, "body_too_large")
-        async with request.form(max_files=CURATE_MAX_FILES) as form:
-            uploads = [f for f in form.getlist("files") if isinstance(f, UploadFile)]
-            if not uploads:
-                return _fail(400, "invalid_audio", "files is empty")
-            with tempfile.TemporaryDirectory() as directory:
-                files = []
-                for index, upload in enumerate(uploads):
-                    # 送られた名前はパスに使わない（../ で外へ出られる）
-                    path = Path(directory) / str(index)
-                    await asyncio.to_thread(_save_upload, upload, path)
-                    files.append((upload.filename or f"{index + 1} 本目", path))
-                outcome = await curate(files)
+        with tempfile.TemporaryDirectory() as directory:
+            files = await _receive_files(request, Path(directory))
+            analysis = await curate_analyze(files, Path(directory))
+            outcome = await curate_render(analysis, None)
+        return await _create_curated(name, caption, outcome)
+
+    async def _create_curated(name: str, caption: str, outcome: Outcome) -> dict:
         created = await asyncio.to_thread(
             profiles.create,
             name=name,
@@ -696,6 +771,103 @@ def data_router(data_root: Path, synthesize: Synthesize, curate: Curate) -> APIR
             write_reference=lambda path: write_mono(path, outcome.samples, outcome.sample_rate),
         )
         return {"profile": created.describe(), "report": outcome.report}
+
+    @router.post(
+        "/curate",
+        status_code=201,
+        response_model=CurateAnalysisResponse,
+        summary="素材を解析して区間の候補を出す",
+        tags=["声"],
+        openapi_extra=_FILES_BODY,
+        responses={
+            400: _error("`invalid_audio`（ファイルが無い・読めない）"),
+            413: _error(f"`body_too_large`（{CURATE_MAX_BYTES // 1024**3}GB まで）"),
+            422: _error("`too_little_speech`（声が無い）"),
+            503: _error("`ffmpeg_missing`、またはモデルを使えない"),
+        },
+    )
+    async def analyze_curate(request: Request):
+        """`POST /profiles/curate` を2段に分けた前半。区間を自分で選ぶときに使う。
+
+        `files` の素材から、いちばん多く話す人だけが話している区間を候補として返す。候補を
+        `GET /curate/{job_id}/audio` で聴き、`POST /curate/{job_id}/profile` に番号を渡して声を作る。
+        解析は最後に使ってから1時間か、新しい解析が3つを超えると消える。
+        """
+        directory = tempfile.TemporaryDirectory(prefix="pairvoice-curate-")
+        try:
+            files = await _receive_files(request, Path(directory.name))
+            analysis = await curate_analyze(files, Path(directory.name))
+            described = await asyncio.to_thread(curate.describe, analysis)
+        except BaseException:
+            directory.cleanup()
+            raise
+        return {"job_id": curate_jobs.add(analysis, directory), **described}
+
+    @router.get(
+        "/curate/{job_id}/audio",
+        response_class=Response,
+        summary="素材の一部を聴く",
+        tags=["声"],
+        responses={
+            200: {"content": {"audio/wav": {}}, "description": "48kHz モノラルの wav"},
+            **_CURATE_JOB_NOT_FOUND,
+        },
+    )
+    def curate_audio(
+        job_id: str,
+        start: Annotated[float, Query(ge=0, description="始まり（流れの秒）")],
+        end: Annotated[float, Query(gt=0, description="終わり（流れの秒）")],
+    ):
+        """雑音を除く前の元の音（声の大きいチャンネル）。一度に60秒まで。"""
+        analysis = curate_jobs.get(job_id)
+        samples = curate.excerpt(analysis.material, start, end)
+        return Response(mono_wav(samples, curate.OUTPUT_RATE), media_type="audio/wav")
+
+    @router.post(
+        "/curate/{job_id}/profile",
+        status_code=201,
+        response_model=CurateResponse,
+        summary="選んだ区間から声を作る",
+        tags=["声"],
+        responses={
+            **_CURATE_JOB_NOT_FOUND,
+            400: _error("`invalid_selection`（番号が無い・重なる・長さが足りない・長すぎる）"),
+            422: _error("`too_little_speech`（自動で選んだとき、きれいな声が足りない）"),
+            503: _error("モデルを使えない"),
+        },
+    )
+    async def create_curated_profile(job_id: str, body: CurateProfileBody):
+        """選んだ区間の雑音を除いてつなぐ。解析は残るので、選び直して何度でも作れる。"""
+        analysis = curate_jobs.get(job_id)
+        outcome = await curate_render(analysis, body.pieces)
+        return await _create_curated(body.name, body.caption, outcome)
+
+    @router.delete(
+        "/curate/{job_id}",
+        summary="解析を消す",
+        tags=["声"],
+        responses=_CURATE_JOB_NOT_FOUND,
+    )
+    def delete_curate(job_id: str) -> Ok:
+        """デコードした素材を消す。消さなくても1時間で消える。"""
+        curate_jobs.remove(job_id)
+        return Ok()
+
+    async def _receive_files(request: Request, directory: Path) -> list[tuple[str, Path]]:
+        """multipart の `files` を directory に書き、(送られた名前, パス) を返す。"""
+        if declares_too_large(request, CURATE_MAX_BYTES):
+            raise BodyTooLarge
+        async with request.form(max_files=CURATE_MAX_FILES) as form:
+            uploads = [f for f in form.getlist("files") if isinstance(f, UploadFile)]
+            if not uploads:
+                raise InvalidAudio("files is empty")
+            files = []
+            for index, upload in enumerate(uploads):
+                # 送られた名前はパスに使わない（../ で外へ出られる）
+                path = directory / f"upload-{index}"
+                await asyncio.to_thread(_save_upload, upload, path)
+                files.append((upload.filename or f"{index + 1} 本目", path))
+        return files
 
     @router.post(
         "/profiles/random",

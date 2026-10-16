@@ -8,7 +8,7 @@ type Props = {
   accept: string
   multiple?: boolean
   // 選んだ後に空へ戻すには input を作り直すしかない（value を書き換えられない）。変えると作り直す
-  resetKey: number
+  resetKey?: number
   summary: string
   ariaLabel?: string
   onPick: (files: File[]) => void

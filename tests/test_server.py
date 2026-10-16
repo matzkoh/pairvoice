@@ -630,6 +630,14 @@ def test_openapi_documents_version_and_every_field():
     assert undocumented == []
     assert {"404", "500", "503"} <= spec["paths"]["/api/speak"]["post"]["responses"].keys()
 
+    # 本文を自分で読むエンドポイントは、受ける形を手で書く
+    def body(path):
+        return spec["paths"][path]["post"]["requestBody"]["content"].keys()
+
+    assert list(body("/api/profiles/upload")) == ["audio/wav"]
+    assert list(body("/api/profiles/curate")) == ["multipart/form-data"]
+    assert list(body("/api/curate")) == ["multipart/form-data"]
+
 
 def test_restart_answers_before_asking_launchd(monkeypatch):
     calls = []

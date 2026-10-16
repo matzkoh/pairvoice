@@ -10,7 +10,8 @@ from fastapi import FastAPI, Request
 from fastapi.responses import JSONResponse
 from pydantic import BaseModel, Field
 
-from .curate import FfmpegMissing, InvalidAudio, TooLittleSpeech
+from .curate import FfmpegMissing, InvalidAudio, InvalidSelection, TooLittleSpeech
+from .curate_jobs import CurateJobNotFound
 from .history import InvalidVersion, VersionNotFound
 from .lifecycle import Superseded
 from .narration import NoJapaneseSummary, NothingToSay
@@ -19,6 +20,10 @@ from .prompt import PromptMissing
 from .styles import StyleInvalid, StyleNotFound, StyleRejected
 from .tts import AudioNotFound
 from .wav import WavFormatError
+
+
+class BodyTooLarge(Exception):
+    """本文が上限を超える（申告の長さで判断する）。"""
 
 
 class ErrorResponse(BaseModel):
@@ -56,6 +61,9 @@ _ERRORS: dict[type[Exception], tuple[int, str, bool]] = {
     InvalidAudio: (400, "invalid_audio", True),
     TooLittleSpeech: (422, "too_little_speech", True),
     FfmpegMissing: (503, "ffmpeg_missing", True),
+    InvalidSelection: (400, "invalid_selection", True),
+    CurateJobNotFound: (404, "curate_job_not_found", False),
+    BodyTooLarge: (413, "body_too_large", False),
 }
 
 

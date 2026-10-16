@@ -1,16 +1,31 @@
 /** @vitest-environment jsdom */
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query'
 import { act, cleanup, fireEvent, render, screen } from '@testing-library/react'
-import { afterEach, expect, it, vi } from 'vitest'
+import { afterEach, beforeAll, expect, it, vi } from 'vitest'
 
-import { apiSendForm } from '@/lib/api'
-import type { CurateResponse } from '@/lib/api-types'
+import { ApiError, apiSend, apiSendForm } from '@/lib/api'
+import type { CurateAnalysis, CurateCandidate, CurateResponse } from '@/lib/api-types'
 
 import { CurateProfile } from './CurateProfile'
 
 vi.mock('@/lib/api', async (importOriginal) => {
   const actual = await importOriginal<typeof import('@/lib/api')>()
-  return { ...actual, apiSendForm: vi.fn() }
+  return { ...actual, apiSendForm: vi.fn(), apiSend: vi.fn() }
+})
+
+beforeAll(() => {
+  // jsdom には無い
+  globalThis.ResizeObserver ??= class {
+    observe() {}
+    unobserve() {}
+    disconnect() {}
+  }
+  HTMLCanvasElement.prototype.getContext = vi.fn(() => null)
+  // タイムラインは見えている幅の分だけ区間を描く。jsdom は幅が 0 なので、画面ほどの幅にする
+  Object.defineProperty(HTMLElement.prototype, 'clientWidth', {
+    configurable: true,
+    get: () => 1000,
+  })
 })
 
 afterEach(() => {
@@ -18,10 +33,44 @@ afterEach(() => {
   vi.clearAllMocks()
 })
 
+function candidate(index: number, start: number, end: number): CurateCandidate {
+  return {
+    index,
+    file: 0,
+    start,
+    end,
+    snr_db: 20,
+    loudness_db: -25,
+    pitch_hz: 260,
+    brightness_hz: 1400,
+    deviation: 0.5,
+  }
+}
+
+const ANALYSIS: CurateAnalysis = {
+  job_id: 'job1',
+  files: [{ name: 'ドラマ.mp3', offset: 0, seconds: 120 }],
+  truncated: false,
+  speakers: [
+    { speaker: 0, seconds: 90, chosen: true },
+    { speaker: 1, seconds: 30, chosen: false },
+  ],
+  segments: [{ start: 1, end: 60, speaker: 0 }],
+  candidates: [
+    candidate(0, 1, 8),
+    candidate(1, 10, 16),
+    candidate(2, 20, 27),
+    candidate(3, 75, 80),
+  ],
+  preselected: [0, 1, 2],
+  envelope: { step: 0.01, levels: [0, 50, 100] },
+  limits: { min_seconds: 6, target_seconds: 20, max_seconds: 28 },
+}
+
 const RESPONSE: CurateResponse = {
   profile: {
     id: 'p-c',
-    name: '対談',
+    name: 'ドラマ',
     caption: '',
     source: 'curate',
     created_at: '1',
@@ -30,15 +79,12 @@ const RESPONSE: CurateResponse = {
     order: 'random',
   },
   report: {
-    files: [{ name: '対談.m4a', seconds: 3600 }],
+    files: [{ name: 'ドラマ.mp3', seconds: 120 }],
     truncated: false,
-    speakers: [
-      { speaker: 0, seconds: 1800, chosen: true },
-      { speaker: 1, seconds: 600, chosen: false },
-    ],
-    candidates: 120,
-    seconds: 19.5,
-    pieces: [{ file: '対談.m4a', start: 75.2, end: 81.0, snr_db: 21.3 }],
+    speakers: [{ speaker: 0, seconds: 90, chosen: true }],
+    candidates: 4,
+    seconds: 13,
+    pieces: [{ index: 1, file: 'ドラマ.mp3', start: 75.2, end: 81.0, snr_db: 21.3 }],
   },
 }
 
@@ -58,43 +104,121 @@ function pick(...names: string[]) {
   fireEvent.change(screen.getByLabelText('素材のファイル'), { target: { files } })
 }
 
-it('選んだファイルをすべて送り、使った区間を見せてから開ける', async () => {
-  vi.mocked(apiSendForm).mockResolvedValue(RESPONSE)
-  const { onCreated } = renderForm()
+async function analyze() {
+  await act(async () => {
+    fireEvent.click(screen.getByRole('button', { name: '解析する' }))
+  })
+}
 
-  pick('対談.m4a', '配信.mp4')
+function clip(start: string) {
+  return screen.getByRole('button', { name: new RegExp(`^区間 ${start}〜`) })
+}
+
+it('解析した素材を送り、自動の見込みを選んだ状態で並べる', async () => {
+  vi.mocked(apiSendForm).mockResolvedValue(ANALYSIS)
+  renderForm()
+
+  pick('ドラマ.mp3', '続き.mp4')
+  await analyze()
+
+  const [path, form] = vi.mocked(apiSendForm).mock.calls[0] ?? []
+  expect(path).toBe('/curate')
+  const sent = form?.getAll('files').map((f) => (f instanceof File ? f.name : f))
+  expect(sent).toEqual(['ドラマ.mp3', '続き.mp4'])
+  expect(clip('0:01').getAttribute('aria-pressed')).toBe('true')
+  expect(clip('1:15').getAttribute('aria-pressed')).toBe('false')
+  expect(screen.getByText(/3 区間・20.0 秒/)).toBeTruthy()
   // 名前は最初のファイルから拡張子を除いて埋める
-  expect(screen.getByLabelText<HTMLInputElement>('名前').value).toBe('対談')
+  expect(screen.getByLabelText<HTMLInputElement>('名前').value).toBe('ドラマ')
+})
+
+it('自動で選んだ区間で作り、作った内訳を見せてから開ける', async () => {
+  vi.mocked(apiSendForm).mockResolvedValue(ANALYSIS)
+  vi.mocked(apiSend).mockResolvedValue(RESPONSE)
+  const { onCreated } = renderForm()
+  pick('ドラマ.mp3')
+  await analyze()
+
   await act(async () => {
     fireEvent.click(screen.getByRole('button', { name: 'プロファイルを作る' }))
   })
 
-  const [path, form] = vi.mocked(apiSendForm).mock.calls[0] ?? []
-  expect(path).toBe('/profiles/curate?name=%E5%AF%BE%E8%AB%87&caption=')
-  const sent = form?.getAll('files').map((f) => (f instanceof File ? f.name : f))
-  expect(sent).toEqual(['対談.m4a', '配信.mp4'])
-  // 内訳を見せてから、開くのは押したとき
+  expect(vi.mocked(apiSend).mock.calls[0]).toEqual([
+    '/curate/job1/profile',
+    'POST',
+    { name: 'ドラマ', caption: '', pieces: [0, 1, 2] },
+    { allowNotFound: true },
+  ])
+  expect(screen.getByText(/1 区間（候補 4 区間）から、13 秒の声/)).toBeTruthy()
+  expect(screen.getByText(/ドラマ.mp3 1:15〜1:21・S\/N 21.3 dB/)).toBeTruthy()
   expect(onCreated).not.toHaveBeenCalled()
-  expect(screen.getByText(/1 区間（候補 120 区間）から、19.5 秒の声/)).toBeTruthy()
-  expect(screen.getByText(/全体の 75%/)).toBeTruthy()
-  expect(screen.getByText(/対談.m4a 1:15〜1:21・S\/N 21.3 dB/)).toBeTruthy()
-  fireEvent.click(screen.getByRole('button', { name: '「対談」を開く' }))
+  fireEvent.click(screen.getByRole('button', { name: '「ドラマ」を開く' }))
   expect(onCreated).toHaveBeenCalledWith('p-c')
 })
 
-it('作れなければ理由を知らせ、選んだファイルを残す', async () => {
-  vi.mocked(apiSendForm).mockRejectedValue(new Error('きれいな声が 3.0 秒しか見つかりません'))
-  const { onStatus, onCreated } = renderForm()
+it('クリックで選び直した区間の番号を送る', async () => {
+  vi.mocked(apiSendForm).mockResolvedValue(ANALYSIS)
+  vi.mocked(apiSend).mockResolvedValue(RESPONSE)
+  renderForm()
+  pick('ドラマ.mp3')
+  await analyze()
 
-  pick('短い.wav')
+  fireEvent.click(clip('0:20'))
+  fireEvent.click(clip('1:15'))
   await act(async () => {
     fireEvent.click(screen.getByRole('button', { name: 'プロファイルを作る' }))
   })
 
+  expect(vi.mocked(apiSend).mock.calls[0]?.[2]).toEqual({
+    name: 'ドラマ',
+    caption: '',
+    pieces: [0, 1, 3],
+  })
+})
+
+it('長さが足りなければ作れず、自動の選び方に戻せる', async () => {
+  vi.mocked(apiSendForm).mockResolvedValue(ANALYSIS)
+  renderForm()
+  pick('ドラマ.mp3')
+  await analyze()
+
+  fireEvent.click(screen.getByRole('button', { name: 'すべて外す' }))
+  expect(screen.getByText(/6 秒以上選んでください/)).toBeTruthy()
+  expect(
+    screen.getByRole<HTMLButtonElement>('button', { name: 'プロファイルを作る' }).disabled,
+  ).toBe(true)
+
+  fireEvent.click(screen.getByRole('button', { name: '自動の選び方に戻す' }))
+  expect(clip('0:01').getAttribute('aria-pressed')).toBe('true')
+})
+
+it('解析が消えていたら、解析し直すよう知らせる', async () => {
+  vi.mocked(apiSendForm).mockResolvedValue(ANALYSIS)
+  vi.mocked(apiSend).mockRejectedValue(new ApiError(404, '{"error":"curate_job_not_found"}'))
+  const { onStatus } = renderForm()
+  pick('ドラマ.mp3')
+  await analyze()
+
+  await act(async () => {
+    fireEvent.click(screen.getByRole('button', { name: 'プロファイルを作る' }))
+  })
+
+  expect(onStatus).toHaveBeenCalledWith(
+    expect.objectContaining({ message: expect.stringMatching(/もう一度解析/), isError: true }),
+  )
+  expect(screen.queryByRole('region', { name: '区間を選ぶ' })).toBeNull()
+})
+
+it('解析できなければ理由を知らせ、選んだファイルを残す', async () => {
+  vi.mocked(apiSendForm).mockRejectedValue(new Error('声が見つかりません'))
+  const { onStatus } = renderForm()
+
+  pick('短い.wav')
+  await analyze()
+
   expect(onStatus).toHaveBeenCalledWith({
-    message: '作れませんでした: きれいな声が 3.0 秒しか見つかりません',
+    message: '解析できませんでした: 声が見つかりません',
     isError: true,
   })
-  expect(onCreated).not.toHaveBeenCalled()
   expect(screen.getByText(/短い.wav/)).toBeTruthy()
 })

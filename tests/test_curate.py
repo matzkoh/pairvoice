@@ -12,15 +12,18 @@ from pairvoice.curate import (
     OUTPUT_RATE,
     CurateError,
     InvalidAudio,
+    InvalidSelection,
     Material,
     Segment,
     Source,
     TooLittleSpeech,
-    build,
+    analyze,
     decode,
     find_pieces,
     frame_power,
+    measure_voice,
     merge_segments,
+    render,
 )
 from pairvoice.wav import write_mono
 from tests.fakes import FakeCurate
@@ -47,7 +50,16 @@ def material(plan, *, right=None, **kwargs):
     return Material(audio16, audio48, [Source("a.wav", 0.0, len(audio16) / DIARIZE_RATE)])
 
 
-async def run(material, backend=None, enhance=None):
+def heads(*voice_starts):
+    """声の始まりから、参照音声の区間の頭（静かな所へ EDGE_PAD_SECONDS 寄せた所）。"""
+    return [t - curate.EDGE_PAD_SECONDS for t in voice_starts]
+
+
+async def offload(fn, *args):
+    return fn(*args)
+
+
+async def run_analyze(material, backend=None):
     backend = backend or FakeCurate()
     state = None
 
@@ -56,13 +68,27 @@ async def run(material, backend=None, enhance=None):
         segments, state = backend.diarize(chunk, state)
         return segments
 
+    return await analyze(material, diarize, offload)
+
+
+async def run_render(analysis, selection, backend=None):
+    backend = backend or FakeCurate()
+
+    async def enhance(samples):
+        return backend.enhance(samples)
+
+    return await render(analysis, selection, enhance, offload)
+
+
+async def run(material, backend=None, enhance=None):
+    """素材から自動で作る（POST /profiles/curate と同じ道筋）。"""
+    backend = backend or FakeCurate()
+    analysis = await run_analyze(material, backend)
+
     async def enhance_(samples):
         return (enhance or backend.enhance)(samples)
 
-    async def offload(fn, *args):
-        return fn(*args)
-
-    return await build(material, diarize, enhance_, offload)
+    return await render(analysis, None, enhance_, offload)
 
 
 def test_merge_segments_joins_across_chunks_per_speaker():
@@ -107,7 +133,7 @@ async def test_build_prefers_main_speaker_without_background():
     starts = [p["start"] for p in report["pieces"]]
     # 背景音の大きい 32・38 秒の区間より、静かな区間を選ぶ。18 秒では TARGET_SECONDS に
     # 届かないので、MAX_REFERENCE_SECONDS に収まる4つ目も足す
-    assert starts == pytest.approx([1.0, 10.0, 17.0, 24.0], abs=0.05)
+    assert starts == pytest.approx(heads(1.0, 10.0, 17.0, 24.0), abs=0.05)
     assert curate.TARGET_SECONDS <= report["seconds"] <= curate.MAX_REFERENCE_SECONDS
     assert outcome.sample_rate == OUTPUT_RATE
     assert np.abs(outcome.samples).max() <= 1.0
@@ -122,7 +148,9 @@ async def test_build_skips_clipped_pieces():
     m = material(plan)
     m.audio48 = np.clip(m.audio48, -1, 1)
     outcome = await run(m)
-    assert [p["start"] for p in outcome.report["pieces"]] == pytest.approx([1.0, 15.0], abs=0.05)
+    assert [p["start"] for p in outcome.report["pieces"]] == pytest.approx(
+        heads(1.0, 15.0), abs=0.05
+    )
 
 
 async def test_build_refuses_when_clean_speech_is_too_short():
@@ -137,12 +165,12 @@ async def test_build_refuses_without_speech():
     assert isinstance(raised.value, TooLittleSpeech)
 
 
-async def test_build_stops_enhancing_once_enough_clean_pieces():
-    # 6 秒の区間が 12 個ある。良い区間が TARGET_SECONDS の2倍集まれば残りは除かない
+async def test_build_stops_enhancing_once_enough_pieces():
+    # 6 秒の区間が 12 個ある。TARGET_SECONDS に届けば残りは除かない
     plan = [(1 + 7 * k, 7 + 7 * k, 0.5, 220) for k in range(12)]
     backend = FakeCurate()
     await run(material(plan), backend)
-    assert backend.enhance_calls == 7
+    assert backend.enhance_calls == 4
 
 
 @needs_ffmpeg
@@ -280,8 +308,42 @@ def test_snap_edges_moves_cuts_into_the_nearest_quiet():
     audio = synth([(2.0, 6.0, 0.5, 220)], OUTPUT_RATE, noise=0.0001)
     piece = curate.Piece(2.3, 5.7, 40.0, min_start=1.8, max_end=6.2)
     start, end = curate.snap_edges(piece, audio, 0.0)
-    assert start == pytest.approx(1.99, abs=0.02)
-    assert end == pytest.approx(6.0, abs=0.02)
+    # 声の際（2.0・6.0 秒）からさらに EDGE_PAD_SECONDS、静かな所の中へ寄せる。際で切ると、
+    # つなぐときのフェードが言葉の頭と末尾にかかる
+    assert start == pytest.approx(2.0 - curate.EDGE_PAD_SECONDS, abs=0.02)
+    assert end == pytest.approx(6.0 + curate.EDGE_PAD_SECONDS, abs=0.02)
+
+
+class LateDiarizer(FakeCurate):
+    """区間の頭を 0.2 秒遅れて付ける。"""
+
+    def diarize(self, chunk, state):
+        segments, state = super().diarize(chunk, state)
+        return [Segment(s.start + 0.2, s.end, s.speaker) for s in segments], state
+
+
+def test_snap_edges_skips_a_gap_inside_a_word_for_the_real_pause():
+    # 声は 1.0〜1.3 秒と 1.36〜4.0 秒。1.3〜1.36 秒の短い静けさは言葉の中（破裂音の閉じなど）で、
+    # 話者分離が付けた 1.4 秒にはそちらが近いが、その前の 1.0 秒より前の間で切る
+    audio = synth([(1.0, 1.3, 0.5, 220), (1.36, 4.0, 0.5, 220)], OUTPUT_RATE, noise=0.0001)
+    piece = curate.Piece(1.4, 3.8, 40.0, min_start=0.5, max_end=4.5)
+    start, _ = curate.snap_edges(piece, audio, 0.0)
+    assert start == pytest.approx(1.0 - curate.EDGE_PAD_SECONDS, abs=0.02)
+
+
+def test_snap_edges_leaves_an_already_padded_cut():
+    # 解析でずらした区間を、雑音を除いた後にもう一度ずらしても動かない
+    audio = synth([(2.0, 6.0, 0.5, 220)], OUTPUT_RATE, noise=0.0001)
+    piece = curate.Piece(2.3, 5.7, 40.0, min_start=1.0, max_end=7.0)
+    piece.start, piece.end = curate.snap_edges(piece, audio, 0.0)
+    assert curate.snap_edges(piece, audio, 0.0) == pytest.approx((piece.start, piece.end))
+
+
+async def test_analysis_starts_candidates_before_the_first_word():
+    # 話者分離は声の頭より遅れて区間を付けることがある。タイムラインで聴く候補も、言葉の頭から始める
+    plan = [(1 + 7 * k, 6 + 7 * k, 0.4, 220) for k in range(4)]
+    analysis = await run_analyze(material(plan), LateDiarizer())
+    assert [p.start for p in analysis.pieces] == pytest.approx(heads(1, 8, 15, 22), abs=0.03)
 
 
 def test_snap_edges_stays_off_the_other_speaker():
@@ -305,3 +367,85 @@ async def test_build_fills_by_rank_even_when_one_piece_stands_out():
     outcome = await run(material(plan))
     assert len(outcome.report["pieces"]) == 4
     assert outcome.report["seconds"] >= curate.TARGET_SECONDS
+
+
+def test_measure_voice_reads_pitch_loudness_and_brightness():
+    t = np.arange(DIARIZE_RATE * 2) / DIARIZE_RATE
+    low = measure_voice((0.1 * np.sin(2 * np.pi * 220 * t)).astype(np.float32))
+    high = measure_voice((0.5 * np.sin(2 * np.pi * 440 * t)).astype(np.float32))
+    assert low is not None
+    assert high is not None
+    assert low.pitch_hz == pytest.approx(220, rel=0.03)
+    assert high.pitch_hz == pytest.approx(440, rel=0.03)
+    assert high.loudness_db - low.loudness_db == pytest.approx(14, abs=0.5)
+    assert high.brightness_hz > low.brightness_hz
+
+
+def test_measure_voice_leaves_noise_unpitched():
+    noise = np.random.default_rng(0).normal(0, 0.1, DIARIZE_RATE).astype(np.float32)
+    voice = measure_voice(noise)
+    assert voice is not None
+    assert voice.pitch_hz is None
+    assert measure_voice(np.zeros(100, np.float32)) is None
+
+
+async def test_build_skips_shouting_even_with_the_best_snr():
+    # ふだんの声（0.3・220Hz）が5区間、張り上げた声（0.9・440Hz）が2区間。張り上げた声は
+    # 背景音との差がいちばん大きいが、ふだんの声から外れるので後に回す
+    plan = [(1 + 7 * k, 6 + 7 * k, 0.4, 220) for k in range(5)]
+    plan += [(36, 41, 0.9, 440), (43, 48, 0.9, 440)]
+    analysis = await run_analyze(material(plan))
+    shouts = [i for i, p in enumerate(analysis.pieces) if p.start > 35]
+    assert all(analysis.pieces[i].background_snr > 50 for i in shouts)
+    assert set(analysis.ranked[-2:]) == set(shouts)
+    outcome = await run_render(analysis, None)
+    assert all(p["start"] < 35 for p in outcome.report["pieces"])
+
+
+async def test_render_uses_the_selection_and_keeps_the_analysis():
+    plan = [(1 + 7 * k, 6 + 7 * k, 0.4, 220) for k in range(5)]
+    analysis = await run_analyze(material(plan))
+    before = [(p.start, p.end, p.audio) for p in analysis.pieces]
+
+    outcome = await run_render(analysis, [3, 1])
+
+    assert [p["index"] for p in outcome.report["pieces"]] == [1, 3]
+    assert [p["start"] for p in outcome.report["pieces"]] == pytest.approx(heads(8, 22), abs=0.05)
+    assert [(p.start, p.end, p.audio) for p in analysis.pieces] == before
+    again = await run_render(analysis, [0, 4])
+    assert [p["index"] for p in again.report["pieces"]] == [0, 4]
+
+
+@pytest.mark.parametrize(
+    ("selection", "message"),
+    [([0, 0], "2度"), ([9], "番号"), ([0], "以上"), ([0, 1, 2, 3, 4, 5], "まで")],
+)
+async def test_render_refuses_a_bad_selection(selection, message):
+    plan = [(1 + 7 * k, 6 + 7 * k, 0.4, 220) for k in range(6)]
+    analysis = await run_analyze(material(plan))
+    with pytest.raises(InvalidSelection, match=message):
+        await run_render(analysis, selection)
+
+
+async def test_describe_lists_candidates_on_the_stream_timeline():
+    plan = [(1 + 7 * k, 6 + 7 * k, 0.4, 220) for k in range(5)]
+    analysis = await run_analyze(material(plan))
+    described = curate.describe(analysis)
+    assert [c["index"] for c in described["candidates"]] == list(range(5))
+    assert described["candidates"][0]["pitch_hz"] == pytest.approx(220, rel=0.03)
+    # 5 秒の区間を TARGET_SECONDS に届くまで（どれも同じ声なので、どの4つでも）
+    assert len(described["preselected"]) == 4
+    assert described["files"] == [{"name": "a.wav", "offset": 0.0, "seconds": 35.0}]
+    assert {s["speaker"] for s in described["segments"]} == {0}
+
+
+def test_envelope_and_excerpt():
+    m = material([(1, 2, 0.5, 220)])
+    shape = curate.envelope(frame_power(m.audio16))
+    step, levels = shape["step"], shape["levels"]
+    assert step == pytest.approx(curate.FRAME_SECONDS)
+    assert len(levels) == len(m.audio16) // (DIARIZE_RATE // 100)
+    assert max(levels[100:200]) > 80 > max(levels[:90])
+    clip = curate.excerpt(m, 0.5, 1.5)
+    assert len(clip) == OUTPUT_RATE
+    assert curate.excerpt(m, 5.0, 6.0).size == 0

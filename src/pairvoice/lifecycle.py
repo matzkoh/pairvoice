@@ -9,7 +9,6 @@ from __future__ import annotations
 import asyncio
 import contextlib
 import logging
-import tempfile
 import time
 from collections.abc import Callable
 from concurrent.futures import ThreadPoolExecutor
@@ -20,7 +19,7 @@ from typing import Protocol
 
 from . import curate, generations
 from .config import Config
-from .curate import Outcome
+from .curate import Analysis, Outcome
 from .player import Player
 
 _log = logging.getLogger(__name__)
@@ -538,11 +537,10 @@ class Engine:
         """wav を聞き取った文。合成した音声が原稿どおりに読めているかを確かめるのに使う。"""
         return await self._measure(self._stt, self._stt_backend.transcribe, path)
 
-    async def curate(self, files: list[tuple[str, Path]]) -> Outcome:
-        """(名前, パス) の素材から参照音声を作る。作れなければ curate.CurateError。
+    async def curate_analyze(self, files: list[tuple[str, Path]], directory: Path) -> Analysis:
+        """素材をデコードして話者を分け、区間を採点する。デコードした素材は directory に置く。
 
-        話者分離はチャンクごと、雑音除去は区間ごとに列に並べる。素材が長くても、その合間に
-        読み上げが割り込める。
+        話者分離はチャンクごとに列に並べる。素材が長くても、その合間に読み上げが割り込める。
         """
         state = None
 
@@ -553,12 +551,19 @@ class Engine:
             )
             return segments
 
+        material = await asyncio.to_thread(curate.decode, files, directory)
+        return await curate.analyze(material, diarize, asyncio.to_thread)
+
+    async def curate_render(self, analysis: Analysis, selection: list[int] | None) -> Outcome:
+        """解析した区間の雑音を除いてつなぐ。selection は区間の番号で、None なら自動で選ぶ。
+
+        雑音除去は区間ごとに列に並べる。
+        """
+
         async def enhance(samples):
             return await self._measure(self._curate, self._curate_backend.enhance, samples)
 
-        with tempfile.TemporaryDirectory() as directory:
-            material = await asyncio.to_thread(curate.decode, files, Path(directory))
-            return await curate.build(material, diarize, enhance, asyncio.to_thread)
+        return await curate.render(analysis, selection, enhance, asyncio.to_thread)
 
     async def warmup(self, respect_mute: bool = False) -> dict:
         if respect_mute:

@@ -9,6 +9,7 @@ import pytest
 
 import pairvoice.lifecycle as lifecycle_module
 from pairvoice.config import Config, LLMConfig, MuteConfig, TTSConfig
+from pairvoice.curate import EDGE_PAD_SECONDS
 from pairvoice.lifecycle import Engine, ModelUnavailable, MutedError, Superseded
 from pairvoice.mute import MuteController
 from pairvoice.wav import write_mono
@@ -733,10 +734,11 @@ async def test_curate_queues_each_chunk_and_ignores_mute(tmp_path):
     # 話者分離の1チャンク（60 秒）より長い素材
     write_mono(audio, synth([(1 + 7 * k, 7 + 7 * k, 0.5, 220) for k in range(10)], 16000), 16000)
 
-    outcome = await engine.curate([("a.wav", audio)])
+    analysis = await engine.curate_analyze([("a.wav", audio)], tmp_path)
+    outcome = await engine.curate_render(analysis, None)
 
-    # 6 秒の区間を TARGET_SECONDS に届くまで（4つ）選ぶ
-    assert outcome.report["seconds"] == pytest.approx(24, abs=0.3)
+    # 6 秒の区間を TARGET_SECONDS に届くまで（4つ）選ぶ。頭と末尾は静かな所へ寄せて伸びる
+    assert outcome.report["seconds"] == pytest.approx(4 * (6 + 2 * EDGE_PAD_SECONDS), abs=0.3)
     assert curate.load_calls == 1
     assert curate.diarize_calls == 2
     assert engine.health()["curate"]["state"] == "loaded"

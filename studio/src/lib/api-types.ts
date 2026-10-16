@@ -111,9 +111,38 @@ export type CurateReport = {
   speakers: { speaker: number; seconds: number; chosen: boolean }[]
   candidates: number
   seconds: number
-  pieces: { file: string; start: number; end: number; snr_db: number }[]
+  // index は CurateAnalysis の candidates の番号
+  pieces: { index: number; file: string; start: number; end: number; snr_db: number }[]
 }
 export type CurateResponse = { profile: ProfileItem; report: CurateReport }
+
+// POST /curate の候補。時刻はファイルを無音を挟んでつないだ流れの秒、file は files の番号
+export type CurateCandidate = {
+  index: number
+  file: number
+  start: number
+  end: number
+  snr_db: number
+  loudness_db: number | null
+  pitch_hz: number | null
+  brightness_hz: number | null
+  // ふだんの声からの離れ。null は S/N が低すぎて自動では使わない区間
+  deviation: number | null
+}
+
+// POST /curate の応答。job_id で区間を聴き、選んで声を作る
+export type CurateAnalysis = {
+  job_id: string
+  files: { name: string; offset: number; seconds: number }[]
+  truncated: boolean
+  speakers: { speaker: number; seconds: number; chosen: boolean }[]
+  segments: { start: number; end: number; speaker: number }[]
+  candidates: CurateCandidate[]
+  preselected: number[]
+  // levels は step 秒ごとの音の大きさ（0〜100）
+  envelope: { step: number; levels: number[] }
+  limits: { min_seconds: number; target_seconds: number; max_seconds: number }
+}
 
 // /synthesize が wav を作れたときの応答。鳴らさないのでミュートでは断られない
 export type SpeakResponse = { relative_path: string; duration: number }

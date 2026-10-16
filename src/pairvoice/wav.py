@@ -45,9 +45,16 @@ def concat_wavs(buffers: list[bytes], gap_seconds: float) -> bytes:
 def write_mono(path: Path, samples: np.ndarray, sample_rate: int) -> None:
     """-1〜1 の float を 16bit モノラルの wav に書く。"""
     path.parent.mkdir(parents=True, exist_ok=True)
+    path.write_bytes(mono_wav(samples, sample_rate))
+
+
+def mono_wav(samples: np.ndarray, sample_rate: int) -> bytes:
+    """-1〜1 の float を 16bit モノラルの wav のバイト列にする。"""
     pcm = (np.clip(samples, -1.0, 1.0) * 32767.0).astype("<i2")
-    with wave.open(str(path), "wb") as writer:
+    out = io.BytesIO()
+    with wave.open(out, "wb") as writer:
         writer.setnchannels(1)
         writer.setsampwidth(2)
         writer.setframerate(sample_rate)
         writer.writeframes(pcm.tobytes())
+    return out.getvalue()

@@ -8,7 +8,7 @@ import pytest
 from pairvoice.data_api import MASTER_STEPS, REFERENCE_TEXTS, TAKE_GAP_SECONDS
 from pairvoice.tts import ANCHOR_TEXT, SpeechResult, resolve_data_audio
 from pairvoice.wav import write_mono
-from tests.test_curate import needs_ffmpeg, synth
+from tests.test_curate import heads, needs_ffmpeg, synth
 from tests.test_engine import FakeTTS
 from tests.test_server import build
 
@@ -212,7 +212,7 @@ def test_curate_creates_profile_from_loudest_speaker(client, tmp_path):
     assert [f["name"] for f in report["files"]] == ["対談.wav", "配信.wav"]
     assert report["speakers"][0]["chosen"]
     assert [p["file"] for p in report["pieces"]] == ["対談.wav", "対談.wav", "配信.wav"]
-    assert [p["start"] for p in report["pieces"]] == pytest.approx([1.0, 10.0, 1.0], abs=0.05)
+    assert [p["start"] for p in report["pieces"]] == pytest.approx(heads(1.0, 10.0, 1.0), abs=0.05)
     audio = client.get(f"/profiles/{body['profile']['id']}/audio")
     with wave.open(io.BytesIO(audio.content)) as reader:
         assert reader.getframerate() == 48000
@@ -244,6 +244,66 @@ def test_curate_refuses_too_little_speech(client, tmp_path):
     assert response.status_code == 422
     assert response.json()["error"] == "too_little_speech"
     assert client.get("/profiles").json()["items"] == []
+
+
+def analyze_upload(client, files):
+    return client.post(
+        "/curate",
+        files=[("files", (filename, body, "application/octet-stream")) for filename, body in files],
+    )
+
+
+@needs_ffmpeg
+def test_curate_job_lists_candidates_and_builds_from_a_selection(client, tmp_path):
+    plan = [(1 + 7 * k, 6 + 7 * k, 0.5, 220) for k in range(5)]
+    analyzed = analyze_upload(client, [("ドラマ.wav", speech_wav(tmp_path, plan))])
+
+    assert analyzed.status_code == 201
+    job = analyzed.json()
+    assert job["files"][0]["name"] == "ドラマ.wav"
+    assert [c["index"] for c in job["candidates"]] == list(range(5))
+    assert len(job["preselected"]) == 4
+    assert job["envelope"]["levels"]
+    assert job["limits"]["max_seconds"] == 28.0
+
+    audio = client.get(f"/curate/{job['job_id']}/audio", params={"start": 1, "end": 3})
+    assert audio.headers["content-type"] == "audio/wav"
+    with wave.open(io.BytesIO(audio.content)) as reader:
+        assert reader.getnframes() == 2 * 48000
+
+    first = client.post(
+        f"/curate/{job['job_id']}/profile", json={"name": "選んだ声", "pieces": [4, 0]}
+    )
+    assert first.status_code == 201
+    assert [p["index"] for p in first.json()["report"]["pieces"]] == [0, 4]
+    assert first.json()["profile"]["source"] == "curate"
+    # 解析は残るので、自動でも作れる
+    auto = client.post(f"/curate/{job['job_id']}/profile", json={"name": "自動の声"})
+    assert len(auto.json()["report"]["pieces"]) == 4
+
+    assert client.delete(f"/curate/{job['job_id']}").json() == {"ok": True}
+    gone = client.post(f"/curate/{job['job_id']}/profile", json={"name": "x", "pieces": [0, 1]})
+    assert gone.status_code == 404
+    assert gone.json()["error"] == "curate_job_not_found"
+
+
+@needs_ffmpeg
+def test_curate_job_refuses_a_bad_selection(client, tmp_path):
+    plan = [(1 + 7 * k, 6 + 7 * k, 0.5, 220) for k in range(2)]
+    job = analyze_upload(client, [("a.wav", speech_wav(tmp_path, plan))]).json()
+
+    response = client.post(f"/curate/{job['job_id']}/profile", json={"name": "x", "pieces": [0]})
+
+    assert response.status_code == 400
+    assert response.json()["error"] == "invalid_selection"
+    assert client.get("/profiles").json()["items"] == []
+
+
+def test_curate_job_requires_files(client):
+    response = client.post("/curate", data={"other": "x"})
+
+    assert response.status_code == 400
+    assert response.json()["error"] == "invalid_audio"
 
 
 def test_create_from_takes_joins_with_silence(client, tmp_path):

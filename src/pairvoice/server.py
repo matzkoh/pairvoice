@@ -671,7 +671,9 @@ def create_app(engine: Engine) -> FastAPI:
             results.append(evaluation.judge(case, output, engine.config.eval.style))
         return {"summary": evaluation.format_summary(results), "results": results}
 
-    api.include_router(data_router(data_root, engine.synthesize, engine.curate))
+    api.include_router(
+        data_router(data_root, engine.synthesize, engine.curate_analyze, engine.curate_render)
+    )
     api.include_router(corpus_router(data_root))
     app.include_router(api, prefix=API_PREFIX)
     # 画面はどの道筋にも index.html を返すので、API のあとに足す
