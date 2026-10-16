@@ -50,7 +50,7 @@ function renderAt(path: string) {
 }
 
 it.each([
-  ['/', '/review'],
+  ['/', '/profiles'],
   ['/voice', '/profiles'],
   ['/caption', '/profiles'],
   ['/playground', '/profiles'],

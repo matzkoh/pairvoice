@@ -7,12 +7,12 @@ import { Route as promptRoute } from './routes/prompt'
 import { Route as reviewRoute } from './routes/review'
 import { Route as stylesRoute } from './routes/styles'
 
-// いちばん使う画面なので、ここを入口にする
+// サイドバーの先頭の画面を入口にする
 const indexRoute = createRoute({
   getParentRoute: () => rootRoute,
   path: '/',
   beforeLoad: () => {
-    throw redirect({ to: '/review' })
+    throw redirect({ to: '/profiles', search: {} })
   },
 })
 
