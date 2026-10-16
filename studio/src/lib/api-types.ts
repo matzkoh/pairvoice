@@ -162,6 +162,12 @@ export type CorpusItem = {
   audio_path?: string
   // 口調を使った声の ID（声ごとの口調より前の読み上げには無い）
   voice?: string | null
+  // voice の声のいまの名前。消した声は voice の ID のまま
+  voice_name?: string | null
+  // 合成に使ったスタイルの名前。指定が無ければ null
+  style?: string | null
+  // 要約に使ったモデル（記録し始める前の読み上げには無い）
+  summary_model?: string | null
   verdict: Exclude<Verdict, 'none'> | null
   ideal: string | null
   archived: boolean

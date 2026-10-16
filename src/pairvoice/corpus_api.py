@@ -39,6 +39,15 @@ class CorpusItem(BaseModel):
     voice: str | None = Field(
         default=None, description="口調を使った声の ID（0.8.0 より前の読み上げには無い）"
     )
+    voice_name: str | None = Field(
+        default=None, description="voice の声のいまの名前。消した声は voice の ID のまま"
+    )
+    style: str | None = Field(
+        default=None, description="合成に使ったスタイルの名前。指定が無ければ null"
+    )
+    summary_model: str | None = Field(
+        default=None, description="要約に使ったモデル（記録し始める前の読み上げには無い）"
+    )
     verdict: Literal["good", "bad"] | None = Field(description="レビュー。未レビューは null")
     ideal: str | None = Field(description="👎 に添えた理想の出力")
     archived: bool = Field(description="アーカイブ済みか")
@@ -115,6 +124,15 @@ def corpus_router(data_root: Path) -> APIRouter:
         page = corpus.corpus_page(
             data_root, limit, offset, since, since(None if active is None else active.id)
         )
+
+        @functools.cache
+        def voice_name(voice: str) -> str:
+            profile = profiles.get(voice)
+            return voice if profile is None else profile.name
+
+        for item in page["items"]:
+            voice = item.get("voice")
+            item["voice_name"] = voice_name(voice) if isinstance(voice, str) and voice else None
         return CorpusResponse.model_validate(page)
 
     @router.get("/corpus/counts", summary="読み上げの記録の件数", tags=["レビュー"])

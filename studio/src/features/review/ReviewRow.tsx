@@ -2,6 +2,7 @@ import { cn } from 'cn'
 import { Play } from 'lucide-react'
 import { type MouseEvent, type ReactNode, useEffect, useRef } from 'react'
 
+import { Badge } from '@/components/ui/badge'
 import { Button } from '@/components/ui/button'
 import { Input } from '@/components/ui/input'
 import { Kbd } from '@/components/ui/kbd'
@@ -90,6 +91,11 @@ export function ReviewRow({
         >
           {item.summary}
         </span>
+        {item.voice_name && (
+          <Badge variant="secondary" className="max-w-32 truncate" title={`声: ${item.voice_name}`}>
+            {item.voice_name}
+          </Badge>
+        )}
         {item.verdict && (
           <span
             className="flex-none text-xs"
@@ -180,6 +186,7 @@ function RowDetail({
         </div>
       )}
       {error && <p className="text-xs text-destructive">{error}</p>}
+      <RowMeta item={item} />
       <div>
         <div className="mb-1 text-xs text-muted-foreground">生成元テキスト</div>
         <div className="max-h-45 overflow-y-auto rounded-md bg-muted px-3 py-2 text-xs whitespace-pre-wrap text-muted-foreground">
@@ -187,6 +194,31 @@ function RowDetail({
         </div>
       </div>
     </div>
+  )
+}
+
+// 何で読み上げたか。記録の無い項目（古い読み上げ）は出さない
+function RowMeta({ item }: Pick<Props, 'item'>) {
+  const entries = [
+    { label: '声', value: item.voice_name, title: item.voice ?? undefined },
+    { label: 'スタイル', value: item.style ?? undefined },
+    // 置き場所（mlx-community/ など）は長いだけなので落とす
+    {
+      label: '要約モデル',
+      value: item.summary_model?.split('/').pop(),
+      title: item.summary_model ?? undefined,
+    },
+  ].filter((e) => e.value)
+  if (entries.length === 0) return null
+  return (
+    <dl className="flex flex-wrap gap-x-4 gap-y-1 text-xs">
+      {entries.map((e) => (
+        <div key={e.label} className="flex gap-1.5">
+          <dt className="text-muted-foreground">{e.label}</dt>
+          <dd title={e.title}>{e.value}</dd>
+        </div>
+      ))}
+    </dl>
   )
 }
 

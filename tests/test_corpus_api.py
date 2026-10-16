@@ -7,6 +7,7 @@ import pytest
 from pairvoice.corpus import corpus_time
 from pairvoice.history import VersionedText, version_time
 from tests.test_server import build
+from tests.test_tone import make_voice
 
 
 @pytest.fixture
@@ -46,6 +47,20 @@ def test_corpus_is_newest_first_with_latest_review(client, tmp_path):
         "こう言ってほしかった",
     )
     assert (body["items"][1]["verdict"], body["items"][1]["ideal"]) == (None, None)
+
+
+def test_corpus_names_the_voice_and_keeps_the_id_of_a_deleted_one(client, tmp_path):
+    voice = make_voice(tmp_path, "落ち着いた声")
+    write_jsonl(
+        tmp_path / "corpus.jsonl",
+        [entry("named", voice=voice.id), entry("deleted", voice="gone"), entry("none")],
+    )
+
+    items = by_id(client)
+
+    assert items["named"]["voice_name"] == "落ち着いた声"
+    assert items["deleted"]["voice_name"] == "gone"
+    assert items["none"]["voice_name"] is None
 
 
 def test_counts_match_the_review_filters(client, tmp_path):

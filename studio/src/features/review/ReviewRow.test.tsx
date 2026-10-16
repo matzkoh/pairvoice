@@ -194,3 +194,26 @@ it('理想の出力を送れなかったときは、先の投稿が返っても�
   )
   expect(screen.getByLabelText<HTMLInputElement>('理想の出力').value).toBe('AB')
 })
+
+it('閉じた行に声の名前を出し、開くとスタイルと要約モデルも出す', () => {
+  const row = item({
+    voice: 'v1',
+    voice_name: '落ち着いた声',
+    style: 'ささやき',
+    summary_model: 'mlx-community/gemma-4-e4b-it-8bit',
+  })
+  renderRow(row)
+  expect(screen.getByText('落ち着いた声')).toBeTruthy()
+  expect(screen.queryByText('ささやき')).toBeNull()
+
+  cleanup()
+  renderRow(row, { selected: true, expanded: true })
+  expect(screen.getByText('ささやき')).toBeTruthy()
+  expect(screen.getByText('gemma-4-e4b-it-8bit').title).toBe('mlx-community/gemma-4-e4b-it-8bit')
+})
+
+it('記録の無い古い読み上げには、声も読み上げの条件も出さない', () => {
+  renderRow(item({}), { selected: true, expanded: true })
+  expect(screen.queryByText('要約モデル')).toBeNull()
+  expect(screen.queryByText('声')).toBeNull()
+})

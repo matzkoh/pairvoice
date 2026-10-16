@@ -59,6 +59,8 @@ def test_speaks_the_summary_in_the_voice_whose_tone_it_used_and_records_it(data_
     assert record["summary"] == "やった、テスト全部通ったよ。"
     assert record["audio_path"] == "generations/x.wav"
     assert record["voice"] == voice.id
+    assert record["style"] == "ゆっくり"
+    assert record["summary_model"]
 
 
 def test_without_a_voice_yet_records_no_voice(data_root):
@@ -66,6 +68,7 @@ def test_without_a_voice_yet_records_no_voice(data_root):
 
     assert narrate(client).json()["voice"] is None
     assert "voice" not in corpus(data_root)[0]
+    assert "style" not in corpus(data_root)[0]
 
 
 def test_retries_until_the_summary_is_japanese(data_root):

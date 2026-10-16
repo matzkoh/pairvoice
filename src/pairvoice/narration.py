@@ -98,7 +98,9 @@ async def narrate(
             "input": text,
             "summary": summary,
             "audio_path": relative_path,
+            "summary_model": engine.config.llm.model,
             **({} if used_voice is None else {"voice": used_voice}),
+            **({} if style is None else {"style": style}),
         }
         await asyncio.to_thread(append_jsonl, data_root / CORPUS_FILENAME, [record])
     return NarrateResponse(
