@@ -5,15 +5,15 @@ description: pairvoice の常駐サーバーを操作するときに使う。任
 
 # pairvoice の API を叩く
 
-常駐サーバーは `http://127.0.0.1:17495` で待ち受け、API の仕様は `GET /openapi.json` が配る。道筋・引数・応答の形・エラーはこの仕様に従い、叩く前に該当箇所を読む。冒頭の `info.description` に全体の約束事（ミュート中の挙動、`voice` と `style` の選び方など）がある。
+常駐サーバーの接続先は `pairvoice url` が出し、API の仕様は `GET /openapi.json` が配る。道筋・引数・応答の形・エラーはこの仕様に従い、叩く前に該当箇所を読む。冒頭の `info.description` に全体の約束事（ミュート中の挙動、`voice` と `style` の選び方など）がある。
 
 ```bash
 # 道筋と要約の一覧
-curl -sf http://127.0.0.1:17495/openapi.json |
+curl -sf "$(pairvoice url)/openapi.json" |
   jq -r '.paths | to_entries[] | .key as $p | .value | to_entries[] | "\(.key|ascii_upcase) \($p)\t\(.value.summary)"'
 
 # 1つの道筋の詳細と、参照している型
-curl -sf http://127.0.0.1:17495/openapi.json | jq '.paths["/api/speak"], .components.schemas.SpeakRequest'
+curl -sf "$(pairvoice url)/openapi.json" | jq '.paths["/api/speak"], .components.schemas.SpeakRequest'
 ```
 
 応答が無ければ `pairvoice status` で常駐サーバーの状態を見る。

@@ -105,7 +105,7 @@ API なら、声の描写を渡すだけで1回でプロファイルにできる
 
 ```bash
 # 日本語の名前は URL に符号化して渡す（--url-query が符号化する。そのまま書くと 400 になる）
-curl -s http://127.0.0.1:17495/api/profiles/curate --url-query 'name=対談の声' \
+curl -s "$(pairvoice url)/api/profiles/curate" --url-query 'name=対談の声' \
   -F files=@対談.m4a -F files=@配信.mp4
 ```
 切り替えは次の読み上げから効き、再起動は要らない。
@@ -127,7 +127,7 @@ curl -s http://127.0.0.1:17495/api/profiles/curate --url-query 'name=対談の�
 - **スタイル**（`style`）: studio の「スタイル」画面で作る、caption とサンプラーの組の名前。プロファイルの caption の代わりに使う。変えられるのは速さ・テンション・抑揚の傾きまでで、声質（ささやき声など）は参照音声で決まるので、声質を変えたいときは `voice` で別のプロファイルを選ぶ
 
 ```bash
-curl -s http://127.0.0.1:17495/api/speak -H 'Content-Type: application/json' \
+curl -s "$(pairvoice url)/api/speak" -H 'Content-Type: application/json' \
   -d '{"text": "テスト", "voice": "落ち着いた声", "style": "ささやき"}'
 pairvoice say --voice 落ち着いた声 --style ささやき "テスト"
 ```
@@ -135,7 +135,7 @@ pairvoice say --voice 落ち着いた声 --style ささやき "テスト"
 `caption` はスタイルより優先する。鳴らさずに wav だけ作る `/api/synthesize` は、ミュートを見ず、`sampler` も受け付ける。
 作った wav は `/api/transcribe` に本文で送ると聞き取った文が返るので、原稿と比べて読み違いを確かめられる（聞き取りのモデルは初めて使うときに読み込む）。
 選べる名前は `GET /api/profiles` と `GET /api/styles` で引ける。
-API はすべて `/api` の下にあり、エンドポイントと項目は、常駐サーバーが動いている間 http://127.0.0.1:17495/docs で引ける。
+API はすべて `/api` の下にあり、エンドポイントと項目は、常駐サーバーが動いている間 `$(pairvoice url)/docs` で引ける。
 studio の画面でできること（プロンプト・辞書・スタイル・声の編集、読み上げのレビュー）と、CLI でできること（再起動・終了・studio の起動・`eval`）も、同じ API で行える。
 Claude Code の読み上げでは、環境変数 `PAIRVOICE_VOICE` と `PAIRVOICE_STYLE` で選ぶ（プロジェクトの `.claude/settings.json` の `env` に書けば、プロジェクトごとに変えられる）。
 
@@ -145,7 +145,7 @@ Claude Code の読み上げでは、環境変数 `PAIRVOICE_VOICE` と `PAIRVOIC
 識別子を読み上げてしまったり、知りたかった結果を落としたりすることがある。
 読み上げの履歴に印を付けておくと、それを材料に要約の指示と辞書を直せる。
 
-studio は常駐サーバーが `http://127.0.0.1:17495/` で配っている。メニューの「studio を開く」か `pairvoice studio` で開く。
+studio は常駐サーバーが根（`/`）で配っている。メニューの「studio を開く」か `pairvoice studio` で開く。
 
 | 画面 | できること |
 | --- | --- |
@@ -172,6 +172,7 @@ studio は常駐サーバーが `http://127.0.0.1:17495/` で配っている。�
 | `pairvoice warmup` | モデルを読み込み、終わるまで待つ（初回はダウンロードも） |
 | `pairvoice restart` | 常駐サーバーを再起動する（設定を変えたら要る） |
 | `pairvoice studio` | studio をブラウザで開く |
+| `pairvoice url` | 常駐サーバーの接続先（`http://127.0.0.1:<port>`）を出す。スクリプトからは `curl "$(pairvoice url)/api/health"` のように使う |
 | `pairvoice eval` | 要約の指示やモデルを規則で採点する（`--reviews` でレビューも使う、`--model` で別のモデルを試す） |
 
 「終了」で止めたサーバーは、ログインし直すか `launchctl kickstart gui/$(id -u)/local.pairvoice` で戻る。
@@ -191,6 +192,7 @@ studio は常駐サーバーが `http://127.0.0.1:17495/` で配っている。�
 
 | 表 | よく触る項目 |
 | --- | --- |
+| （最上位） | `port`（常駐サーバーが待ち受けるポート） |
 | `[llm]` | `model`（要約のモデル） |
 | `[tts]` | `model`（音声合成のモデル）、`output_max_age_days`（合成した wav を消すまでの日数。既定 7、0 で消さない） |
 | `[tts.profile]` | 最初の声を作るときだけ使う。`ref_audio`（取り込む wav）、`caption`（声の描写） |

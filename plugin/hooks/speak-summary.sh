@@ -16,8 +16,6 @@ set -u
 TMP_ROOT="${TMPDIR:-/tmp}"
 STATE_DIR="${CLAUDE_SPEAK_STATE_DIR:-${TMP_ROOT%/}/claude-speak-state}"
 LOG_FILE="${CLAUDE_SPEAK_LOG_FILE:-$HOME/Library/Logs/speak-summary.log}"
-PAIRVOICE_API="http://127.0.0.1:17495/api"
-NARRATE_URL="$PAIRVOICE_API/narrate"
 # 常駐サーバーと別々に更新されるので、版を毎回名乗る。食い違うとメニューバーが知らせる
 PLUGIN_VERSION=$(jq -r '.version' "${0%/*}/../.claude-plugin/plugin.json" 2>/dev/null)
 PLUGIN_VERSION="${PLUGIN_VERSION:-unknown}"
@@ -96,7 +94,7 @@ narrate() {
       + (if $voice == "" then {} else {voice: $voice} end)
       + (if $style == "" then {} else {style: $style} end)' \
     | curl -s --max-time "$NARRATE_TIMEOUT_SECONDS" -w '\n%{http_code}' \
-    -X POST "$NARRATE_URL" -H 'Content-Type: application/json' -H "$VERSION_HEADER" --data-binary @- 2>&1)
+    -X POST "$PAIRVOICE_API/narrate" -H 'Content-Type: application/json' -H "$VERSION_HEADER" --data-binary @- 2>&1)
   status="${response##*$'\n'}"
   body="${response%$'\n'*}"
 
@@ -133,6 +131,8 @@ narrate() {
 }
 
 main() {
+  # 接続先は設定の port で変わるので pairvoice に訊く。url を持たない 0.11 以前の pairvoice は既定のポートで待つ
+  PAIRVOICE_API="$(pairvoice url 2>/dev/null || echo http://127.0.0.1:17495)/api"
   mkdir -p "$STATE_DIR"
   cleanup_old_seen_markers
 

@@ -4,11 +4,11 @@
   "type": "module",
   "scripts": {
     "build": "vite build",
-    "dev": "vite",
+    "dev": "PAIRVOICE_URL=$(uv run pairvoice url) vite",
     "format": "oxfmt",
     "format:check": "oxfmt --check",
     "lint": "oxlint --type-aware",
-    "preview": "vite preview",
+    "preview": "PAIRVOICE_URL=$(uv run pairvoice url) vite preview",
     "test": "vitest run",
     "test:watch": "vitest",
     "typecheck": "tsc --noEmit"

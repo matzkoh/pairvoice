@@ -5,7 +5,7 @@
         "hooks": [
           {
             "type": "command",
-            "command": "curl -s -m 2 -X POST -H 'Content-Type: application/json' -d '{\"respect_mute\":true}' http://127.0.0.1:17495/api/warmup >/dev/null 2>&1 || true",
+            "command": "curl -s -m 2 -X POST -H 'Content-Type: application/json' -d '{\"respect_mute\":true}' \"$(pairvoice url)/api/warmup\" >/dev/null 2>&1 || true",
             "async": true
           }
         ]

@@ -97,6 +97,16 @@ def test_warmup_posts(calls, config_path):
     assert calls[0]["timeout"] == cli.WARMUP_TIMEOUT_SECONDS
 
 
+def test_url_prints_the_configured_origin_without_calling_the_server(calls, capsys, tmp_path):
+    path = tmp_path / "config.toml"
+    path.write_text("port = 18777\n", encoding="utf-8")
+
+    assert cli.main(["--config", str(path), "url"]) == 0
+    # $(pairvoice url)/api/... と繋げて使うので、末尾に / を付けない
+    assert capsys.readouterr().out == "http://127.0.0.1:18777\n"
+    assert calls == []
+
+
 def test_status_gets_health(calls, config_path):
     assert cli.main(["--config", config_path, "status"]) == 0
 

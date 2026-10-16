@@ -118,6 +118,7 @@ def main(argv: list[str] | None = None) -> int:
     sub.add_parser("warmup", help="モデルを読み込み、終わるまで待つ（初回はダウンロードも）")
     sub.add_parser("unmute", help="ミュートを解除する")
     sub.add_parser("status", help="状態を表示する")
+    sub.add_parser("url", help="常駐サーバーの接続先（API は /api の下）を表示する")
     sub.add_parser("restart", help="常駐サーバーを再起動する（設定の反映に必要）")
     sub.add_parser("install", help="常駐サーバーを登録し、データの置き場所に雛形を置く")
     sub.add_parser("uninstall", help="常駐サーバーの登録を外す（データは残す）")
@@ -198,7 +199,11 @@ def main(argv: list[str] | None = None) -> int:
             file=sys.stderr,
         )
         return 2
-    base = f"http://127.0.0.1:{config.port}"
+    base = config.url
+
+    if args.command == "url":
+        print(base)
+        return 0
 
     if args.command == "serve":
         return _serve(config, args.config, log_file=args.log_file)

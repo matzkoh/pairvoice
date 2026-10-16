@@ -632,7 +632,7 @@ def create_app(engine: Engine) -> FastAPI:
     @api.post("/studio/open", summary="studio をブラウザで開く", tags=["運用"])
     def open_studio_page():
         """studio の画面はこの常駐サーバーが根（`/`）で配っている。"""
-        return {"url": open_studio(f"http://127.0.0.1:{engine.config.port}")}
+        return {"url": open_studio(engine.config.url)}
 
     def load_eval_inputs(request: EvalRequest) -> tuple[str, list[evaluation.Case]]:
         system, _ = summary_prompt.compose_summary(request.voice, request.prompt, request.tone)

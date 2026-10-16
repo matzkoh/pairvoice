@@ -1,10 +1,10 @@
 # pairvoice プラグイン
 
 Claude Code の `MessageDisplay` フック。アシスタントの出力を pairvoice の常駐サーバー
-（`127.0.0.1:17495`）で要約・音声化し、常駐サーバーが再生する。サーバー本体はこのプラグインに含まれないので、
+（接続先は `pairvoice url` で出る）で要約・音声化し、常駐サーバーが再生する。サーバー本体はこのプラグインに含まれないので、
 先にリポジトリの README に沿って起動しておく。
 
-フック本体は `hooks/speak-summary.sh`。`bash` `curl` `jq` を使う
+フック本体は `hooks/speak-summary.sh`。`bash` `curl` `jq` と、接続先を引く `pairvoice url` を使う
 （`jq` 以外は macOS に最初からある）。
 
 プロンプトを送ったときにも `UserPromptSubmit` フックで常駐サーバーにモデルを読み込ませておく。
@@ -33,7 +33,7 @@ Claude Code の `MessageDisplay` フック。アシスタントの出力を pair
 ## エージェントから操作する
 
 `api` スキルが、常駐サーバーの API（読み上げ・声・ミュート・辞書など）をエージェントに知らせる。
-仕様は常駐サーバーが配る `http://127.0.0.1:17495/openapi.json` を引かせるので、スキルは API の版に追従する。
+仕様は常駐サーバーが配る `/openapi.json` を引かせるので、スキルは API の版に追従する。
 
 ## 声とスタイルを選ぶ
 

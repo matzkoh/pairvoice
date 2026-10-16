@@ -6,7 +6,7 @@
 
 | 部分 | 場所 | 中身 |
 | --- | --- | --- |
-| 常駐サーバー | `src/pairvoice/` | Python / FastAPI。`127.0.0.1:17495`。要約（mlx-lm）と音声合成（mlx-audio / Irodori-TTS）、プロンプト・辞書・スタイル・声の読み書き |
+| 常駐サーバー | `src/pairvoice/` | Python / FastAPI。接続先は `pairvoice url`。要約（mlx-lm）と音声合成（mlx-audio / Irodori-TTS）、プロンプト・辞書・スタイル・声の読み書き |
 | studio | `studio/` | React 19 + Vite の画面。ビルドした `dist` を常駐サーバーが根（`/`）で配り、画面は同じオリジンで `/api` の下を呼ぶ |
 | 読み上げフック | `plugin/` | Claude Code プラグイン（フックと、要約を改善する `tune` スキル）。マーケットプレイスはリポジトリ直下の `.claude-plugin/marketplace.json` |
 | メニューバー | `src/pairvoice/menubar.py` | 常駐サーバーの子として起きる |
@@ -35,13 +35,13 @@ LaunchAgent は tool 側の Python を指すので、リポジトリのコード
 | `src/pairvoice/` | `pairvoice restart`（モデルを読み込み直す） |
 | `prompt.txt`・口調、辞書 | 要らない（サーバーが読み上げのたびに読む） |
 
-作業ツリーのコードをその場で動かしたいときは、メニューの「pairvoice を終了」で常駐を止めてから手で起動する（ポート `:17495` を取り合うので同時には動かせない）。
+作業ツリーのコードをその場で動かしたいときは、メニューの「pairvoice を終了」で常駐を止めてから手で起動する（同じポートを取り合うので同時には動かせない）。
 
 ```bash
 uv run pairvoice serve            # Ctrl-C でメニューバーごと降りる
 launchctl kickstart gui/$(id -u)/local.pairvoice   # 常駐に戻す
 
-# studio の画面を開発する（http://127.0.0.1:17493/。`/api` は :17495 へ proxy する）
+# studio の画面を開発する（http://127.0.0.1:17493/。`/api` は `uv run pairvoice url` の接続先へ proxy する）
 (cd studio && pnpm dev)
 ```
 

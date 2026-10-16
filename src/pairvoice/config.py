@@ -169,6 +169,11 @@ class Config:
     source_path: Path | None = None
     source_mtime: float | None = None
 
+    @property
+    def url(self) -> str:
+        """常駐サーバーの接続先。`pairvoice url` がこれを出し、フックやスキルはそれを使う。"""
+        return f"http://127.0.0.1:{self.port}"
+
 
 class ConfigError(ValueError):
     """config.toml の値の型が違う。読み込みで止め、使う場面（合成・掃除）まで持ち越さない。"""

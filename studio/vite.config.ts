@@ -5,7 +5,7 @@ import tailwindcss from '@tailwindcss/vite'
 import react, { reactCompilerPreset } from '@vitejs/plugin-react'
 import { defineConfig } from 'vite'
 
-// 画面と API はどちらも pairvoice（17495）が配る。dev server は 17493 を所有する。
+// 画面と API はどちらも pairvoice が配る。dev server は 17493 を所有する。
 // strictPort を立てるのは、衝突時に黙って次の空きポートへ移られると URL が
 // 変わるため（Vite の既定は strictPort:false）。タブを開いたままにする道具では
 // 番号が動かないことのほうが大事なので、衝突は黙って回避せずエラーにする。
@@ -14,7 +14,8 @@ const DEV_PORT = 17493
 // 127.0.0.1 からは接続できない。pairvoice は 127.0.0.1 で待つ道具なので、
 // 番号だけでなく待ち受けるアドレスもそちらに揃える。
 const DEV_HOST = '127.0.0.1'
-const PAIRVOICE_ORIGIN = 'http://127.0.0.1:17495'
+// pairvoice の接続先は設定の port で変わるので、dev / preview のスクリプトが `pairvoice url` で渡す
+const PAIRVOICE_ORIGIN = process.env.PAIRVOICE_URL
 
 // dev と preview に同じ proxy を渡す。片方だけ直すと、ビルド確認のときだけ
 // 挙動が違うという厄介な差が生まれる
