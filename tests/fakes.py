@@ -74,7 +74,10 @@ class FakeProbe:
         self.samples += 1
         if self.error is not None:
             raise self.error
-        return AudioActivity(microphone=self.microphone, output=self.output)
+        return AudioActivity(
+            microphone=("fake",) if self.microphone else (),
+            output=("fake",) if self.output else (),
+        )
 
 
 class FakeCurate(FakeBackend):

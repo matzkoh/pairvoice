@@ -309,6 +309,7 @@ def test_health_shape():
         "queue",
         "playback",
         "dropped_recent",
+        "config_path",
         "config_stale",
         "version",
         "plugin",
@@ -432,7 +433,12 @@ def test_get_mute_reports_current_state():
     response = client.get("/mute")
 
     assert response.status_code == 200
-    assert response.json() == {"active": True, "reason": "audio_output", "until": None}
+    assert response.json() == {
+        "active": True,
+        "reason": "audio_output",
+        "until": None,
+        "processes": ["fake"],
+    }
 
 
 def test_speak_queues_the_audio():

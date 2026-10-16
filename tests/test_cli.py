@@ -107,6 +107,18 @@ def test_url_prints_the_configured_origin_without_calling_the_server(calls, caps
     assert calls == []
 
 
+def test_config_prints_every_item_with_defaults(calls, capsys, tmp_path):
+    path = tmp_path / "config.toml"
+    path.write_text('[mute]\nmicrophone_ignore_processes = ["Slack Helper"]\n', encoding="utf-8")
+
+    assert cli.main(["--config", str(path), "config"]) == 0
+    shown = json.loads(capsys.readouterr().out)
+    assert shown["path"] == str(path)
+    assert shown["values"]["mute"]["microphone_ignore_processes"] == ["Slack Helper"]
+    assert shown["values"]["mute"]["auto_microphone"] is True
+    assert calls == []
+
+
 def test_status_gets_health(calls, config_path):
     assert cli.main(["--config", config_path, "status"]) == 0
 

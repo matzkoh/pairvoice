@@ -311,7 +311,10 @@ class MuteRequest(BaseModel):
 
 def build_engine(config: Config) -> Engine:
     limit_mlx_cache()
-    probe = AudioProbe(ignore_processes=config.mute.audio_output_ignore_processes)
+    probe = AudioProbe(
+        ignore_output=config.mute.audio_output_ignore_processes,
+        ignore_input=config.mute.microphone_ignore_processes,
+    )
     return Engine(
         config=config,
         llm_backend=MlxLmBackend(config.llm),
@@ -591,6 +594,8 @@ def create_app(engine: Engine) -> FastAPI:
 
     @api.get("/mute", summary="ミュートの状態", tags=["ミュート"])
     async def mute_state():
+        """`processes` は自動ミュート（`microphone` / `audio_output`）のもとになったプロセス名。
+        `config.toml` の `[mute]` の除外リストに書く名前はこれ。"""
         return engine.mute.state().describe()
 
     @api.post("/stop", summary="読み上げを止める", tags=["読み上げ"])

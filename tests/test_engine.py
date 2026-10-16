@@ -420,7 +420,12 @@ async def test_health_reports_states_and_mute_reason():
     assert health["ok"] is True
     assert health["llm"]["state"] == "unloaded"
     assert health["tts"]["state"] == "unloaded"
-    assert health["mute"] == {"active": True, "reason": "microphone", "until": None}
+    assert health["mute"] == {
+        "active": True,
+        "reason": "microphone",
+        "until": None,
+        "processes": ["fake"],
+    }
     assert health["queue"] == {"running": 0, "waiting": 0}
     assert health["dropped_recent"] == 0
     assert health["config_stale"] is False

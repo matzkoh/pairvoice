@@ -132,6 +132,8 @@ class MuteConfig:
     audio_output_wait_seconds: float = 5.0
     # 自分の再生はプロセス ID で除外するので、ここに足すのはほかのアプリだけでよい
     audio_output_ignore_processes: tuple[str, ...] = ()
+    # 入ったままマイクを切っている通話（Slack のハドルなど）は、入力を開いたままにする
+    microphone_ignore_processes: tuple[str, ...] = ()
 
 
 @dataclass(frozen=True)

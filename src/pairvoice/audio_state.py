@@ -8,7 +8,7 @@ from __future__ import annotations
 import ctypes
 import os
 import struct
-from collections.abc import Callable
+from collections.abc import Callable, Iterable
 from dataclasses import dataclass
 from pathlib import Path
 
@@ -99,14 +99,15 @@ def sample_processes() -> tuple[AudioProcess, ...]:
         pid = pid_values[0]
         input_values = _get_property(obj, _IS_RUNNING_INPUT, ctypes.c_uint32) or [0]
         output_values = _get_property(obj, _IS_RUNNING_OUTPUT, ctypes.c_uint32) or [0]
+        input_running = bool(input_values[0])
         output_running = bool(output_values[0])
         processes.append(
             AudioProcess(
                 pid=pid,
-                # 名前は出力の除外にしか使わないので、出力中のプロセスだけ引く。
+                # 名前は除外と見せる理由にしか使わないので、入出力中のプロセスだけ引く。
                 # 読み上げの間は 0.25 秒ごとに呼ばれる
-                name=_process_name(pid, name_cache) if output_running else "",
-                input_running=bool(input_values[0]),
+                name=_process_name(pid, name_cache) if input_running or output_running else "",
+                input_running=input_running,
                 output_running=output_running,
             )
         )
@@ -115,8 +116,10 @@ def sample_processes() -> tuple[AudioProcess, ...]:
 
 @dataclass(frozen=True)
 class AudioActivity:
-    microphone: bool
-    output: bool
+    """入出力中のプロセス名。空なら使われていない。"""
+
+    microphone: tuple[str, ...]
+    output: tuple[str, ...]
 
 
 class AudioProbe:
@@ -128,20 +131,34 @@ class AudioProbe:
 
     def __init__(
         self,
-        ignore_processes: tuple[str, ...] = (),
+        ignore_output: tuple[str, ...] = (),
+        ignore_input: tuple[str, ...] = (),
         sampler: Callable[[], tuple[AudioProcess, ...]] = sample_processes,
         own_pid: int | None = None,
     ) -> None:
-        self._ignored = {name.lower() for name in ignore_processes}
+        self._ignored_output = {name.lower() for name in ignore_output}
+        self._ignored_input = {name.lower() for name in ignore_input}
         self._sampler = sampler
         self._own_pid = os.getpid() if own_pid is None else own_pid
 
     def sample(self) -> AudioActivity:
         processes = self._sampler()
         return AudioActivity(
-            microphone=any(p.input_running for p in processes),
-            output=any(
-                p.output_running and p.pid != self._own_pid and p.name.lower() not in self._ignored
+            microphone=_names(
+                p
                 for p in processes
+                if p.input_running and p.name.lower() not in self._ignored_input
+            ),
+            output=_names(
+                p
+                for p in processes
+                if p.output_running
+                and p.pid != self._own_pid
+                and p.name.lower() not in self._ignored_output
             ),
         )
+
+
+def _names(processes: Iterable[AudioProcess]) -> tuple[str, ...]:
+    # Chrome や Slack はヘルパーが同じ名前で並ぶので、重ねて見せない
+    return tuple(dict.fromkeys(p.name for p in processes))

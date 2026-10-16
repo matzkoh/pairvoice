@@ -64,6 +64,7 @@ def test_overrides_and_tilde_expansion(tmp_path, monkeypatch):
                 "[mute]",
                 "auto_audio_output = true",
                 'audio_output_ignore_processes = ["afplay", "Music"]',
+                'microphone_ignore_processes = ["Slack Helper"]',
             ]
         ),
         encoding="utf-8",
@@ -80,6 +81,7 @@ def test_overrides_and_tilde_expansion(tmp_path, monkeypatch):
     assert config.tts.profile.ref_audio == tmp_path / "voice" / "ref.wav"
     assert config.mute.auto_audio_output is True
     assert config.mute.audio_output_ignore_processes == ("afplay", "Music")
+    assert config.mute.microphone_ignore_processes == ("Slack Helper",)
 
 
 def test_playback_reads_from_toml(tmp_path):

@@ -173,6 +173,7 @@ studio は常駐サーバーが根（`/`）で配っている。メニューの�
 | `pairvoice restart` | 常駐サーバーを再起動する（設定を変えたら要る） |
 | `pairvoice studio` | studio をブラウザで開く |
 | `pairvoice url` | 常駐サーバーの接続先（`http://127.0.0.1:<port>`）を出す。スクリプトからは `curl "$(pairvoice url)/api/health"` のように使う |
+| `pairvoice config` | 設定ファイルの場所と、既定値を含めたすべての項目の値を出す |
 | `pairvoice eval` | 要約の指示やモデルを規則で採点する（`--reviews` でレビューも使う、`--model` で別のモデルを試す） |
 
 「終了」で止めたサーバーは、ログインし直すか `launchctl kickstart gui/$(id -u)/local.pairvoice` で戻る。
@@ -189,6 +190,7 @@ studio は常駐サーバーが根（`/`）で配っている。メニューの�
 `~/.config/pairvoice/config.toml`。
 無くても既定値で動く。
 変えたら `pairvoice restart` する。
+Claude Code からはプラグインの `config` スキルで頼める。
 
 | 表 | よく触る項目 |
 | --- | --- |
@@ -199,7 +201,7 @@ studio は常駐サーバーが根（`/`）で配っている。メニューの�
 | `[stt]` | `model`（`/api/transcribe` の聞き取りのモデル。既定は whisper-large-v3-turbo）、`language`（モデルに渡す言語。既定 `ja`） |
 | `[curate]` | `diarize_model`（`/api/profiles/curate` の話者分離のモデル）、`enhance_model`（雑音除去のモデル） |
 | `[tts.sampler]` | 音声合成の細かい調整。studio の「声」画面で試して、表示される設定を写す |
-| `[mute]` | `auto_microphone`（既定 true）、`auto_audio_output`（既定 true）、`audio_output_wait_seconds`（既定 5） |
+| `[mute]` | `auto_microphone`（既定 true）、`auto_audio_output`（既定 true）、`audio_output_wait_seconds`（既定 5）、`microphone_ignore_processes` / `audio_output_ignore_processes`（自動ミュートで見ないプロセス名。マイクを切ったまま入っている通話など。名前は `GET /api/mute` の `processes` で分かる） |
 | `[playback]` | `volume`（既定 1.0）、`duck_volume`（ほかのアプリの音が鳴っている間の音量。既定 0.3）、`max_wait_seconds`（順番待ちがこれを超えたら捨てる。既定 60） |
 | `[eval]` | `style = "casual"` で、`pairvoice eval` がです/ます調を違反にする（タメ口に育てるとき） |
 

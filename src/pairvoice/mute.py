@@ -33,12 +33,15 @@ class MuteState:
     active: bool
     reason: str | None
     until: datetime | None
+    # 自動ミュートのもとになったプロセス名。除外の設定に書く名前を知るため
+    processes: tuple[str, ...] = ()
 
     def describe(self) -> dict:
         return {
             "active": self.active,
             "reason": self.reason,
             "until": self.until.isoformat() if self.until else None,
+            "processes": list(self.processes),
         }
 
 
@@ -92,9 +95,13 @@ class MuteController:
             return _OFF
 
         if self._config.auto_microphone and activity.microphone:
-            return MuteState(active=True, reason="microphone", until=None)
+            return MuteState(
+                active=True, reason="microphone", until=None, processes=activity.microphone
+            )
         if check_output and activity.output:
-            return MuteState(active=True, reason="audio_output", until=None)
+            return MuteState(
+                active=True, reason="audio_output", until=None, processes=activity.output
+            )
         return _OFF
 
     def watch(self, *, bypass_mute: bool = False) -> PlaybackWatch:

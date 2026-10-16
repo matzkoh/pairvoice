@@ -617,6 +617,8 @@ class Engine:
             "queue": {"running": self._runner.running, "waiting": self._runner.waiting},
             "playback": self.player.describe(),
             "dropped_recent": self._runner.dropped_recent(),
+            # 常駐サーバーが読んだ設定ファイル。launchd に --config で渡すと既定の場所と違う
+            "config_path": str(self._config.source_path) if self._config.source_path else None,
             "config_stale": config_is_stale(self._config),
         }
 
