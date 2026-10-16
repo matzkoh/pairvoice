@@ -30,7 +30,7 @@ from . import curate, reading
 from .api_errors import BodyTooLarge
 from .api_errors import error_doc as _error
 from .api_errors import fail as _fail
-from .curate import Analysis, InvalidAudio, Outcome
+from .curate import Analysis, InvalidAudio, InvalidSelection, Outcome
 from .curate_jobs import CurateJobs
 from .profiles import TakeRejected
 from .prompt import SummaryPrompt
@@ -96,6 +96,12 @@ class CurateAnalyze(Protocol):
     """Engine.curate_analyze。(ファイル名, パス) の素材を directory にデコードして区間を採点する。"""
 
     async def __call__(self, files: list[tuple[str, Path]], directory: Path) -> Analysis: ...
+
+
+class Transcribe(Protocol):
+    """Engine.transcribe。wav を聞き取った文。"""
+
+    async def __call__(self, path: Path) -> str: ...
 
 
 class CurateRender(Protocol):
@@ -389,6 +395,10 @@ class CurateAnalysisResponse(BaseModel):
     limits: CurateLimits = Field(description="参照音声の声の長さの決まり")
 
 
+class CurateTranscript(BaseModel):
+    text: str = Field(description="聞き取った文")
+
+
 class CurateProfileBody(BaseModel):
     name: ProfileName = Field(description="声の名前")
     caption: Caption = Field(default="", description="話し方の指示")
@@ -479,6 +489,7 @@ def data_router(
     synthesize: Synthesize,
     curate_analyze: CurateAnalyze,
     curate_render: CurateRender,
+    transcribe: Transcribe,
 ) -> APIRouter:
     router = APIRouter()
     curate_jobs = CurateJobs()
@@ -822,6 +833,50 @@ def data_router(
         analysis = curate_jobs.get(job_id)
         samples = curate.excerpt(analysis.material, start, end)
         return Response(mono_wav(samples, curate.OUTPUT_RATE), media_type="audio/wav")
+
+    @router.post(
+        "/curate/{job_id}/candidates/{index}/transcript",
+        response_model=CurateTranscript,
+        summary="候補のセリフを聞き取る",
+        tags=["声"],
+        responses={
+            **_CURATE_JOB_NOT_FOUND,
+            400: _error("`invalid_selection`（候補の番号が無い）"),
+            503: _error("聞き取りのモデルを使えない"),
+        },
+    )
+    async def transcribe_candidate(job_id: str, index: int):
+        """候補の区間を聞き取る。一度聞いた候補は覚えておいて、すぐ返す。
+
+        聞き取りは合成と同じ列に並ぶ。たくさんの候補をまとめて頼まず、1つずつ順に頼む
+        （まとめると列を占めて、読み上げが待たされる）。
+        """
+        analysis = curate_jobs.get(job_id)
+        if not 0 <= index < len(analysis.pieces):
+            raise InvalidSelection(f"候補の番号は 0〜{len(analysis.pieces) - 1} です")
+        if index not in analysis.transcripts:
+            # 頼んだ側が待つのをやめても（画面を離れても）、聞き取りは終えて覚えておく
+            analysis.transcripts[index] = asyncio.ensure_future(
+                _transcribe_piece(analysis.material, analysis.pieces[index])
+            )
+        try:
+            text = await asyncio.shield(analysis.transcripts[index])
+        except Exception:
+            # 失敗は覚えない（次に頼まれたら聞き直す）
+            analysis.transcripts.pop(index, None)
+            raise
+        return {"text": text}
+
+    async def _transcribe_piece(material: curate.Material, piece: curate.Piece) -> str:
+        with tempfile.TemporaryDirectory() as directory:
+            path = Path(directory) / "candidate.wav"
+
+            def write() -> None:
+                samples = curate.excerpt(material, piece.start, piece.end)
+                write_mono(path, samples, curate.OUTPUT_RATE)
+
+            await asyncio.to_thread(write)
+            return await transcribe(path)
 
     @router.post(
         "/curate/{job_id}/profile",

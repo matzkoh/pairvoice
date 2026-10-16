@@ -12,11 +12,21 @@ import {
 import { Button } from '@/components/ui/button'
 import type { CurateAnalysis, CurateCandidate } from '@/lib/api-types'
 
+import {
+  clipLabel,
+  type CurateFile,
+  DeviationBar,
+  describeCandidate,
+  drawEnvelope,
+  formatClock,
+} from './curateParts'
 import { useExcerptPlayer, type ExcerptPlayer, type Span } from './useExcerptPlayer'
 
 type Props = {
   analysis: CurateAnalysis
   selected: ReadonlySet<number>
+  // 聞き取った候補のセリフ。まだ聞いていない候補は無い
+  transcripts: ReadonlyMap<number, string | null>
   onToggle: (index: number) => void
 }
 
@@ -41,7 +51,7 @@ const OVERSCAN_PX = 400
 
 // 素材の流れを映像編集ソフトのタイムラインのように並べ、候補の区間をクリックで選ぶ。
 // 波形をクリックするとその位置から鳴らし、区間の ▶ でその区間だけを鳴らす
-export function CurateTimeline({ analysis, selected, onToggle }: Props) {
+export function CurateTimeline({ analysis, selected, transcripts, onToggle }: Props) {
   const scrollRef = useRef<HTMLDivElement>(null)
   const canvasRef = useRef<HTMLCanvasElement>(null)
   const duration = streamSeconds(analysis)
@@ -74,7 +84,7 @@ export function CurateTimeline({ analysis, selected, onToggle }: Props) {
   useEffect(() => {
     const canvas = canvasRef.current
     if (!canvas || view.width === 0) return
-    drawEnvelope(canvas, analysis.envelope, view, pps)
+    drawEnvelope(canvas, analysis.envelope, view, pps, WAVE)
   }, [analysis.envelope, view, pps])
 
   function rezoom(next: number, anchorX = view.width / 2) {
@@ -228,6 +238,7 @@ export function CurateTimeline({ analysis, selected, onToggle }: Props) {
                 selected={selected.has(c.index)}
                 playing={player.isPlaying(c)}
                 file={analysis.files[c.file]}
+                transcript={transcripts.get(c.index)}
                 onToggle={() => onToggle(c.index)}
                 onPlay={(span) => (player.isPlaying(span) ? player.stop() : player.play(span))}
               />
@@ -270,15 +281,24 @@ type ClipProps = {
   pps: number
   selected: boolean
   playing: boolean
-  file: CurateAnalysis['files'][number] | undefined
+  file: CurateFile | undefined
+  transcript: string | null | undefined
   onToggle: () => void
   onPlay: (span: Span) => void
 }
 
-function Clip({ candidate: c, pps, selected, playing, file, onToggle, onPlay }: ClipProps) {
+function Clip({
+  candidate: c,
+  pps,
+  selected,
+  playing,
+  file,
+  transcript,
+  onToggle,
+  onPlay,
+}: ClipProps) {
   const seconds = c.end - c.start
   const px = seconds * pps
-  const fileOffset = file?.offset ?? 0
   return (
     <div
       className="absolute"
@@ -292,8 +312,8 @@ function Clip({ candidate: c, pps, selected, playing, file, onToggle, onPlay }: 
       <button
         type="button"
         aria-pressed={selected}
-        aria-label={`区間 ${formatClock(c.start - fileOffset)}〜${formatClock(c.end - fileOffset)}`}
-        title={describeCandidate(c, file?.name ?? '', fileOffset)}
+        aria-label={clipLabel(c, file)}
+        title={describeCandidate(c, file, transcript)}
         onClick={onToggle}
         className={cn(
           'relative block size-full overflow-hidden rounded-md border px-1 py-0.5 text-left text-[10px] leading-tight tabular-nums transition-colors',
@@ -305,7 +325,8 @@ function Clip({ candidate: c, pps, selected, playing, file, onToggle, onPlay }: 
         )}
       >
         <span className={cn('truncate', px >= 40 ? 'pl-4' : 'sr-only')}>{seconds.toFixed(1)}s</span>
-        <DeviationBar deviation={c.deviation} />
+        {/* 長さの表示を隠す細い区間でも同じ所に出るよう、区間の下端に置く */}
+        <DeviationBar deviation={c.deviation} className="absolute inset-x-1 bottom-1" />
       </button>
       {px >= PLAY_MIN_PX && (
         <button
@@ -326,67 +347,6 @@ function Clip({ candidate: c, pps, selected, playing, file, onToggle, onPlay }: 
   )
 }
 
-// ふだんの声からの離れ。0 で空、3 以上で満ちる。張り上げた声ほど長い
-function DeviationBar({ deviation }: { deviation: number | null }) {
-  if (deviation === null) return null
-  const ratio = Math.min(1, deviation / 3)
-  return (
-    // 長さの表示を隠す細い区間でも同じ所に出るよう、区間の下端に置く
-    <span aria-hidden className="absolute inset-x-1 bottom-1 h-1 rounded-full bg-current/15">
-      <span
-        className={cn('block h-full rounded-full', ratio > 0.5 ? 'bg-amber-500' : 'bg-current/60')}
-        style={{ width: `${Math.max(4, ratio * 100)}%` }}
-      />
-    </span>
-  )
-}
-
-function describeCandidate(c: CurateCandidate, fileName: string, fileOffset: number): string {
-  const lines = [
-    `${fileName} ${formatClock(c.start - fileOffset)}〜${formatClock(c.end - fileOffset)}（${(c.end - c.start).toFixed(1)} 秒）`,
-    [
-      `S/N ${c.snr_db} dB`,
-      c.loudness_db !== null && `大きさ ${c.loudness_db} dB`,
-      `高さ ${c.pitch_hz !== null ? `${c.pitch_hz} Hz` : '—'}`,
-      c.brightness_hz !== null && `明るさ ${c.brightness_hz} Hz`,
-    ]
-      .filter(Boolean)
-      .join('・'),
-    c.deviation === null
-      ? '雑音が多いので自動では使いません'
-      : `ふだんの声からの離れ ${c.deviation}（大きいほど張り上げた声）`,
-  ]
-  return lines.join('\n')
-}
-
-function drawEnvelope(
-  canvas: HTMLCanvasElement,
-  envelope: CurateAnalysis['envelope'],
-  view: { left: number; width: number },
-  pps: number,
-) {
-  const ratio = window.devicePixelRatio || 1
-  canvas.width = Math.round(view.width * ratio)
-  canvas.height = Math.round(WAVE * ratio)
-  const ctx = canvas.getContext('2d')
-  if (!ctx) return
-  ctx.scale(ratio, ratio)
-  ctx.clearRect(0, 0, view.width, WAVE)
-  ctx.fillStyle = getComputedStyle(canvas).color
-  const mid = WAVE / 2
-  for (let x = 0; x < view.width; x++) {
-    // この1px に入る点のいちばん大きい値
-    const from = Math.floor((view.left + x) / pps / envelope.step)
-    const to = Math.max(from + 1, Math.floor((view.left + x + 1) / pps / envelope.step))
-    let level = 0
-    for (let i = from; i < to && i < envelope.levels.length; i++) {
-      level = Math.max(level, envelope.levels[i] ?? 0)
-    }
-    const h = (level / 100) * (mid - 1)
-    if (h > 0) ctx.fillRect(x, mid - h, 1, h * 2)
-  }
-}
-
 function streamSeconds(analysis: CurateAnalysis): number {
   const last = analysis.files[analysis.files.length - 1]
   return last ? last.offset + last.seconds : 0
@@ -395,13 +355,4 @@ function streamSeconds(analysis: CurateAnalysis): number {
 function fitZoom(width: number, duration: number): number {
   if (width <= 0 || duration <= 0) return 1
   return Math.min(MAX_ZOOM, Math.max(MIN_ZOOM, width / duration))
-}
-
-export function formatClock(seconds: number): string {
-  const total = Math.max(0, Math.floor(seconds))
-  const h = Math.floor(total / 3600)
-  const m = Math.floor((total % 3600) / 60)
-  const s = total % 60
-  const mm = h > 0 ? String(m).padStart(2, '0') : String(m)
-  return `${h > 0 ? `${h}:` : ''}${mm}:${String(s).padStart(2, '0')}`
 }

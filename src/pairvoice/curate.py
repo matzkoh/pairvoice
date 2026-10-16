@@ -36,6 +36,7 @@ MLX を触るのは diarize と enhance だけで、どちらも Engine が Runn
 
 from __future__ import annotations
 
+import asyncio
 import shutil
 import subprocess
 from collections.abc import Awaitable, Callable, Iterator
@@ -266,6 +267,9 @@ class Analysis:
     speaker: int
     pieces: list[Piece]
     ranked: list[int]
+    # 候補のセリフの聞き取り（区間の番号 → 文を返す仕事）。一度頼んだものは使い回し、
+    # 聞き取りの最中に同じ候補を頼まれても、同じ仕事の答えを待つ
+    transcripts: dict[int, asyncio.Future[str]] = field(default_factory=dict)
 
 
 def decode(files: list[tuple[str, Path]], directory: Path) -> Material:

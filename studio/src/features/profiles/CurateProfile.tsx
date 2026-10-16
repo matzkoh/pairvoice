@@ -7,11 +7,22 @@ import { Input } from '@/components/ui/input'
 import { Textarea } from '@/components/ui/textarea'
 import { ApiError, apiSend, apiSendForm, toErrorMessage } from '@/lib/api'
 import type { CurateAnalysis, CurateReport, CurateResponse } from '@/lib/api-types'
+import { usePersistedChoice } from '@/lib/usePersistedChoice'
 
-import { CurateTimeline, formatClock } from './CurateTimeline'
+import { CurateList } from './CurateList'
+import { formatClock } from './curateParts'
+import { CurateTimeline } from './CurateTimeline'
 import { Field } from './Field'
 import { FilePicker } from './FilePicker'
 import { invalidateProfiles, type ProfileStatus } from './queries'
+import { useTranscripts } from './useTranscripts'
+
+// 候補の並べ方。セリフを読んで選ぶ一覧と、素材全体の流れを見渡すタイムライン
+type Layout = 'list' | 'timeline'
+const LAYOUTS: [Layout, string][] = [
+  ['list', 'セリフ一覧'],
+  ['timeline', 'タイムライン'],
+]
 
 type Props = {
   onStatus: (status: ProfileStatus) => void
@@ -33,6 +44,13 @@ export function CurateProfile({ onStatus, onCreated }: Props) {
   const [created, setCreated] = useState<CurateResponse | null>(null)
   const [analyzing, startAnalyzing] = useTransition()
   const [saving, startSaving] = useTransition()
+  // タイムラインでも聞き取る（区間にマウスを乗せるとセリフが出る。一覧に切り替えたときにも埋まっている）
+  const transcripts = useTranscripts(analysis)
+  const [layout, chooseLayout] = usePersistedChoice<Layout>(
+    'pairvoice.curate.layout',
+    ['list', 'timeline'],
+    'list',
+  )
 
   const seconds = analysis ? selectedSeconds(analysis, selected) : 0
   const limits = analysis?.limits
@@ -146,14 +164,40 @@ export function CurateProfile({ onStatus, onCreated }: Props) {
       {analysis && limits && (
         <>
           <section className="space-y-2" aria-label="区間を選ぶ">
-            <AnalysisSummary analysis={analysis} />
+            <div className="flex flex-wrap items-end justify-between gap-3">
+              <AnalysisSummary analysis={analysis} />
+              <div role="group" aria-label="並べ方" className="flex rounded-md border p-0.5">
+                {LAYOUTS.map(([value, label]) => (
+                  <Button
+                    key={value}
+                    variant={layout === value ? 'secondary' : 'ghost'}
+                    size="sm"
+                    aria-pressed={layout === value}
+                    onClick={() => chooseLayout(value)}
+                  >
+                    {label}
+                  </Button>
+                ))}
+              </div>
+            </div>
             {/* 解析が替われば、倍率も鳴っている音も持ち越さない */}
-            <CurateTimeline
-              key={analysis.job_id}
-              analysis={analysis}
-              selected={selected}
-              onToggle={toggle}
-            />
+            {layout === 'timeline' ? (
+              <CurateTimeline
+                key={analysis.job_id}
+                analysis={analysis}
+                selected={selected}
+                transcripts={transcripts}
+                onToggle={toggle}
+              />
+            ) : (
+              <CurateList
+                key={analysis.job_id}
+                analysis={analysis}
+                selected={selected}
+                transcripts={transcripts}
+                onToggle={toggle}
+              />
+            )}
             <div className="flex flex-wrap items-center gap-3 text-sm">
               <span className={cn('tabular-nums', !lengthOk && 'text-destructive')} role="status">
                 {selected.size} 区間・{seconds.toFixed(1)} 秒

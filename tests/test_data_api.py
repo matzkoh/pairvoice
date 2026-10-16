@@ -9,7 +9,7 @@ from pairvoice.data_api import MASTER_STEPS, REFERENCE_TEXTS, TAKE_GAP_SECONDS
 from pairvoice.tts import ANCHOR_TEXT, SpeechResult, resolve_data_audio
 from pairvoice.wav import write_mono
 from tests.test_curate import heads, needs_ffmpeg, synth
-from tests.test_engine import FakeTTS
+from tests.test_engine import FakeSTT, FakeTTS
 from tests.test_server import build
 
 
@@ -285,6 +285,28 @@ def test_curate_job_lists_candidates_and_builds_from_a_selection(client, tmp_pat
     gone = client.post(f"/curate/{job['job_id']}/profile", json={"name": "x", "pieces": [0, 1]})
     assert gone.status_code == 404
     assert gone.json()["error"] == "curate_job_not_found"
+
+
+@needs_ffmpeg
+def test_curate_job_transcribes_a_candidate_once(tmp_path):
+    stt = FakeSTT()
+    _, client = build(data_root=tmp_path, stt=stt)
+    plan = [(1 + 7 * k, 6 + 7 * k, 0.5, 220) for k in range(2)]
+    job = analyze_upload(client, [("a.wav", speech_wav(tmp_path, plan))]).json()
+    path = f"/curate/{job['job_id']}/candidates/1/transcript"
+
+    first = client.post(path)
+    again = client.post(path)
+
+    assert first.json() == again.json() == {"text": "テスト全部通ったよ。"}
+    # 2度目は覚えた文を返す。聞き取ったのは候補の区間の wav
+    assert len(stt.calls) == 1
+    with wave.open(io.BytesIO(stt.calls[0])) as reader:
+        seconds = reader.getnframes() / reader.getframerate()
+    candidate = job["candidates"][1]
+    assert seconds == pytest.approx(candidate["end"] - candidate["start"], abs=0.02)
+    missing = client.post(f"/curate/{job['job_id']}/candidates/9/transcript")
+    assert missing.json()["error"] == "invalid_selection"
 
 
 @needs_ffmpeg

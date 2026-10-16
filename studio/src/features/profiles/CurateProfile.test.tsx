@@ -1,7 +1,7 @@
 /** @vitest-environment jsdom */
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query'
 import { act, cleanup, fireEvent, render, screen } from '@testing-library/react'
-import { afterEach, beforeAll, expect, it, vi } from 'vitest'
+import { afterEach, beforeAll, beforeEach, expect, it, vi } from 'vitest'
 
 import { ApiError, apiSend, apiSendForm } from '@/lib/api'
 import type { CurateAnalysis, CurateCandidate, CurateResponse } from '@/lib/api-types'
@@ -11,6 +11,11 @@ import { CurateProfile } from './CurateProfile'
 vi.mock('@/lib/api', async (importOriginal) => {
   const actual = await importOriginal<typeof import('@/lib/api')>()
   return { ...actual, apiSendForm: vi.fn(), apiSend: vi.fn() }
+})
+
+beforeEach(() => {
+  localStorage.clear()
+  serve(async () => RESPONSE)
 })
 
 beforeAll(() => {
@@ -88,6 +93,19 @@ const RESPONSE: CurateResponse = {
   },
 }
 
+// 候補のセリフの聞き取りと、声を作る要求に答える
+function serve(profile: () => Promise<CurateResponse>) {
+  vi.mocked(apiSend).mockImplementation(async (path: string) => {
+    const transcript = /candidates\/(\d+)\/transcript$/.exec(path)
+    if (transcript) return { text: `セリフ${transcript[1]}` }
+    return profile()
+  })
+}
+
+function profileCalls() {
+  return vi.mocked(apiSend).mock.calls.filter(([path]) => path.endsWith('/profile'))
+}
+
 function renderForm() {
   const onCreated = vi.fn()
   const onStatus = vi.fn()
@@ -134,7 +152,7 @@ it('解析した素材を送り、自動の見込みを選んだ状態で並べ�
 
 it('自動で選んだ区間で作り、作った内訳を見せてから開ける', async () => {
   vi.mocked(apiSendForm).mockResolvedValue(ANALYSIS)
-  vi.mocked(apiSend).mockResolvedValue(RESPONSE)
+  serve(async () => RESPONSE)
   const { onCreated } = renderForm()
   pick('ドラマ.mp3')
   await analyze()
@@ -143,7 +161,7 @@ it('自動で選んだ区間で作り、作った内訳を見せてから開け�
     fireEvent.click(screen.getByRole('button', { name: 'プロファイルを作る' }))
   })
 
-  expect(vi.mocked(apiSend).mock.calls[0]).toEqual([
+  expect(profileCalls()[0]).toEqual([
     '/curate/job1/profile',
     'POST',
     { name: 'ドラマ', caption: '', pieces: [0, 1, 2] },
@@ -158,7 +176,7 @@ it('自動で選んだ区間で作り、作った内訳を見せてから開け�
 
 it('クリックで選び直した区間の番号を送る', async () => {
   vi.mocked(apiSendForm).mockResolvedValue(ANALYSIS)
-  vi.mocked(apiSend).mockResolvedValue(RESPONSE)
+  serve(async () => RESPONSE)
   renderForm()
   pick('ドラマ.mp3')
   await analyze()
@@ -169,7 +187,7 @@ it('クリックで選び直した区間の番号を送る', async () => {
     fireEvent.click(screen.getByRole('button', { name: 'プロファイルを作る' }))
   })
 
-  expect(vi.mocked(apiSend).mock.calls[0]?.[2]).toEqual({
+  expect(profileCalls()[0]?.[2]).toEqual({
     name: 'ドラマ',
     caption: '',
     pieces: [0, 1, 3],
@@ -194,7 +212,9 @@ it('長さが足りなければ作れず、自動の選び方に戻せる', asyn
 
 it('解析が消えていたら、解析し直すよう知らせる', async () => {
   vi.mocked(apiSendForm).mockResolvedValue(ANALYSIS)
-  vi.mocked(apiSend).mockRejectedValue(new ApiError(404, '{"error":"curate_job_not_found"}'))
+  serve(async () => {
+    throw new ApiError(404, '{"error":"curate_job_not_found"}')
+  })
   const { onStatus } = renderForm()
   pick('ドラマ.mp3')
   await analyze()
@@ -221,4 +241,26 @@ it('解析できなければ理由を知らせ、選んだファイルを残す'
     isError: true,
   })
   expect(screen.getByText(/短い.wav/)).toBeTruthy()
+})
+
+it('セリフ一覧に候補のセリフを順に埋め、タイムラインに切り替えられる', async () => {
+  vi.mocked(apiSendForm).mockResolvedValue(ANALYSIS)
+  renderForm()
+  pick('ドラマ.mp3')
+  await analyze()
+
+  // 既定はセリフ一覧。候補を流れの順に1つずつ聞き取る
+  expect(await screen.findByText('セリフ3')).toBeTruthy()
+  const asked = vi.mocked(apiSend).mock.calls.map(([path]) => path)
+  expect(asked).toEqual([0, 1, 2, 3].map((i) => `/curate/job1/candidates/${i}/transcript`))
+  expect(clip('0:01').title).toContain('「セリフ0」')
+
+  fireEvent.click(screen.getByRole('button', { name: 'タイムライン' }))
+  expect(screen.getByRole('button', { name: 'タイムライン' }).getAttribute('aria-pressed')).toBe(
+    'true',
+  )
+  expect(screen.getByRole('button', { name: '縮小' })).toBeTruthy()
+  // 選んだ区間は並べ方を変えても残る
+  expect(clip('0:01').getAttribute('aria-pressed')).toBe('true')
+  expect(localStorage.getItem('pairvoice.curate.layout')).toBe('timeline')
 })

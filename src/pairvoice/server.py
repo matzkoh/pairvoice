@@ -672,7 +672,13 @@ def create_app(engine: Engine) -> FastAPI:
         return {"summary": evaluation.format_summary(results), "results": results}
 
     api.include_router(
-        data_router(data_root, engine.synthesize, engine.curate_analyze, engine.curate_render)
+        data_router(
+            data_root,
+            engine.synthesize,
+            engine.curate_analyze,
+            engine.curate_render,
+            engine.transcribe,
+        )
     )
     api.include_router(corpus_router(data_root))
     app.include_router(api, prefix=API_PREFIX)
