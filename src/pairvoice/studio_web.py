@@ -7,6 +7,7 @@ from __future__ import annotations
 
 import subprocess
 from pathlib import Path
+from urllib.parse import urlencode
 
 from fastapi import FastAPI
 from fastapi.responses import FileResponse, HTMLResponse
@@ -50,9 +51,15 @@ class _OutsideApi(Convertor[str]):
 register_url_convertor("outside_api", _OutsideApi())
 
 
+def studio_url(base: str, path: str = "", **query: str) -> str:
+    """base（常駐サーバーの URL）が配る studio の画面の URL。画面は根に置かれる（API は /api の下）。"""
+    url = f"{base.rstrip('/')}/{path}"
+    return f"{url}?{urlencode(query)}" if query else url
+
+
 def open_studio(base: str) -> str:
     """base（常駐サーバーの URL）が配る studio をブラウザで開き、その URL を返す。"""
-    url = f"{base}/"
+    url = studio_url(base)
     subprocess.Popen(["open", url], stdin=subprocess.DEVNULL)
     return url
 

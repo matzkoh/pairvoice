@@ -34,6 +34,7 @@ from .curate import Analysis, InvalidAudio, InvalidSelection, Outcome
 from .curate_jobs import CurateJobs
 from .profiles import TakeRejected
 from .prompt import SummaryPrompt
+from .studio_web import studio_url
 from .styles import STYLES_FILENAME, StyleStore
 from .tts import ANCHOR_TEXT, AudioNotFound, SpeechResult, resolve_data_audio
 from .wav import concat_wavs, has_wav_header, mono_wav, write_mono
@@ -379,6 +380,9 @@ class CurateLimits(BaseModel):
 
 class CurateAnalysisResponse(BaseModel):
     job_id: str = Field(description="解析の ID。区間を選んで声を作るときに使う")
+    studio_url: str = Field(
+        description="この解析を studio の「素材から作る」で開く URL。利用者に区間を選んでもらうときに渡す"
+    )
     files: list[CurateSource] = Field(
         description="送った順の素材。ファイルの間に無音を挟んで1本の流れにつないである"
     )
@@ -802,17 +806,35 @@ def data_router(
 
         `files` の素材から、いちばん多く話す人だけが話している区間を候補として返す。候補を
         `GET /curate/{job_id}/audio` で聴き、`POST /curate/{job_id}/profile` に番号を渡して声を作る。
+        区間を利用者に選んでもらうなら、`studio_url` を渡す（studio で聴いて選び、そのまま作れる）。
         解析は最後に使ってから1時間か、新しい解析が3つを超えると消える。
         """
         directory = tempfile.TemporaryDirectory(prefix="pairvoice-curate-")
         try:
             files = await _receive_files(request, Path(directory.name))
             analysis = await curate_analyze(files, Path(directory.name))
-            described = await asyncio.to_thread(curate.describe, analysis)
         except BaseException:
             directory.cleanup()
             raise
-        return {"job_id": curate_jobs.add(analysis, directory), **described}
+        job_id = curate_jobs.add(analysis, directory)
+        return await _describe_job(request, job_id, analysis)
+
+    @router.get(
+        "/curate/{job_id}",
+        response_model=CurateAnalysisResponse,
+        summary="解析した候補",
+        tags=["声"],
+        responses=_CURATE_JOB_NOT_FOUND,
+    )
+    async def get_curate(request: Request, job_id: str):
+        """`POST /curate` と同じ形で返す。studio が URL から解析を開くのに使う。"""
+        return await _describe_job(request, job_id, curate_jobs.get(job_id))
+
+    async def _describe_job(request: Request, job_id: str, analysis: Analysis) -> dict:
+        described = await asyncio.to_thread(curate.describe, analysis)
+        # 呼び手が届いた Host のまま返す（設定の URL と違う名前で来ていることがある）
+        url = studio_url(str(request.base_url), "profiles", id="new", curate=job_id)
+        return {"job_id": job_id, "studio_url": url, **described}
 
     @router.get(
         "/curate/{job_id}/audio",

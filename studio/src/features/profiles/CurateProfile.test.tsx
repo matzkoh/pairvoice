@@ -3,14 +3,14 @@ import { QueryClient, QueryClientProvider } from '@tanstack/react-query'
 import { act, cleanup, fireEvent, render, screen } from '@testing-library/react'
 import { afterEach, beforeAll, beforeEach, expect, it, vi } from 'vitest'
 
-import { ApiError, apiSend, apiSendForm } from '@/lib/api'
+import { ApiError, apiGet, apiSend, apiSendForm } from '@/lib/api'
 import type { CurateAnalysis, CurateCandidate, CurateResponse } from '@/lib/api-types'
 
 import { CurateProfile } from './CurateProfile'
 
 vi.mock('@/lib/api', async (importOriginal) => {
   const actual = await importOriginal<typeof import('@/lib/api')>()
-  return { ...actual, apiSendForm: vi.fn(), apiSend: vi.fn() }
+  return { ...actual, apiSendForm: vi.fn(), apiSend: vi.fn(), apiGet: vi.fn() }
 })
 
 beforeEach(() => {
@@ -106,15 +106,21 @@ function profileCalls() {
   return vi.mocked(apiSend).mock.calls.filter(([path]) => path.endsWith('/profile'))
 }
 
-function renderForm() {
+function renderForm(jobId?: string) {
   const onCreated = vi.fn()
   const onStatus = vi.fn()
+  const onJobChange = vi.fn()
   render(
     <QueryClientProvider client={new QueryClient()}>
-      <CurateProfile onStatus={onStatus} onCreated={onCreated} />
+      <CurateProfile
+        jobId={jobId}
+        onJobChange={onJobChange}
+        onStatus={onStatus}
+        onCreated={onCreated}
+      />
     </QueryClientProvider>,
   )
-  return { onCreated, onStatus }
+  return { onCreated, onStatus, onJobChange }
 }
 
 function pick(...names: string[]) {
@@ -134,7 +140,7 @@ function clip(start: string) {
 
 it('解析した素材を送り、自動の見込みを選んだ状態で並べる', async () => {
   vi.mocked(apiSendForm).mockResolvedValue(ANALYSIS)
-  renderForm()
+  const { onJobChange } = renderForm()
 
   pick('ドラマ.mp3', '続き.mp4')
   await analyze()
@@ -148,6 +154,40 @@ it('解析した素材を送り、自動の見込みを選んだ状態で並べ�
   expect(screen.getByText(/3 区間・20.0 秒/)).toBeTruthy()
   // 名前は最初のファイルから拡張子を除いて埋める
   expect(screen.getByLabelText<HTMLInputElement>('名前').value).toBe('ドラマ')
+  // 再読み込みしても戻れるよう、解析の ID を URL に残す
+  expect(onJobChange).toHaveBeenLastCalledWith('job1')
+})
+
+it('URL の解析を開いて、そのまま選んで作れる', async () => {
+  vi.mocked(apiGet).mockResolvedValue(ANALYSIS)
+  renderForm('job1')
+
+  await screen.findByRole('region', { name: '区間を選ぶ' })
+
+  expect(vi.mocked(apiGet)).toHaveBeenCalledWith('/curate/job1', { allowNotFound: true })
+  expect(clip('0:01').getAttribute('aria-pressed')).toBe('true')
+  // 手元にファイルは無いので、解析した素材の名前を見せる
+  expect(screen.getByText('ドラマ.mp3（解析済み）')).toBeTruthy()
+  expect(screen.getByLabelText<HTMLInputElement>('名前').value).toBe('ドラマ')
+  await act(async () => {
+    fireEvent.click(screen.getByRole('button', { name: 'プロファイルを作る' }))
+  })
+  expect(profileCalls()[0]?.[0]).toBe('/curate/job1/profile')
+})
+
+it('URL の解析が消えていたら知らせ、URL から外す', async () => {
+  vi.mocked(apiGet).mockRejectedValue(new ApiError(404, '{"error":"curate_job_not_found"}'))
+  const { onStatus, onJobChange } = renderForm('gone')
+
+  await vi.waitFor(() => expect(onJobChange).toHaveBeenCalledWith(undefined))
+
+  expect(onStatus).toHaveBeenCalledWith(
+    expect.objectContaining({
+      message: expect.stringMatching(/解析が消えていました/),
+      isError: true,
+    }),
+  )
+  expect(screen.queryByRole('region', { name: '区間を選ぶ' })).toBeNull()
 })
 
 it('自動で選んだ区間で作り、作った内訳を見せてから開ける', async () => {
@@ -224,7 +264,7 @@ it('解析が消えていたら、解析し直すよう知らせる', async () =
   })
 
   expect(onStatus).toHaveBeenCalledWith(
-    expect.objectContaining({ message: expect.stringMatching(/もう一度解析/), isError: true }),
+    expect.objectContaining({ message: expect.stringMatching(/解析し直して/), isError: true }),
   )
   expect(screen.queryByRole('region', { name: '区間を選ぶ' })).toBeNull()
 })

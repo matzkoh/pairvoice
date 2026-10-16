@@ -21,7 +21,7 @@ export const NEW_PROFILE = 'new'
 export function ProfilesPage() {
   const { data: profiles } = useSuspenseQuery(profilesQueryOptions())
   const { data: health } = useSuspenseQuery(healthQueryOptions())
-  const { id } = useSearch({ from: '/profiles' })
+  const { id, curate } = useSearch({ from: '/profiles' })
   const navigate = useNavigate({ from: '/profiles' })
   const [rawStatus, setStatus] = useState<ProfileStatus | null>(null)
   const status = useTransientStatus(rawStatus)
@@ -37,6 +37,11 @@ export function ProfilesPage() {
 
   function select(next: string | undefined) {
     void navigate({ search: { id: next } })
+  }
+
+  // 「素材から作る」で開いている解析を URL に残す（再読み込みしても、選んでいる途中に戻れる）
+  function showCurate(job: string | undefined) {
+    void navigate({ search: (prev) => ({ ...prev, curate: job }), replace: true })
   }
 
   function play(url: string) {
@@ -76,6 +81,8 @@ export function ProfilesPage() {
             onPlay={play}
             onStatus={setStatus}
             onCreated={select}
+            curateJob={curate}
+            onCurateJob={showCurate}
           />
         ) : (
           // プロファイルを移ったら、試聴の入力とテイクは持ち越さない

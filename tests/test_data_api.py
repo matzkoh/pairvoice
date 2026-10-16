@@ -265,6 +265,10 @@ def test_curate_job_lists_candidates_and_builds_from_a_selection(client, tmp_pat
     assert len(job["preselected"]) == 4
     assert job["envelope"]["levels"]
     assert job["limits"]["max_seconds"] == 28.0
+    # 利用者に選んでもらうときは、studio の「素材から作る」をこの解析で開く
+    assert job["studio_url"] == f"http://127.0.0.1:17495/profiles?id=new&curate={job['job_id']}"
+    again = client.get(f"/curate/{job['job_id']}")
+    assert again.json() == job
 
     audio = client.get(f"/curate/{job['job_id']}/audio", params={"start": 1, "end": 3})
     assert audio.headers["content-type"] == "audio/wav"

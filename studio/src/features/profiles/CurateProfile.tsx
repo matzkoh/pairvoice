@@ -1,11 +1,11 @@
 import { useQueryClient } from '@tanstack/react-query'
 import { cn } from 'cn'
-import { useState, useTransition } from 'react'
+import { useEffect, useEffectEvent, useState, useTransition } from 'react'
 
 import { Button } from '@/components/ui/button'
 import { Input } from '@/components/ui/input'
 import { Textarea } from '@/components/ui/textarea'
-import { ApiError, apiSend, apiSendForm, toErrorMessage } from '@/lib/api'
+import { ApiError, apiGet, apiSend, apiSendForm, toErrorMessage } from '@/lib/api'
 import type { CurateAnalysis, CurateReport, CurateResponse } from '@/lib/api-types'
 import { usePersistedChoice } from '@/lib/usePersistedChoice'
 
@@ -25,6 +25,10 @@ const LAYOUTS: [Layout, string][] = [
 ]
 
 type Props = {
+  // 開く解析の ID（URL の ?curate=）。API で解析し、studio_url で渡されたときに来る
+  jobId?: string
+  // 画面で解析し直したり素材を替えたりしたら、URL の解析の ID を書き換える
+  onJobChange?: (jobId: string | undefined) => void
   onStatus: (status: ProfileStatus) => void
   onCreated: (id: string) => void
 }
@@ -32,7 +36,7 @@ type Props = {
 // 長い・形式がばらばら・BGM の乗った音声や動画から、いちばん多く話す人のきれいな
 // 区間を選んで参照音声にする。サーバーが解析して候補の区間と自動で選ぶ見込みを返し、
 // タイムラインで聴いて選び直してから作る。解析はサーバーに残るので、選び直して何度でも作れる
-export function CurateProfile({ onStatus, onCreated }: Props) {
+export function CurateProfile({ jobId, onJobChange, onStatus, onCreated }: Props) {
   const queryClient = useQueryClient()
   const [files, setFiles] = useState<File[]>([])
   const [name, setName] = useState('')
@@ -58,6 +62,46 @@ export function CurateProfile({ onStatus, onCreated }: Props) {
   const canSave = !!analysis && name.trim() !== '' && lengthOk && !saving
   const isAuto = !!analysis && sameSet(selected, analysis.preselected)
 
+  function open(result: CurateAnalysis) {
+    setAnalysis(result)
+    setSelected(new Set(result.preselected))
+    setCreated(null)
+    const first = result.files[0]
+    if (first && name === '') setName(stripExtension(first.name))
+  }
+
+  // URL の解析を開く。開いている解析と同じなら何もしない（画面で解析して URL を書き換えたとき）
+  const isOpen = useEffectEvent((job: string) => analysis?.job_id === job)
+  const opened = useEffectEvent(open)
+  const failedToOpen = useEffectEvent((err: unknown) => {
+    if (isExpired(err)) expire()
+    else onStatus({ message: `解析を開けませんでした: ${toErrorMessage(err)}`, isError: true })
+  })
+
+  // 解析がサーバーから消えていた（使わずに1時間たった・常駐サーバーを再起動した）
+  function expire() {
+    setAnalysis(null)
+    if (jobId) onJobChange?.(undefined)
+    onStatus({
+      message:
+        '解析が消えていました（使わずに1時間たつと消えます）。素材を選んで解析し直してください',
+      isError: true,
+    })
+  }
+
+  useEffect(() => {
+    let current = true
+    if (jobId && !isOpen(jobId)) {
+      apiGet<CurateAnalysis>(`/curate/${jobId}`, { allowNotFound: true }).then(
+        (result) => current && opened(result),
+        (err: unknown) => current && failedToOpen(err),
+      )
+    }
+    return () => {
+      current = false
+    }
+  }, [jobId])
+
   function forget() {
     if (analysis) {
       // 消さなくても1時間で消える。消せなくても画面の操作は止めない
@@ -67,6 +111,7 @@ export function CurateProfile({ onStatus, onCreated }: Props) {
     }
     setAnalysis(null)
     setCreated(null)
+    if (jobId) onJobChange?.(undefined)
   }
 
   function analyze() {
@@ -77,8 +122,8 @@ export function CurateProfile({ onStatus, onCreated }: Props) {
     startAnalyzing(async () => {
       try {
         const result = await apiSendForm<CurateAnalysis>('/curate', form)
-        setAnalysis(result)
-        setSelected(new Set(result.preselected))
+        open(result)
+        onJobChange?.(result.job_id)
       } catch (err: unknown) {
         onStatus({ message: `解析できませんでした: ${toErrorMessage(err)}`, isError: true })
       }
@@ -112,12 +157,8 @@ export function CurateProfile({ onStatus, onCreated }: Props) {
         onStatus({ message: `「${response.profile.name}」を作りました`, isError: false })
         setCreated(response)
       } catch (err: unknown) {
-        if (err instanceof ApiError && err.status === 404) {
-          setAnalysis(null)
-          onStatus({
-            message: '解析が消えていました（1時間使わないと消えます）。もう一度解析してください',
-            isError: true,
-          })
+        if (isExpired(err)) {
+          expire()
           return
         }
         onStatus({ message: `作れませんでした: ${toErrorMessage(err)}`, isError: true })
@@ -137,12 +178,12 @@ export function CurateProfile({ onStatus, onCreated }: Props) {
               label="ファイルを選ぶ"
               accept="audio/*,video/*"
               multiple
-              summary={describeFiles(files)}
+              summary={describeFiles(files, analysis)}
               ariaLabel="素材のファイル"
               onPick={(picked) => {
                 setFiles(picked)
                 forget()
-                if (picked[0] && name === '') setName(picked[0].name.replace(/\.[^.]+$/, ''))
+                if (picked[0] && name === '') setName(stripExtension(picked[0].name))
               }}
             />
             <Button
@@ -278,9 +319,23 @@ function selectedSeconds(analysis: CurateAnalysis, selected: ReadonlySet<number>
     .reduce((sum, c) => sum + c.end - c.start, 0)
 }
 
-function describeFiles(files: File[]): string {
+function isExpired(err: unknown): boolean {
+  return err instanceof ApiError && err.status === 404
+}
+
+function stripExtension(name: string): string {
+  return name.replace(/\.[^.]+$/, '')
+}
+
+// URL から開いた解析は、手元にファイルが無い。解析した素材の名前を見せる
+function describeFiles(files: File[], analysis: CurateAnalysis | null): string {
   const [first, ...rest] = files
-  if (!first) return '選ばれていません'
+  if (!first) {
+    const [analyzed, ...others] = analysis?.files ?? []
+    if (!analyzed) return '選ばれていません'
+    const names = others.length === 0 ? analyzed.name : `${analyzed.name} ほか ${others.length} 件`
+    return `${names}（解析済み）`
+  }
   const megabytes = files.reduce((sum, f) => sum + f.size, 0) / 1024 ** 2
   const names = rest.length === 0 ? first.name : `${first.name} ほか ${rest.length} 件`
   return `${names}（${megabytes.toFixed(1)} MB）`
