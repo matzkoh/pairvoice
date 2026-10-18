@@ -131,10 +131,10 @@ async def test_build_prefers_main_speaker_without_background():
         "chosen": True,
     }
     starts = [p["start"] for p in report["pieces"]]
-    # 背景音の大きい 32・38 秒の区間より、静かな区間を選ぶ。18 秒では TARGET_SECONDS に
-    # 届かないので、MAX_REFERENCE_SECONDS に収まる4つ目も足す
+    # 背景音の大きい 32・38 秒の区間より、静かな区間を選ぶ。静かな4つで約 24 秒になり、
+    # 背景音の大きい区間はどちらも MAX_REFERENCE_SECONDS に収まらない
     assert starts == pytest.approx(heads(1.0, 10.0, 17.0, 24.0), abs=0.05)
-    assert curate.TARGET_SECONDS <= report["seconds"] <= curate.MAX_REFERENCE_SECONDS
+    assert report["seconds"] <= curate.MAX_REFERENCE_SECONDS
     assert outcome.sample_rate == OUTPUT_RATE
     assert np.abs(outcome.samples).max() <= 1.0
     # 4つの区間と間の無音
@@ -355,8 +355,8 @@ def test_snap_edges_stays_off_the_other_speaker():
 
 
 async def test_build_fills_by_rank_even_when_one_piece_stands_out():
-    # 1つだけ背景音の無い区間があり、残りは背景音が少し大きい。点の差で切らず、20 秒に届く
-    # まで点の高い順に取る
+    # 1つだけ背景音の無い区間があり、残りは背景音が少し大きい。点の差で切らず、
+    # MAX_REFERENCE_SECONDS に収まるだけ点の高い順に取る
     plan = [
         (1, 7, 0.5, 220),
         (9, 15, 0.5, 220),
@@ -366,7 +366,6 @@ async def test_build_fills_by_rank_even_when_one_piece_stands_out():
     ]
     outcome = await run(material(plan))
     assert len(outcome.report["pieces"]) == 4
-    assert outcome.report["seconds"] >= curate.TARGET_SECONDS
 
 
 def test_measure_voice_reads_pitch_loudness_and_brightness():
@@ -428,14 +427,14 @@ async def test_render_refuses_a_bad_selection(selection, message):
 
 
 async def test_describe_lists_candidates_on_the_stream_timeline():
-    plan = [(1 + 7 * k, 6 + 7 * k, 0.4, 220) for k in range(5)]
+    plan = [(1 + 7 * k, 6 + 7 * k, 0.4, 220) for k in range(6)]
     analysis = await run_analyze(material(plan))
     described = curate.describe(analysis)
-    assert [c["index"] for c in described["candidates"]] == list(range(5))
+    assert [c["index"] for c in described["candidates"]] == list(range(6))
     assert described["candidates"][0]["pitch_hz"] == pytest.approx(220, rel=0.03)
-    # 5 秒の区間を TARGET_SECONDS に届くまで（どれも同じ声なので、どの4つでも）
-    assert len(described["preselected"]) == 4
-    assert described["files"] == [{"name": "a.wav", "offset": 0.0, "seconds": 35.0}]
+    # 5 秒の区間を TARGET_SECONDS に届くまで（どれも同じ声なので、どの5つでも）
+    assert len(described["preselected"]) == 5
+    assert described["files"] == [{"name": "a.wav", "offset": 0.0, "seconds": 42.0}]
     assert {s["speaker"] for s in described["segments"]} == {0}
 
 

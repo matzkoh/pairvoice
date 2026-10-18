@@ -98,7 +98,7 @@ studio の「プロファイル」画面で、
 API なら、声の描写を渡すだけで1回でプロファイルにできる（`POST /api/profiles/design`）。
 何も作らなくても、最初の読み上げのときに既定の声が1つ作られる。
 
-雑多なファイルから作るとき（studio の「素材から作る」、API なら `POST /api/profiles/curate`）は、ファイルをまとめて話者を分け、いちばん多く話す人の声から BGM や雑音の少ない区間を合わせて 20 秒ほど選び、雑音を除いてつなぐ。
+雑多なファイルから作るとき（studio の「素材から作る」、API なら `POST /api/profiles/curate`）は、ファイルをまとめて話者を分け、いちばん多く話す人の声から BGM や雑音の少ない区間を合わせて 26〜28 秒ほど選び、雑音を除いてつなぐ。
 ファイルをまたいでも同じ人は同じ人とみなす（全体で4人まで）。
 どのファイルのどの区間を使ったかが返るので、聞いて違和感があれば素材を変えて作り直す。
 ファイルの読み込みに [ffmpeg](https://ffmpeg.org/)（`brew install ffmpeg`）を使い、話者分離（[Sortformer](https://huggingface.co/mlx-community/diar_streaming_sortformer_4spk-v2.1-fp16)）と雑音除去（[MossFormer2 SE 48K](https://huggingface.co/starkdmi/MossFormer2_SE_48K_MLX)、Apache-2.0）のモデルを初めて使うときにダウンロードする。

@@ -86,8 +86,9 @@ EDGE_PAD_SECONDS = 0.1
 PAUSE_MIN_SECONDS = 0.15
 # 参照音声の長さ。TARGET_SECONDS に届くまで、MAX_REFERENCE_SECONDS を超えない区間を足す。
 # 区間は話の切れ目で切るので長さがまちまちで、ちょうど TARGET_SECONDS には詰まらない。
-# Irodori-TTS は 30 秒までを使う
-TARGET_SECONDS = 20.0
+# Irodori-TTS は 30 秒までを使う。長いほど合成した声が元の声に近い（12 本の素材で、区間の
+# 組を変えて合成し話者照合のモデルで測ると、20 秒前後より 24〜28 秒の方が近かった）
+TARGET_SECONDS = 26.0
 MAX_REFERENCE_SECONDS = 28.0
 # これより短くしか集まらなければ作らない
 MIN_TOTAL_SECONDS = 6.0

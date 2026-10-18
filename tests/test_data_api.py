@@ -255,14 +255,14 @@ def analyze_upload(client, files):
 
 @needs_ffmpeg
 def test_curate_job_lists_candidates_and_builds_from_a_selection(client, tmp_path):
-    plan = [(1 + 7 * k, 6 + 7 * k, 0.5, 220) for k in range(5)]
+    plan = [(1 + 7 * k, 6 + 7 * k, 0.5, 220) for k in range(6)]
     analyzed = analyze_upload(client, [("ドラマ.wav", speech_wav(tmp_path, plan))])
 
     assert analyzed.status_code == 201
     job = analyzed.json()
     assert job["files"][0]["name"] == "ドラマ.wav"
-    assert [c["index"] for c in job["candidates"]] == list(range(5))
-    assert len(job["preselected"]) == 4
+    assert [c["index"] for c in job["candidates"]] == list(range(6))
+    assert len(job["preselected"]) == 5
     assert job["envelope"]["levels"]
     assert job["limits"]["max_seconds"] == 28.0
     # 利用者に選んでもらうときは、studio の「素材から作る」をこの解析で開く
@@ -283,7 +283,7 @@ def test_curate_job_lists_candidates_and_builds_from_a_selection(client, tmp_pat
     assert first.json()["profile"]["source"] == "curate"
     # 解析は残るので、自動でも作れる
     auto = client.post(f"/curate/{job['job_id']}/profile", json={"name": "自動の声"})
-    assert len(auto.json()["report"]["pieces"]) == 4
+    assert len(auto.json()["report"]["pieces"]) == 5
 
     assert client.delete(f"/curate/{job['job_id']}").json() == {"ok": True}
     gone = client.post(f"/curate/{job['job_id']}/profile", json={"name": "x", "pieces": [0, 1]})
