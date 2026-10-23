@@ -27,8 +27,9 @@ sampler は項目ごとに speak() の引数 → スタイル → config.toml �
 プロファイルの声も、参照音声から作った表現を取っておいて同じ口から差し込む（参照音声の
 符号化を合成のたびにやり直さない）。
 
-読み上げ（speak_sentences）は文ごとに合成し、できた文から返す。呼び手は最初の文を鳴らして
-いる間に次の文を合成できるので、全文の合成を待たずに鳴り始める。
+読み上げ（speak_sentences）は既定で全文を1回で合成する。設定の split_sentences を入れると
+文ごとに合成し、できた文から返す。呼び手は最初の文を鳴らしている間に次の文を合成できるので、
+全文の合成を待たずに鳴り始める。
 """
 
 from __future__ import annotations
@@ -337,9 +338,9 @@ class MlxAudioBackend:
         profile_id: str | None = None,
         style: str | None = None,
     ) -> Iterator[SpeechResult]:
-        """文ごとに合成し、できた順に返す。引数は speak() と同じ意味。
+        """合成し、できた順に返す。引数は speak() と同じ意味。
 
-        声は最初の文の前に1回だけ決める。
+        設定の split_sentences が無ければ全文を1文として合成する。声は最初の文の前に1回だけ決める。
         """
         voice = self._voice(caption=caption, profile_id=profile_id, style=style)
         scale = voice.sampler.get("duration_scale")
@@ -347,7 +348,9 @@ class MlxAudioBackend:
         shortened = dataclasses.replace(
             voice, sampler={**voice.sampler, "duration_scale": scale * NON_FINAL_DURATION_SCALE}
         )
-        *leading, last = split_sentences(self._read(text)) or [text]
+        read = self._read(text)
+        sentences = split_sentences(read) if self._config.split_sentences else [read]
+        *leading, last = sentences or [text]
         for sentence in leading:
             yield self._save(*self._generate(sentence, shortened))
         yield self._save(*self._generate(last, voice))

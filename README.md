@@ -201,7 +201,7 @@ Claude Code からはプラグインの `config` スキルで頼める。
 | --- | --- |
 | （最上位） | `port`（常駐サーバーが待ち受けるポート） |
 | `[llm]` | `model`（要約のモデル） |
-| `[tts]` | `model`（音声合成のモデル）、`output_max_age_days`（合成した wav を消すまでの日数。既定 7、0 で消さない） |
+| `[tts]` | `model`（音声合成のモデル）、`output_max_age_days`（合成した wav を消すまでの日数。既定 7、0 で消さない）、`split_sentences`（読み上げを文ごとに合成し、できた文から鳴らす。鳴り始めは早くなるが文の間の抑揚がつながらない。既定 false） |
 | `[tts.profile]` | 最初の声を作るときだけ使う。`ref_audio`（取り込む wav）、`caption`（声の描写） |
 | `[stt]` | `model`（`/api/transcribe` の聞き取りのモデル。既定は whisper-large-v3-turbo）、`language`（モデルに渡す言語。既定 `ja`） |
 | `[curate]` | `diarize_model`（`/api/profiles/curate` の話者分離のモデル）、`enhance_model`（雑音除去のモデル） |

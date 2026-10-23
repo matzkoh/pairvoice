@@ -94,6 +94,8 @@ class TTSConfig:
     output_dir: Path = field(default_factory=lambda: default_data_root() / "generations")
     # output_dir の wav を、作ってからこの日数で消す。0 で消さない
     output_max_age_days: int = 7
+    # 読み上げを文ごとに合成し、できた文から鳴らす。鳴り始めは早くなるが、文の間の抑揚がつながらない
+    split_sentences: bool = False
     sampler: SamplerConfig = field(default_factory=SamplerConfig)
     profile: ProfileConfig = field(default_factory=ProfileConfig)
 

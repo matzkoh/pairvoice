@@ -621,6 +621,8 @@ def test_speak_with_mix_injects_weighted_speaker_state(no_ref_config, tmp_path, 
 def test_speak_injects_the_profile_speaker_state_measured_once(config, tmp_path, monkeypatch):
     import mlx.core as mx
 
+    config = dataclasses.replace(config, split_sentences=True)
+
     model = MixModel(FakeResult(np.zeros(480, dtype=np.float32)))
     backend = make_backend(config, model, tmp_path, monkeypatch)
     measured = []
@@ -795,7 +797,20 @@ def test_speak_sentences_reads_text_without_end_marks_as_one_sentence(
     ]
 
 
+def test_speak_sentences_reads_whole_text_at_once_by_default(config, tmp_path, monkeypatch):
+    model = FakeModel(FakeResult(np.zeros(480, dtype=np.float32)))
+    backend = make_backend(config, model, tmp_path, monkeypatch)
+
+    parts = list(backend.speak_sentences("一つ目。二つ目。"))
+
+    assert [(call["text"], call.get("duration_scale")) for call in model.calls] == [
+        ("一つ目。二つ目。", None)
+    ]
+    assert len(parts) == 1
+
+
 def test_speak_sentences_shortens_all_but_the_last_sentence(config, tmp_path, monkeypatch):
+    config = dataclasses.replace(config, split_sentences=True)
     model = FakeModel(FakeResult(np.linspace(-0.5, 0.5, 4800, dtype=np.float32)))
     backend = make_backend(config, model, tmp_path, monkeypatch)
 
@@ -812,7 +827,9 @@ def test_speak_sentences_shortens_all_but_the_last_sentence(config, tmp_path, mo
 
 def test_speak_sentences_scales_the_configured_duration(config, tmp_path, monkeypatch):
     config = dataclasses.replace(
-        config, sampler=dataclasses.replace(config.sampler, duration_scale=1.2)
+        config,
+        split_sentences=True,
+        sampler=dataclasses.replace(config.sampler, duration_scale=1.2),
     )
     model = FakeModel(FakeResult(np.zeros(480, dtype=np.float32)))
     backend = make_backend(config, model, tmp_path, monkeypatch)
@@ -826,6 +843,7 @@ def test_speak_sentences_scales_the_configured_duration(config, tmp_path, monkey
 
 
 def test_join_concatenates_parts_into_one_wav(config, tmp_path, monkeypatch):
+    config = dataclasses.replace(config, split_sentences=True)
     model = FakeModel(FakeResult(np.linspace(-0.5, 0.5, 48000, dtype=np.float32)))
     backend = make_backend(config, model, tmp_path, monkeypatch)
     parts = list(backend.speak_sentences("一つ目。二つ目。"))

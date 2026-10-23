@@ -32,6 +32,7 @@ def test_defaults_when_file_missing(tmp_path):
     assert config.mute.audio_output_ignore_processes == ()
     assert config.playback.volume == 1.0
     assert config.tts.output_max_age_days == 7
+    assert config.tts.split_sentences is False
     assert config.eval.style == "any"
     assert config.tts.output_dir.is_absolute()
     assert "~" not in config.tts.output_dir.parts
@@ -57,6 +58,7 @@ def test_overrides_and_tilde_expansion(tmp_path, monkeypatch):
                 'model = "test/llm"',
                 "[tts]",
                 'output_dir = "~/sounds"',
+                "split_sentences = true",
                 "[tts.sampler]",
                 "cfg_scale_speaker = 2.5",
                 "[tts.profile]",
@@ -76,6 +78,7 @@ def test_overrides_and_tilde_expansion(tmp_path, monkeypatch):
     assert config.llm.model == "test/llm"
     assert config.llm.max_tokens == 128  # 未指定は既定値のまま
     assert config.tts.output_dir == tmp_path / "sounds"
+    assert config.tts.split_sentences is True
     assert config.tts.sampler.cfg_scale_speaker == 2.5
     assert config.tts.sampler.cfg_guidance_mode is None  # 未指定はモデル既定に任せる
     assert config.tts.profile.ref_audio == tmp_path / "voice" / "ref.wav"
