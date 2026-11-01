@@ -487,8 +487,8 @@ def test_resolve_sampler_overlays_override_on_config(config, tmp_path):
 def test_resolve_sampler_disables_speaker_kv_rollback_when_scale_is_set(config, tmp_path):
     backend = MlxAudioBackend(config, data_dir=tmp_path)
 
-    # モデル既定（0.9）のままだと mlx-audio が巻き戻しで落ちる（理由は resolve_sampler
-    # のコメント）。None を連れていくのはこのときだけで、他の項目は動かさない
+    # スケールを全ステップに効かせる（理由は resolve_sampler のコメント）。
+    # None を連れていくのはこのときだけで、他の項目は動かさない
     assert backend.resolve_sampler({"speaker_kv_scale": 0.8}) == {
         "cfg_guidance_mode": "alternating",
         "cfg_scale_speaker": 2.5,

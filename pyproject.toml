@@ -22,13 +22,13 @@ classifiers = [
 # 引数名（ずれると黙って捨てられる）とバグの迂回に頼っているので、確かめた版に固定する。
 # 上げるときは実モデルで読み上げを聞いてから
 dependencies = [
-    "fastapi>=0.141,<1",
+    "fastapi>=0.162,<1",
     "uvicorn>=0.54,<1",
-    "mlx-lm>=0.32.0,<0.33",
-    "mlx-audio==0.5.7",
-    "pyobjc-framework-Cocoa>=12,<13",
-    "pyobjc-framework-avfoundation>=12,<13",
-    "python-multipart>=0.0.32,<0.1",
+    "mlx-lm>=0.32.2,<0.33",
+    "mlx-audio==0.6.3",
+    "pyobjc-framework-Cocoa>=13,<14",
+    "pyobjc-framework-avfoundation>=13,<14",
+    "python-multipart>=0.0.33,<0.1",
 ]
 
 [project.urls]
@@ -43,9 +43,9 @@ dev = [
     "pytest",
     "pytest-asyncio",
     "httpx2",
-    "ruff>=0.16.10",
+    "ruff>=0.17.3",
     # ty はベータで、版が上がると判定が変わる。上げるときは指摘を見直す
-    "ty==0.0.84",
+    "ty==0.0.95",
 ]
 
 [build-system]

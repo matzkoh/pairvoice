@@ -164,13 +164,10 @@ class MlxAudioBackend:
             merged.update(override)
         resolved = {k: v for k, v in merged.items() if v is not None}
         if "speaker_kv_scale" in resolved and "speaker_kv_min_t" not in merged:
-            # mlx-audio の巻き戻しを踏まないための明示。モデル既定の speaker_kv_min_t
-            # （0.9）のままだと、t がそれを跨いだステップで話者 KV のスケールを戻す分岐に
-            # 入るが、そこでキャッシュを組み直す複製数が単一コンテキスト前提の2で固定
-            # されている。話者と caption を併せ持つモデルでは CFG のバッチが 4 なので、
-            # 戻した次のステップで attention の concat がバッチ不一致で落ちる
-            # （mlx-audio 0.5.7 でも未修正）。None なら巻き戻しの分岐自体に入らず、
-            # スケールは全ステップに効く。
+            # モデル既定の speaker_kv_min_t（0.9）のままだと、t がそれを跨いだステップで
+            # 話者 KV のスケールが戻る。mlx-audio 0.6.0 までは、話者と caption を併せ持つ
+            # モデルでこの巻き戻しが落ちたので None にして避けていた（0.6.1 で修正）。
+            # None なら巻き戻さずスケールが全ステップに効く。その聞こえ方を保つため残す。
             #
             # speaker_kv_min_t が SamplerConfig の項目になった日には、指定された値を
             # 黙って捨てないよう手を引く（巻き戻しを望んだのはユーザーである）。
