@@ -1,8 +1,7 @@
 import path from 'node:path'
 
-import babel from '@rolldown/plugin-babel'
 import tailwindcss from '@tailwindcss/vite'
-import react, { reactCompilerPreset } from '@vitejs/plugin-react'
+import react from '@vitejs/plugin-react'
 import { defineConfig } from 'vite'
 
 // 画面と API はどちらも pairvoice が配る。dev server は 17493 を所有する。
@@ -22,7 +21,7 @@ const PAIRVOICE_ORIGIN = process.env.PAIRVOICE_URL
 const proxy = { '/api': { target: PAIRVOICE_ORIGIN, changeOrigin: true } }
 
 export default defineConfig({
-  plugins: [react(), babel({ presets: [reactCompilerPreset()] }), tailwindcss()],
+  plugins: [react(), tailwindcss()],
   resolve: { alias: { '@': path.resolve(import.meta.dirname, 'src') } },
   server: { host: DEV_HOST, port: DEV_PORT, strictPort: true, proxy },
   preview: { host: DEV_HOST, port: DEV_PORT, strictPort: true, proxy },

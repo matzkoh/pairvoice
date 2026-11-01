@@ -2,8 +2,8 @@
   "$schema": "./node_modules/oxlint/configuration_schema.json",
   // react-perf は載せない。ルールが perf カテゴリにあり、下の categories には
   // 入れていないので1つも起動しない（載せても無意味）。perf を有効化する道は採らない
-  // ——React Compiler が入っているので「インライン object を prop に渡すな」系は
-  // 自動メモ化が解決する対象で、警告はノイズになる。
+  // ——「インライン object を prop に渡すな」系は、遅さを測ってから直すものなので、
+  // 一律の警告はノイズになる。
   "plugins": [
     "import",
     "jsx-a11y",
