@@ -70,14 +70,6 @@ export function CurateProfile({ jobId, onJobChange, onStatus, onCreated }: Props
     if (first && name === '') setName(stripExtension(first.name))
   }
 
-  // URL の解析を開く。開いている解析と同じなら何もしない（画面で解析して URL を書き換えたとき）
-  const isOpen = useEffectEvent((job: string) => analysis?.job_id === job)
-  const opened = useEffectEvent(open)
-  const failedToOpen = useEffectEvent((err: unknown) => {
-    if (isExpired(err)) expire()
-    else onStatus({ message: `解析を開けませんでした: ${toErrorMessage(err)}`, isError: true })
-  })
-
   // 解析がサーバーから消えていた（使わずに1時間たった・常駐サーバーを再起動した）
   function expire() {
     setAnalysis(null)
@@ -88,6 +80,14 @@ export function CurateProfile({ jobId, onJobChange, onStatus, onCreated }: Props
       isError: true,
     })
   }
+
+  // URL の解析を開く。開いている解析と同じなら何もしない（画面で解析して URL を書き換えたとき）
+  const isOpen = useEffectEvent((job: string) => analysis?.job_id === job)
+  const opened = useEffectEvent(open)
+  const failedToOpen = useEffectEvent((err: unknown) => {
+    if (isExpired(err)) expire()
+    else onStatus({ message: `解析を開けませんでした: ${toErrorMessage(err)}`, isError: true })
+  })
 
   useEffect(() => {
     let current = true

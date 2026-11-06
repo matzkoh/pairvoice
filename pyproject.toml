@@ -25,7 +25,7 @@ dependencies = [
     "fastapi>=0.162,<1",
     "uvicorn>=0.54,<1",
     "mlx-lm>=0.32.2,<0.33",
-    "mlx-audio==0.6.3",
+    "mlx-audio==0.6.4",
     "pyobjc-framework-Cocoa>=13,<14",
     "pyobjc-framework-avfoundation>=13,<14",
     "python-multipart>=0.0.33,<0.1",
@@ -43,9 +43,9 @@ dev = [
     "pytest",
     "pytest-asyncio",
     "httpx2",
-    "ruff>=0.17.3",
+    "ruff>=0.17.4",
     # ty はベータで、版が上がると判定が変わる。上げるときは指摘を見直す
-    "ty==0.0.95",
+    "ty==0.0.98",
 ]
 
 [build-system]
