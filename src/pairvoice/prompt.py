@@ -52,17 +52,25 @@ class SummaryPrompt:
         return f"{base.rstrip()}\n\n{tone}\n"
 
     def compose_for(
-        self, voice: str | None, common: str | None = None, tone: str | None = None
+        self,
+        voice: str | None,
+        common: str | None = None,
+        tone: str | None = None,
+        group: str | None = None,
     ) -> tuple[str, Profile | None]:
-        """声の名前か ID（省けば使用中の声）で組む。無い声は ProfileNotFound。"""
-        profile = self.profiles.resolve(voice)
+        """声の名前か ID（省けば使用中の声）で組む。無い声は ProfileNotFound。group は ProfileStore.pick と同じ。"""
+        profile = self.profiles.resolve(voice, group)
         return self.compose(profile, common, tone), profile
 
     def compose_summary(
-        self, voice: str | None, common: str | None = None, tone: str | None = None
+        self,
+        voice: str | None,
+        common: str | None = None,
+        tone: str | None = None,
+        group: str | None = None,
     ) -> tuple[str, Profile | None]:
         """要約に渡すプロンプト。compose_for と同じく組み、空なら PromptMissing。"""
-        system, profile = self.compose_for(voice, common, tone)
+        system, profile = self.compose_for(voice, common, tone, group)
         if not system.strip():
             raise PromptMissing
         return system, profile

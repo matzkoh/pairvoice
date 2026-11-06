@@ -65,7 +65,7 @@ pairvoice の常駐サーバーの API。要約（mlx-lm）と音声合成（Iro
 - 待ち受けは 127.0.0.1 だけ。ブラウザで開いた外部のページ（Host か Origin がループバックでない要求）は 403 で断る
 - ミュート中は `/speak`（鳴らす）と `respect_mute` 付きの `/llm`・`/warmup` を 409 `{"error": "muted", "reason": ...}` で断る。`/speak` は `bypass_mute` で鳴らせる。`/synthesize` は wav を作るだけなのでミュートを見ない
 - 声は `voice`（プロファイルの名前か ID）、話し方は `style`（studio の「スタイル」画面で作る名前）で選ぶ。選べる名前は `GET /profiles` と `GET /styles` で引ける
-- ランダムの声（`source` が `random` のプロファイル）は、要約・合成のたびにメンバーから1つを選ぶ（`order` が `shuffle` なら、全員を一巡するまで同じ声を選ばない）。`/llm` が返す `voice` を `/speak` に渡すと、要約の口調と同じ声で読む（`/narrate` はこれを1回で行う）
+- ランダムの声（`source` が `random` のプロファイル）は、要約・合成のたびにメンバーから1つを選ぶ（`order` が `shuffle` なら、全員を一巡するまで同じ声を選ばない）。`group` を渡すと、同じ `group` には同じ声を選び続ける（読み上げフックは Claude Code のセッションごとに渡す）。`/llm` が返す `voice` を `/speak` に渡すと、要約の口調と同じ声で読む（`/narrate` はこれを1回で行う）
 """
 
 # /docs の「Try it out」の初期値。例が無いと Swagger UI はすべての項目を 0 で埋めた本文を出し、
@@ -90,6 +90,13 @@ WaitDownload = Annotated[
     bool,
     Field(
         description="false なら、初回のモデルのダウンロード中は待たずに 503 `model_downloading` を返す"
+    ),
+]
+Group = Annotated[
+    str | None,
+    Field(
+        description="同じ値の読み上げには、ランダムの声から同じ声を選ぶ。初めての値には新しく選ぶ"
+        "（`shuffle` なら、ほかの値と別の声を選ぶ）。省くと毎回選ぶ。ランダムでない声では見ない"
     ),
 ]
 DataAudioPath = Annotated[str, Field(description="データの置き場所からの相対パス（wav）")]
@@ -134,6 +141,7 @@ class SummaryRequest(BaseModel):
         description="口調を使う声（プロファイル）の名前か ID。`system` を省いたときだけ見る。"
         "省くと使用中のプロファイル",
     )
+    group: Group = None
     prompt: str = Field(description="要約する文")
     # mlx_lm は負の値を無制限とみなす。上限は読み上げ要約の既定（128）に十分な余裕を
     # 持たせた値で、これを超える生成は Runner を塞いでフックの読み上げを待たせるだけ
@@ -162,6 +170,7 @@ class NarrateRequest(BaseModel):
         description="声（プロファイル）の名前か ID。要約の口調もこの声のもの。省くと使用中のプロファイル",
     )
     style: str | None = Field(default=None, description="スタイルの名前（`/speak` と同じ）")
+    group: Group = None
     wait_download: WaitDownload = True
 
 
@@ -247,6 +256,7 @@ class SynthesisRequest(BaseModel):
 
 class SpeakRequest(SynthesisRequest):
     bypass_mute: bool = Field(default=False, description="ミュート中でも鳴らす")
+    group: Group = None
 
 
 class SynthesizeRequest(SynthesisRequest):
@@ -411,7 +421,7 @@ def create_app(engine: Engine) -> FastAPI:
         if request.system is not None:
             system, profile = request.system, None
         else:
-            system, profile = summary_prompt.compose_summary(request.voice)
+            system, profile = summary_prompt.compose_summary(request.voice, group=request.group)
         text = await engine.summarize(
             system=system,
             prompt=request.prompt,
@@ -448,11 +458,17 @@ def create_app(engine: Engine) -> FastAPI:
     )
     async def speak(request: Annotated[SpeakRequest, Body(openapi_examples=_SPEAK_EXAMPLES)]):
         """再生の列に積んだら返り、鳴り終わるのは待たない。積んだあとに入ったミュートでは鳴らない。"""
+        profile_id = request.voice
+        if request.group is not None:
+            # グループの声はここで決めて名指しする（合成のスレッドまで group を持ち込まない）
+            picked = summary_prompt.profiles.resolve(request.voice, request.group)
+            if picked is not None:
+                profile_id = picked.id
         result = await engine.speak(
             request.text,
             bypass_mute=request.bypass_mute,
             caption=request.caption,
-            profile_id=request.voice,
+            profile_id=profile_id,
             wait_download=request.wait_download,
             style=request.style,
         )
@@ -490,6 +506,7 @@ def create_app(engine: Engine) -> FastAPI:
             message_id=request.message_id,
             voice=request.voice,
             style=request.style,
+            group=request.group,
             wait_download=request.wait_download,
         )
 

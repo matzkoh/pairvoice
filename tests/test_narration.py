@@ -2,7 +2,7 @@ import pytest
 
 from pairvoice.corpus import CORPUS_FILENAME, read_jsonl
 from pairvoice.narration import contains_japanese, has_speakable_content
-from pairvoice.profiles import ProfileNotFound
+from pairvoice.profiles import ProfileNotFound, ProfileStore
 from tests.fakes import FakeProbe
 from tests.test_engine import FakeLLM, FakeTTS
 from tests.test_server import build
@@ -61,6 +61,24 @@ def test_speaks_the_summary_in_the_voice_whose_tone_it_used_and_records_it(data_
     assert record["voice"] == voice.id
     assert record["style"] == "ゆっくり"
     assert record["summary_model"]
+
+
+def test_group_keeps_the_random_voice_for_summary_and_speech(data_root, monkeypatch):
+    tts = FakeTTS()
+    _, client = build(tts=tts, data_root=data_root)
+    members = [make_voice(data_root, name).id for name in ("甲", "乙")]
+    store = ProfileStore(data_root / "profiles")
+    store.activate(store.create_random(name="ランダム", members=members).id)
+    draws = iter([members, list(reversed(members))] * 3)
+    monkeypatch.setattr("pairvoice.profiles.random.sample", lambda seq, k: list(next(draws)))
+
+    assert narrate(client, group="s1").json()["voice"] == members[0]
+    assert client.post("/speak", json={"text": "テスト", "group": "s1"}).status_code == 200
+    assert (
+        client.post("/llm", json={"prompt": "作業ログ", "group": "s1"}).json()["voice"]
+        == members[0]
+    )
+    assert [call["profile_id"] for call in tts.calls] == [members[0]] * 2
 
 
 def test_without_a_voice_yet_records_no_voice(data_root):

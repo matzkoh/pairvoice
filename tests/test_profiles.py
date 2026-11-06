@@ -247,6 +247,61 @@ def test_shuffle_profile_follows_member_changes(tmp_path):
         store.pick(meta)
 
 
+def test_random_profile_keeps_the_voice_it_picked_for_a_group(tmp_path, monkeypatch):
+    store = ProfileStore(tmp_path / "profiles")
+    meta, members = make_random(store)
+    # 引くたびに並びを入れ替え、group が無ければ毎回違う声になるようにする
+    draws = iter([members, list(reversed(members))] * 4)
+    monkeypatch.setattr("pairvoice.profiles.random.sample", lambda seq, k: list(next(draws)))
+
+    assert [store.pick(meta, "s1").id for _ in range(3)] == [members[0]] * 3
+    assert store.pick(meta, "s2").id == members[1]
+    assert store.pick(meta).id == members[0]
+    # 別に作った ProfileStore（再起動後）でも覚えている
+    assert ProfileStore(store.root).pick(meta, "s1").id == members[0]
+
+
+def test_group_picks_again_when_its_voice_is_gone(tmp_path):
+    store = ProfileStore(tmp_path / "profiles")
+    meta, members = make_random(store)
+    first = store.pick(meta, "s1").id
+    other = next(m for m in members if m != first)
+
+    third = store.create(name="丙", caption="", source="design", write_reference=write_wav)
+    meta = store.update(meta.id, members=[other, third.id])
+    assert store.pick(meta, "s1").id in (other, third.id)
+
+
+def test_shuffle_gives_each_group_its_own_voice(tmp_path, monkeypatch):
+    store = ProfileStore(tmp_path / "profiles")
+    meta, members = make_shuffle(store)
+    monkeypatch.setattr("pairvoice.profiles.random.sample", lambda seq, k: list(seq))
+
+    picked = [store.pick(meta, group).id for group in ("s1", "s2", "s1", "s1", "s3")]
+    # 覚えているグループは巡を進めない
+    assert picked == [members[0], members[1], members[0], members[0], members[2]]
+
+
+def test_groups_unused_for_long_are_forgotten(tmp_path):
+    store = ProfileStore(tmp_path / "profiles")
+    meta, _ = make_random(store)
+    path = store.root / "groups.json"
+    old = {"voice": "p-x", "used_at": "2000-01-01T00:00:00+00:00"}
+    path.write_text(json.dumps({f"{meta.id}/古い": old, "p-消えた声/古い": old}), encoding="utf-8")
+
+    store.pick(meta, "新しい")
+
+    assert list(json.loads(path.read_text(encoding="utf-8"))) == [f"{meta.id}/新しい"]
+
+
+def test_broken_groups_file_is_ignored(tmp_path):
+    store = ProfileStore(tmp_path / "profiles")
+    meta, members = make_random(store)
+    (store.root / "groups.json").write_text("{壊れた", encoding="utf-8")
+
+    assert store.pick(meta, "s1").id in members
+
+
 def test_order_is_only_for_random_profiles(tmp_path):
     store = ProfileStore(tmp_path / "profiles")
     meta, members = make_random(store)

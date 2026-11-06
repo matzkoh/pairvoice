@@ -7,6 +7,7 @@
 ランダムの声（source が random）は参照音声を持たず、ほかの声（メンバー）を束ねる。
 使用中にも `voice` にもでき、要約・合成のたびにメンバーから1つを選んで読む（pick）。
 選び方（order）がシャッフルなら、混ぜた順に全員を一巡するまで同じ声を選ばない。
+グループ（group）を渡すと、同じグループには前に選んだ声を選び続ける（groups.json に覚える）。
 """
 
 from __future__ import annotations
@@ -20,13 +21,20 @@ import shutil
 import threading
 from collections.abc import Callable
 from dataclasses import dataclass
-from datetime import UTC, datetime
+from datetime import UTC, datetime, timedelta
 from pathlib import Path
 
 from . import history
 from .files import atomic_write
 
 ACTIVE_FILENAME = "active"
+# ランダムの声ごとの、グループに選んだ声。常駐サーバーを入れ替えるたびに再起動するので、
+# メモリだけに持つと更新のたびに Claude Code のセッションの途中で声が変わる
+GROUPS_FILENAME = "groups.json"
+# これより長く使っていないグループは忘れる（終わったセッションで溜まり続けないように）
+GROUP_RETENTION = timedelta(days=7)
+# 同じ声を選び続けている間は、使った時刻をこれより細かく書き直さない（読み上げのたびに書かない）
+GROUP_TOUCH_INTERVAL = timedelta(days=1)
 META_FILENAME = "profile.json"
 REFERENCE_FILENAME = "reference.wav"
 PROFILES_DIRNAME = "profiles"
@@ -53,6 +61,8 @@ _write_lock = threading.RLock()
 # （合成と要約で別）ので、モジュールで持つ
 _shuffle_rounds: dict[Path, tuple[list[str], str | None]] = {}
 _shuffle_lock = threading.Lock()
+# groups.json を読んで書き戻す間を1本にする（重なると、片方が選んだ声が消える）
+_groups_lock = threading.Lock()
 
 
 @dataclass(frozen=True)
@@ -86,6 +96,15 @@ class Profile:
             "members": list(self.members),
             "order": self.order,
         }
+
+
+def _read_groups(path: Path) -> dict[str, dict[str, str]]:
+    """groups.json（`<ランダムの声の ID>/<グループ>` → 選んだ声と使った時刻）。無い・壊れているなら空。"""
+    try:
+        groups = json.loads(path.read_text(encoding="utf-8"))
+    except (OSError, ValueError):
+        return {}
+    return groups if isinstance(groups, dict) else {}
 
 
 class ProfileNotFound(Exception):
@@ -163,22 +182,55 @@ class ProfileStore:
         found = (self.get(child.name) for child in sorted(self.root.iterdir()) if child.is_dir())
         return [profile for profile in found if profile is not None]
 
-    def resolve(self, key: str | None) -> Profile | None:
+    def resolve(self, key: str | None, group: str | None = None) -> Profile | None:
         """API で選ばれた声で読む声。省けば使用中の声（まだ無ければ None）、名前か ID が無ければ ProfileNotFound。
 
-        ランダムの声なら、メンバーから1つを選んで返す
+        ランダムの声なら、メンバーから1つを選んで返す（group は pick と同じ）
         """
         profile = self.active() if key is None else self.find(key)
         if profile is None:
             if key is None:
                 return None
             raise ProfileNotFound(key)
-        return self.pick(profile)
+        return self.pick(profile, group)
 
-    def pick(self, profile: Profile) -> Profile:
-        """読む声。ランダムの声ならメンバーから1つを選び、読めるメンバーが無ければ ProfileNotFound。"""
+    def pick(self, profile: Profile, group: str | None = None) -> Profile:
+        """読む声。ランダムの声ならメンバーから1つを選び、読めるメンバーが無ければ ProfileNotFound。
+
+        group を渡すと、そのグループに前に選んだ声がまだ読めるメンバーならそれを返す。
+        初めてのグループにだけ新しく選ぶので、シャッフルならグループ同士が別の声になる
+        """
         if not profile.is_random:
             return profile
+        if group is None:
+            return self._draw(profile)
+        path = self.root / GROUPS_FILENAME
+        # ID は / を含まないので、グループに / があっても取り違えない
+        key = f"{profile.id}/{group}"
+        now = datetime.now(UTC)
+        with _groups_lock:
+            groups = _read_groups(path)
+            entry = groups.get(key) or {}
+            chosen = (
+                self._readable(entry["voice"]) if entry.get("voice") in profile.members else None
+            )
+            if (
+                chosen is not None
+                and now - datetime.fromisoformat(entry["used_at"]) < GROUP_TOUCH_INTERVAL
+            ):
+                return chosen
+            voice = chosen or self._draw(profile)
+            groups[key] = {"voice": voice.id, "used_at": now.isoformat()}
+            fresh = {
+                k: e
+                for k, e in groups.items()
+                if now - datetime.fromisoformat(e["used_at"]) <= GROUP_RETENTION
+            }
+            atomic_write(path, json.dumps(fresh, ensure_ascii=False))
+        return voice
+
+    def _draw(self, profile: Profile) -> Profile:
+        """選び方（order）に従って、メンバーから新しく1つを選ぶ。"""
         deck = random.sample(profile.members, len(profile.members))
         if profile.order != "shuffle":
             return self._first_readable(profile, deck)[1]
@@ -200,10 +252,15 @@ class ProfileStore:
     def _first_readable(self, profile: Profile, candidates: list[str]) -> tuple[int, Profile]:
         """候補を順に読み、最初に読めた声とその位置。全員を読むと読み上げのたびにメンバーの数だけ読む。"""
         for index, member in enumerate(candidates):
-            voice = self.get(member)
-            if voice is not None and not voice.is_random:
+            voice = self._readable(member)
+            if voice is not None:
                 return index, voice
         raise ProfileNotFound(profile.id)
+
+    def _readable(self, member: str) -> Profile | None:
+        """メンバーとして読める声（読めて、ランダムでない）。"""
+        voice = self.get(member)
+        return voice if voice is not None and not voice.is_random else None
 
     def tone(self, profile_id: str) -> history.VersionedText:
         """その声の要約の口調（版つき）。空なら既定の口調で読む。"""

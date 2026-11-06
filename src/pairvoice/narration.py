@@ -67,12 +67,13 @@ async def narrate(
     message_id: str,
     voice: str | None = None,
     style: str | None = None,
+    group: str | None = None,
     wait_download: bool = True,
 ) -> NarrateResponse:
     """ミュート中は要約もしない。待っている間に後発の読み上げが来たら、要約の前に捨てる。"""
     if not has_speakable_content(text):
         raise NothingToSay
-    system, profile = prompt.compose_summary(voice)
+    system, profile = prompt.compose_summary(voice, group=group)
     for _ in range(SUMMARY_ATTEMPTS):
         summary = await engine.summarize(
             system, text, respect_mute=True, droppable=True, wait_download=wait_download

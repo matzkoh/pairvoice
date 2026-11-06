@@ -42,15 +42,17 @@ cleanup_old_seen_markers() {
   find "$STATE_DIR" -maxdepth 1 -name 'seen-*' -mtime "+${SEEN_MARKER_MAX_AGE_DAYS}" -delete 2>/dev/null
 }
 
-# 入力JSONを1回だけパースし、final / message_id / delta(text) をグローバル変数にセットする。
-# final・message_id は改行を含まない前提で1行目にタブ区切りで出力し、
+# 入力JSONを1回だけパースし、final / message_id / session_id / delta(text) をグローバル変数にセットする。
+# final・message_id・session_id は改行を含まない前提で1行目に US（\x1f）区切りで並べ
+# （タブで区切ると、read が空の項目を詰めて後ろの項目がずれる）、
 # delta は改行を含み得るテキストなので2行目以降（残り全体）として扱う。
 # コマンド置換は末尾改行を除去するため、delta が空（＝末尾の"\n"が消えて改行自体が
 # 無くなる）場合は header 行しか残らない。その場合 PARSED_TEXT は空文字にする。
 parse_input() {
   local raw="$1" full header
   full=$(printf '%s' "$raw" | jq -r '
-    (.final | tostring) + "\t" + (.message_id // "") + "\n" + (.delta // "")
+    ([(.final | tostring), (.message_id // ""), (.session_id // "")] | join("\u001f"))
+    + "\n" + (.delta // "")
   ' 2>/dev/null)
   header="${full%%$'\n'*}"
   if [[ "$full" == *$'\n'* ]]; then
@@ -58,7 +60,7 @@ parse_input() {
   else
     PARSED_TEXT=""
   fi
-  IFS=$'\t' read -r PARSED_FINAL PARSED_MESSAGE_ID <<<"$header"
+  IFS=$'\x1f' read -r PARSED_FINAL PARSED_MESSAGE_ID PARSED_SESSION_ID <<<"$header"
 }
 
 # 要求に応答が無かった（curl の status が 000）理由を /health から絞る。
@@ -82,17 +84,19 @@ unanswered_reason() {
 }
 
 # 返事を pairvoice に読み上げてもらう。読めなかった理由は NARRATE_STATUS に入れる。
-# 読み辞書（dict.tsv）は pairvoice が合成の直前にかける
+# 読み辞書（dict.tsv）は pairvoice が合成の直前にかける。
+# セッションを group に渡し、ランダムの声でも同じセッションは同じ声で読む
 narrate() {
-  local text="$1" message_id="$2" response status body
+  local text="$1" message_id="$2" session_id="$3" response status body
   NARRATE_SUMMARY=""
   NARRATE_STATUS=""
   # 本文は標準入力で渡す。引数に載せると長い出力で ARG_MAX を超えて jq も curl も動かない
   response=$(printf '%s' "$text" | jq -Rs --arg message_id "$message_id" \
-    --arg voice "$VOICE" --arg style "$STYLE" \
+    --arg voice "$VOICE" --arg style "$STYLE" --arg group "$session_id" \
     '{text: ., message_id: $message_id, wait_download: false}
       + (if $voice == "" then {} else {voice: $voice} end)
-      + (if $style == "" then {} else {style: $style} end)' \
+      + (if $style == "" then {} else {style: $style} end)
+      + (if $group == "" then {} else {group: $group} end)' \
     | curl -s --max-time "$NARRATE_TIMEOUT_SECONDS" -w '\n%{http_code}' \
     -X POST "$PAIRVOICE_API/narrate" -H 'Content-Type: application/json' -H "$VERSION_HEADER" --data-binary @- 2>&1)
   status="${response##*$'\n'}"
@@ -144,7 +148,7 @@ main() {
   local seen_marker="$STATE_DIR/seen-${PARSED_MESSAGE_ID}"
   mkdir "$seen_marker" 2>/dev/null || return 0
 
-  narrate "$PARSED_TEXT" "$PARSED_MESSAGE_ID" || {
+  narrate "$PARSED_TEXT" "$PARSED_MESSAGE_ID" "$PARSED_SESSION_ID" || {
     log INFO "SKIP (${NARRATE_STATUS:-unknown})"
     return 0
   }
