@@ -73,8 +73,14 @@ class Rig:
         self.player.enqueue(Path(name), **kwargs)
 
     def idle(self, expected_sounds):
+        # 音は opener のスレッドで作られ、_play が playing を立てるのはその後なので、音の側も見る
         state = self.player.describe()
-        return len(self.sounds) >= expected_sounds and not state["playing"] and not state["waiting"]
+        return (
+            len(self.sounds) >= expected_sounds
+            and not any(sound.playing() for sound in self.sounds)
+            and not state["playing"]
+            and not state["waiting"]
+        )
 
     async def drain(self, expected_sounds):
         task = asyncio.create_task(self.player.run())
@@ -89,6 +95,7 @@ async def wait_until(condition, attempts=500):
         if condition():
             return
         await asyncio.sleep(0.002)
+    raise AssertionError("条件が満たされないまま時間切れになりました")
 
 
 async def test_plays_queued_audio_in_order():
