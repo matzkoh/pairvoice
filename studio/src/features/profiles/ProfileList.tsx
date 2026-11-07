@@ -84,9 +84,8 @@ export function ProfileList({ items, active, selected, onSelect, onCreate }: Pro
   return (
     <nav
       aria-label="プロファイル一覧"
-      // 一覧だけを送れるようにする。ページごと送ると、下の方の声を選ぶたびに中身が画面の外へ出る。
-      // 高さは開いた時点で見出しの下に収まる分（ページの見出しと知らせの行で約 11rem）
-      className="sticky top-4 flex max-h-[calc(100dvh-11rem)] flex-col gap-2"
+      // 絞り込みと新規作成は上に残し、行だけを送る
+      className="flex min-h-0 flex-1 flex-col gap-2"
     >
       <div className="flex items-center gap-1.5">
         <div className="relative min-w-0 flex-1">

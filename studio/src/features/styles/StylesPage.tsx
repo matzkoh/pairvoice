@@ -3,6 +3,7 @@ import { cn } from 'cn'
 import { Plus } from 'lucide-react'
 import { useRef, useState } from 'react'
 
+import { ListDetail } from '@/components/ListDetail'
 import { PageHeader } from '@/components/PageHeader'
 import { StatusText } from '@/components/StatusText'
 import { useTransientStatus } from '@/lib/useTransientStatus'
@@ -34,46 +35,53 @@ export function StylesPage() {
   }
 
   return (
-    <div>
-      <PageHeader
-        title="スタイル"
-        description="caption（話し方の指示）とサンプラーの組に名前を付けて保存しておき、読み上げごとに選べます。API の /speak に style で名前を渡すと、そのリクエストだけこの caption とサンプラーで読みます。変えられるのは速さ・テンション・抑揚の傾きまでで、ささやき声のような声質は参照音声で決まるので変わりません。声質を変えたいときは voice で別のプロファイルを選んでください。"
-      />
-      <div className="mb-3 min-h-4">
-        {status && <StatusText message={status.message} isError={status.isError} />}
-      </div>
-      <div className="grid grid-cols-[14rem_minmax(0,1fr)] items-start gap-6">
-        <nav aria-label="スタイル一覧" className="space-y-1">
-          <ul className="space-y-1">
-            {data.items.map((style) => (
-              <li key={style.name}>
-                <button
-                  type="button"
-                  aria-current={style.name === selected?.name ? 'true' : undefined}
-                  className={cn(ROW, 'aria-[current]:bg-muted')}
-                  onClick={() => setSelectedName(style.name)}
-                >
-                  <span className="block truncate text-sm font-medium">{style.name}</span>
-                  <span className="mt-0.5 line-clamp-2 text-xs text-muted-foreground">
-                    {style.caption ?? 'プロファイルの caption のまま'}
-                  </span>
-                </button>
-              </li>
-            ))}
-          </ul>
-          <button
-            type="button"
-            aria-current={selected === null ? 'true' : undefined}
-            className={cn(
-              ROW,
-              'flex items-center gap-1.5 text-sm text-muted-foreground aria-[current]:bg-muted aria-[current]:text-foreground',
-            )}
-            onClick={() => setSelectedName(null)}
-          >
-            <Plus className="size-4" aria-hidden="true" />
-            新しく作る
-          </button>
-        </nav>
+    <>
+      <ListDetail
+        header={
+          <>
+            <PageHeader
+              title="スタイル"
+              description="caption（話し方の指示）とサンプラーの組に名前を付けて保存しておき、読み上げごとに選べます。API の /speak に style で名前を渡すと、そのリクエストだけこの caption とサンプラーで読みます。変えられるのは速さ・テンション・抑揚の傾きまでで、ささやき声のような声質は参照音声で決まるので変わりません。声質を変えたいときは voice で別のプロファイルを選んでください。"
+            />
+            <div className="mb-3 min-h-4">
+              {status && <StatusText message={status.message} isError={status.isError} />}
+            </div>
+          </>
+        }
+        list={
+          <nav aria-label="スタイル一覧" className="space-y-1">
+            <ul className="space-y-1">
+              {data.items.map((style) => (
+                <li key={style.name}>
+                  <button
+                    type="button"
+                    aria-current={style.name === selected?.name ? 'true' : undefined}
+                    className={cn(ROW, 'aria-[current]:bg-muted')}
+                    onClick={() => setSelectedName(style.name)}
+                  >
+                    <span className="block truncate text-sm font-medium">{style.name}</span>
+                    <span className="mt-0.5 line-clamp-2 text-xs text-muted-foreground">
+                      {style.caption ?? 'プロファイルの caption のまま'}
+                    </span>
+                  </button>
+                </li>
+              ))}
+            </ul>
+            <button
+              type="button"
+              aria-current={selected === null ? 'true' : undefined}
+              className={cn(
+                ROW,
+                'flex items-center gap-1.5 text-sm text-muted-foreground aria-[current]:bg-muted aria-[current]:text-foreground',
+              )}
+              onClick={() => setSelectedName(null)}
+            >
+              <Plus className="size-4" aria-hidden="true" />
+              新しく作る
+            </button>
+          </nav>
+        }
+      >
         {/* スタイルを移ったら、編集中の値は持ち越さない */}
         <StyleEditor
           key={selected?.name ?? ''}
@@ -87,12 +95,12 @@ export function StylesPage() {
           onSaved={setSelectedName}
           onDeleted={() => setSelectedName(null)}
         />
-      </div>
+      </ListDetail>
       <audio
         ref={audioRef}
         hidden
         onError={() => setStatus({ message: '音声を再生できませんでした', isError: true })}
       />
-    </div>
+    </>
   )
 }

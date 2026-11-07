@@ -2,6 +2,7 @@ import { useSuspenseQuery } from '@tanstack/react-query'
 import { useNavigate, useSearch } from '@tanstack/react-router'
 import { useRef, useState } from 'react'
 
+import { ListDetail } from '@/components/ListDetail'
 import { PageHeader } from '@/components/PageHeader'
 import { StatusText } from '@/components/StatusText'
 import { useTransientStatus } from '@/lib/useTransientStatus'
@@ -53,24 +54,31 @@ export function ProfilesPage() {
   }
 
   return (
-    <div>
-      <PageHeader
-        title="プロファイル"
-        description="プロファイルは参照音声（声そのもの）と caption（話し方の指示）、要約の口調の組です。試聴しながら caption を直せます。切り替えは次の読み上げから効き、再起動は要りません。"
-      />
-      {/* 知らせが消えても下がずれないよう、行の高さを先に取っておく。ずれると
+    <>
+      <ListDetail
+        header={
+          <>
+            <PageHeader
+              title="プロファイル"
+              description="プロファイルは参照音声（声そのもの）と caption（話し方の指示）、要約の口調の組です。試聴しながら caption を直せます。切り替えは次の読み上げから効き、再起動は要りません。"
+            />
+            {/* 知らせが消えても下がずれないよう、行の高さを先に取っておく。ずれると
           押そうとしたボタンの隣を押してしまう */}
-      <div className="mb-3 min-h-4">
-        {status && <StatusText message={status.message} isError={status.isError} />}
-      </div>
-      <div className="grid grid-cols-[16rem_minmax(0,1fr)] items-start gap-6">
-        <ProfileList
-          items={profiles.items}
-          active={profiles.active}
-          selected={selected?.id ?? null}
-          onSelect={select}
-          onCreate={() => select(NEW_PROFILE)}
-        />
+            <div className="mb-3 min-h-4">
+              {status && <StatusText message={status.message} isError={status.isError} />}
+            </div>
+          </>
+        }
+        list={
+          <ProfileList
+            items={profiles.items}
+            active={profiles.active}
+            selected={selected?.id ?? null}
+            onSelect={select}
+            onCreate={() => select(NEW_PROFILE)}
+          />
+        }
+      >
         {selected === null ? (
           <NewProfile
             voices={voices}
@@ -111,13 +119,13 @@ export function ProfilesPage() {
             )}
           </div>
         )}
-      </div>
+      </ListDetail>
       <audio
         ref={audioRef}
         hidden
         // 合成は成功しても、ファイルが消えていれば再生は無言で終わる。鳴らない理由を出す
         onError={() => setStatus({ message: '音声を再生できませんでした', isError: true })}
       />
-    </div>
+    </>
   )
 }

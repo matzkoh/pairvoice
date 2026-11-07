@@ -1,5 +1,6 @@
 import { useQueryErrorResetBoundary } from '@tanstack/react-query'
 import { type ErrorComponentProps, Outlet, createRootRoute } from '@tanstack/react-router'
+import { cn } from 'cn'
 
 import { AppSidebar } from '@/components/AppSidebar'
 import { CommandMenu } from '@/components/CommandMenu'
@@ -38,8 +39,14 @@ function RootLayout() {
   return (
     <div className="flex h-dvh overflow-hidden">
       <AppSidebar />
-      <main className="min-w-0 flex-1 overflow-y-auto">
-        <div className="mx-auto max-w-5xl px-8 pt-6 pb-16">
+      {/* 一覧と中身を別に送る画面（ListDetail）は、ページごとは送らず画面の高さに収める */}
+      <main className="min-w-0 flex-1 overflow-y-auto has-data-list-detail:overflow-hidden">
+        <div
+          className={cn(
+            'mx-auto max-w-5xl px-8 pt-6 pb-16',
+            'has-data-list-detail:flex has-data-list-detail:h-full has-data-list-detail:flex-col has-data-list-detail:pb-0',
+          )}
+        >
           <Outlet />
         </div>
       </main>
