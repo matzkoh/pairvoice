@@ -157,22 +157,11 @@ class MlxAudioBackend:
 
         None は「モデル既定に任せる」なのでキーごと落とす。項目ごとの配線を持たないので、
         SamplerConfig に1行足せば config.toml と /synthesize の両方に効く。
-        例外は speaker_kv_min_t の1つだけで、これは None のまま残す。
         """
         merged: dict[str, object] = dict(dataclasses.asdict(self._config.sampler))
         if override:
             merged.update(override)
-        resolved = {k: v for k, v in merged.items() if v is not None}
-        if "speaker_kv_scale" in resolved and "speaker_kv_min_t" not in merged:
-            # モデル既定の speaker_kv_min_t（0.9）のままだと、t がそれを跨いだステップで
-            # 話者 KV のスケールが戻る。mlx-audio 0.6.0 までは、話者と caption を併せ持つ
-            # モデルでこの巻き戻しが落ちたので None にして避けていた（0.6.1 で修正）。
-            # None なら巻き戻さずスケールが全ステップに効く。その聞こえ方を保つため残す。
-            #
-            # speaker_kv_min_t が SamplerConfig の項目になった日には、指定された値を
-            # 黙って捨てないよう手を引く（巻き戻しを望んだのはユーザーである）。
-            resolved["speaker_kv_min_t"] = None
-        return resolved
+        return {k: v for k, v in merged.items() if v is not None}
 
     def describe_profile(self) -> dict[str, str] | None:
         profile = self._profiles.active()
