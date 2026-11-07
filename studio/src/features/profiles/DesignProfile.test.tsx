@@ -92,7 +92,8 @@ it('候補は参照音声を使わない design で作り、選んだ候補の�
   )
   expect(apiSend).toHaveBeenLastCalledWith('/profiles', 'POST', {
     name: '作った声',
-    caption: 'やわらかい声。',
+    // 候補を作った caption はプロファイルに入れない
+    caption: '',
     takes: Array.from({ length: REFERENCE_TEXTS.length + 1 }, () => 'generations/candidate.wav'),
   })
   expect(onStatus).toHaveBeenCalledWith(expect.objectContaining({ isError: false }))

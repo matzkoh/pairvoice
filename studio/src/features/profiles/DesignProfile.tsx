@@ -66,7 +66,7 @@ export function DesignProfile({
       <Field
         label="caption"
         htmlFor="design-caption"
-        hint="話し方の指示。候補の声もこの描写から作り、プロファイルにもそのまま入ります。"
+        hint="声の描写。候補の声はこの描写から作ります。プロファイルの caption は空のまま保存します（話し方を足したければ後で書けます）。"
       >
         <Textarea
           id="design-caption"
@@ -169,7 +169,9 @@ function CandidateRow({ take, onPlay, onStatus, onCreated }: RowProps) {
         <div className="ml-auto">
           <SaveAsProfile
             label={`候補 #${take.id}`}
-            caption={take.input.caption}
+            // 声は参照音声が決めるので、プロファイルの caption は空にする（声を作るための
+            // 描写は、読み上げでは声を言い直すだけ。話し方を足したければ後で書ける）
+            caption=""
             // 選んだテイクを参照にして、同じ声で別の文も読ませる（テイクを複製した声なので、
             // テイクそのものとはわずかに違う）
             record={(progress) =>
