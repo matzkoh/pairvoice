@@ -2,8 +2,7 @@ import { keepPreviousData, useQuery, useQueryClient, useSuspenseQuery } from '@t
 import { useDeferredValue, useEffect, useRef, useState, useTransition } from 'react'
 
 import { PageHeader } from '@/components/PageHeader'
-import { StatusText } from '@/components/StatusText'
-import { Button } from '@/components/ui/button'
+import { SaveBar } from '@/components/SaveBar'
 import { Kbd } from '@/components/ui/kbd'
 import { Textarea } from '@/components/ui/textarea'
 import { apiSend, toErrorMessage } from '@/lib/api'
@@ -33,6 +32,11 @@ function toWireRows(rows: readonly EditableDictRow[]): DictRowData[] {
   return rows.filter((r) => r.from.trim() !== '').map(({ from, to, memo }) => ({ from, to, memo }))
 }
 
+// 保存済みかを比べるための、送る表の要約
+function wireKey(rows: readonly DictRowData[]): string {
+  return JSON.stringify(rows)
+}
+
 export function DictTable() {
   const { data } = useSuspenseQuery(dictQueryOptions())
   const queryClient = useQueryClient()
@@ -47,6 +51,10 @@ export function DictTable() {
   // 削除の履歴をスタックで持つ。undo は pop して元の位置に挿し戻す。
   // 1つしか戻せない実装だと連続削除の誤操作の取り返しがつかない。
   const undoStackRef = useRef<{ index: number; row: EditableDictRow }[]>([])
+
+  // 最後に保存した（または読み込んだ）表。今の表と比べて、保存していない変更があるかを出す
+  const [savedKey, setSavedKey] = useState(() => wireKey(toWireRows(toEditableRows(data.rows))))
+  const dirty = wireKey(toWireRows(rows)) !== savedKey
 
   const [pending, startTransition] = useTransition()
   const [rawStatus, setStatus] = useState<SaveStatus>(null)
@@ -98,7 +106,9 @@ export function DictTable() {
   function save() {
     startTransition(async () => {
       try {
-        await apiSend('/dict', 'PUT', { rows: toWireRows(rows) })
+        const sent = toWireRows(rows)
+        await apiSend('/dict', 'PUT', { rows: sent })
+        setSavedKey(wireKey(sent))
         // 保存後に再読込はしない（rows はローカルの編集内容のまま）。他所からの再訪問に
         // 備えてキャッシュだけ古さの印を付けておく。
         await queryClient.invalidateQueries({ queryKey: ['dict'] })
@@ -131,18 +141,7 @@ export function DictTable() {
 
   return (
     <div>
-      <PageHeader
-        title="辞書"
-        description="読み上げる前に、表記を読みに置き換えます。"
-        actions={
-          <>
-            {status && <StatusText as="span" message={status.message} isError={status.isError} />}
-            <Button size="sm" disabled={pending} onClick={save}>
-              {pending ? '保存中…' : '保存'}
-            </Button>
-          </>
-        }
-      />
+      <PageHeader title="辞書" description="読み上げる前に、表記を読みに置き換えます。" />
       <section className="mb-5 rounded-lg border bg-card p-4">
         <label htmlFor="dict-preview" className="mb-1.5 block text-xs text-muted-foreground">
           試し置換（保存前の表で置き換えます）
@@ -198,6 +197,7 @@ export function DictTable() {
       <p className="mt-2 text-xs text-muted-foreground">
         最後の行に書くと次の空行が増えます。行の削除は <Kbd>⌘Z</Kbd> で戻せます。
       </p>
+      <SaveBar dirty={dirty} pending={pending} status={status} onSave={save} />
     </div>
   )
 }

@@ -72,6 +72,17 @@ it('保存すると本文を PUT し、保存しましたと出す', async () =>
   expect(await screen.findByText('保存しました')).toBeTruthy()
 })
 
+it('入力欄で ⌘S を押しても保存する', async () => {
+  const editor = await renderEditor()
+  fireEvent.change(editor, { target: { value: '新しいプロンプト' } })
+  expect(screen.getByText('未保存の変更あり')).toBeTruthy()
+  await act(async () => {
+    fireEvent.keyDown(editor, { key: 's', metaKey: true })
+  })
+  expect(apiSend).toHaveBeenCalledWith('/prompt', 'PUT', { text: '新しいプロンプト' })
+  expect(await screen.findByText('保存しました')).toBeTruthy()
+})
+
 it('変更を破棄すると保存済みの本文に戻る', async () => {
   const editor = await renderEditor()
   fireEvent.change(editor, { target: { value: '書きかけ' } })

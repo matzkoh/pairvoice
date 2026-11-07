@@ -1,9 +1,9 @@
 import { useQueryClient, useSuspenseQuery } from '@tanstack/react-query'
 import { useNavigate, useSearch } from '@tanstack/react-router'
-import { useActionState, useState } from 'react'
+import { useActionState, useRef, useState } from 'react'
 
 import { PageHeader, SectionHeading } from '@/components/PageHeader'
-import { StatusText } from '@/components/StatusText'
+import { SaveBar } from '@/components/SaveBar'
 import { Button } from '@/components/ui/button'
 import { Tabs, TabsList, TabsTrigger } from '@/components/ui/tabs'
 import { Textarea } from '@/components/ui/textarea'
@@ -64,6 +64,7 @@ function TextEditor({ target, tabs }: { target: PromptTarget; tabs: React.ReactN
   // 方式だと、保存直後に出る「保存しました」が一緒に消えてしまうので選ばない。
   const { draft: text, setDraft: setText, markSubmitted } = useDraft(data.text)
   const dirty = text !== data.text
+  const formRef = useRef<HTMLFormElement>(null)
 
   const [restoreError, setRestoreError] = useState('')
 
@@ -97,26 +98,12 @@ function TextEditor({ target, tabs }: { target: PromptTarget; tabs: React.ReactN
 
   return (
     <div>
-      <PageHeader
-        title={title}
-        description={`${description}保存すると旧版は履歴に残ります。`}
-        actions={
-          <>
-            {status && <StatusText as="span" message={status.message} isError={status.isError} />}
-            <Button variant="ghost" size="sm" onClick={() => setText(data.text)}>
-              変更を破棄
-            </Button>
-            <Button size="sm" type="submit" form="prompt-form" disabled={pending}>
-              {pending ? '保存中…' : '保存（旧版は履歴へ）'}
-            </Button>
-          </>
-        }
-      />
+      <PageHeader title={title} description={`${description}保存すると旧版は履歴に残ります。`} />
       {tabs}
       <div className="grid grid-cols-[minmax(0,1fr)_16rem] items-start gap-6">
         {/* 送った値は送信の時点で覚える。action の中で覚えると transition の更新になり、
             保存の後に取り直した本文が先に描かれて、打ち足した分を上書きすることがある */}
-        <form id="prompt-form" action={submit} onSubmit={() => markSubmitted(text)}>
+        <form ref={formRef} action={submit} onSubmit={() => markSubmitted(text)}>
           <Textarea
             name="text"
             aria-label={label}
@@ -125,7 +112,7 @@ function TextEditor({ target, tabs }: { target: PromptTarget; tabs: React.ReactN
             className="min-h-[60vh] resize-y font-mono text-[13px] leading-relaxed"
           />
           <p className="mt-2 text-xs text-muted-foreground tabular-nums">
-            {text.length.toLocaleString('ja-JP')} 文字{dirty && '・未保存の変更あり'}
+            {text.length.toLocaleString('ja-JP')} 文字
           </p>
           <p className="mt-1 text-xs text-muted-foreground">
             レビューをもとに改善するときは、Claude Code で{' '}
@@ -137,6 +124,18 @@ function TextEditor({ target, tabs }: { target: PromptTarget; tabs: React.ReactN
           <HistoryList source={source} confirmBeforeRestore={dirty} onError={setRestoreError} />
         </aside>
       </div>
+      <SaveBar
+        dirty={dirty}
+        pending={pending}
+        status={status}
+        label="保存（旧版は履歴へ）"
+        // フォームの送信を通す。送った値を送信の時点で覚える onSubmit を飛ばさないように
+        onSave={() => formRef.current?.requestSubmit()}
+      >
+        <Button variant="ghost" size="sm" onClick={() => setText(data.text)}>
+          変更を破棄
+        </Button>
+      </SaveBar>
     </div>
   )
 }

@@ -264,3 +264,24 @@ it('レビューから辞書に追加した行（キャッシュ書き込み）�
     ],
   })
 })
+
+it('書き換えると保存していない変更を示し、⌘S で保存すると保存済みに戻る', async () => {
+  seedRows()
+  vi.mocked(apiSend).mockResolvedValue({ ok: true })
+  renderTable()
+
+  const fromInput = await screen.findByDisplayValue('あ')
+  expect(screen.getByText('保存済み')).toBeTruthy()
+  await act(async () => {
+    fireEvent.change(fromInput, { target: { value: 'あ2' } })
+  })
+  expect(screen.getByText('未保存の変更あり')).toBeTruthy()
+
+  // 入力欄にフォーカスがあっても保存できる
+  await act(async () => {
+    fireEvent.keyDown(fromInput, { key: 's', metaKey: true })
+  })
+  expect(apiSend).toHaveBeenCalledWith('/dict', 'PUT', expect.anything())
+  expect(await screen.findByText('保存しました')).toBeTruthy()
+  expect(screen.queryByText('未保存の変更あり')).toBeNull()
+})
