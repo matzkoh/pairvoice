@@ -88,3 +88,30 @@ it('ランダムの声は選び方とメンバーの名前を並べる', () => {
   )
   expect(screen.getByText('シャッフル: 使用中の声・別の声')).toBeTruthy()
 })
+
+it('作り方ごとに見出しを付けて並べ、絞り込むと名前か caption が合うものだけ残す', () => {
+  const { onSelect } = renderList('p-a')
+  expect(screen.getByRole('heading', { name: /作った声/ })).toBeTruthy()
+  expect(screen.getByRole('heading', { name: /自動で作成/ })).toBeTruthy()
+
+  const search = screen.getByRole('searchbox', { name: 'プロファイルを絞り込む' })
+  fireEvent.change(search, { target: { value: 'b の' } })
+  expect(screen.queryByRole('button', { name: /使用中の声/ })).toBeNull()
+  expect(screen.getByRole('button', { name: /別の声/ })).toBeTruthy()
+
+  // Enter で残った先頭を開く
+  fireEvent.keyDown(search, { key: 'Enter' })
+  expect(onSelect).toHaveBeenCalledWith('p-b')
+
+  fireEvent.change(search, { target: { value: '無い声' } })
+  expect(screen.getByText('「無い声」に合うプロファイルはありません')).toBeTruthy()
+})
+
+it('J / K で見出しの順に隣のプロファイルへ移る', () => {
+  const { onSelect } = renderList('p-b')
+  // 作った声（p-b）→ 自動で作成（p-a）の順
+  fireEvent.keyDown(document.body, { key: 'j' })
+  expect(onSelect).toHaveBeenCalledWith('p-a')
+  fireEvent.keyDown(document.body, { key: 'k' })
+  expect(onSelect).toHaveBeenCalledTimes(1)
+})

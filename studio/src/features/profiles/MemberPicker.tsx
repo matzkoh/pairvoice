@@ -1,3 +1,4 @@
+import { Button } from '@/components/ui/button'
 import type { ProfileItem, ProfileOrder } from '@/lib/api-types'
 
 // 1つだけでは選ぶ意味が無い（pairvoice も 400 で断る）
@@ -54,26 +55,60 @@ type PickerProps = {
 }
 
 export function MemberPicker({ voices, value, disabled, onChange }: PickerProps) {
+  const all = voices.map((voice) => voice.id)
+  // 消した声の ID が残っていることがあるので、value.length ではなく今ある声で数える
+  const chosen = all.filter((id) => value.includes(id)).length
   return (
-    <ul aria-label="メンバー" className="space-y-1">
-      {voices.map((voice) => (
-        <li key={voice.id}>
-          <label className="flex items-center gap-2 text-sm">
-            <input
-              type="checkbox"
-              checked={value.includes(voice.id)}
-              disabled={disabled}
-              onChange={(e) =>
-                onChange(
-                  e.target.checked ? [...value, voice.id] : value.filter((id) => id !== voice.id),
-                )
-              }
-              className="size-3.5 accent-primary"
-            />
-            {voice.name}
-          </label>
-        </li>
-      ))}
-    </ul>
+    <div className="space-y-2">
+      <div className="flex items-center gap-2 text-xs text-muted-foreground">
+        <span className="tabular-nums">
+          {chosen} / {all.length} を選択
+        </span>
+        <Button
+          variant="ghost"
+          size="xs"
+          className="ml-auto"
+          disabled={disabled || chosen === all.length}
+          onClick={() => onChange(all)}
+        >
+          すべて選ぶ
+        </Button>
+        <Button
+          variant="ghost"
+          size="xs"
+          disabled={disabled || chosen === 0}
+          onClick={() => onChange([])}
+        >
+          すべて外す
+        </Button>
+      </div>
+      {/* 声が増えても縦に伸びすぎないよう、幅に合わせて段を組む */}
+      <ul
+        aria-label="メンバー"
+        className="grid grid-cols-[repeat(auto-fill,minmax(11rem,1fr))] gap-1"
+      >
+        {voices.map((voice) => (
+          <li key={voice.id}>
+            <label
+              title={voice.name}
+              className="flex items-center gap-2 rounded-md border px-2.5 py-1.5 text-sm transition-colors hover:bg-muted has-checked:border-primary/40 has-checked:bg-primary/5"
+            >
+              <input
+                type="checkbox"
+                checked={value.includes(voice.id)}
+                disabled={disabled}
+                onChange={(e) =>
+                  onChange(
+                    e.target.checked ? [...value, voice.id] : value.filter((id) => id !== voice.id),
+                  )
+                }
+                className="size-3.5 shrink-0 accent-primary"
+              />
+              <span className="truncate">{voice.name}</span>
+            </label>
+          </li>
+        ))}
+      </ul>
+    </div>
   )
 }

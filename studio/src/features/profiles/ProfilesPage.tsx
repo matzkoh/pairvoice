@@ -63,7 +63,7 @@ export function ProfilesPage() {
       <div className="mb-3 min-h-4">
         {status && <StatusText message={status.message} isError={status.isError} />}
       </div>
-      <div className="grid grid-cols-[14rem_minmax(0,1fr)] items-start gap-6">
+      <div className="grid grid-cols-[16rem_minmax(0,1fr)] items-start gap-6">
         <ProfileList
           items={profiles.items}
           active={profiles.active}
