@@ -262,6 +262,8 @@ def test_fetch_health_returns_none_when_unreachable(monkeypatch):
         ("unmute", "/unmute", None),
         ("stop", "/stop", None),
         ("warmup", "/warmup", None),
+        ("spatial:on", "/spatial", {"enabled": True}),
+        ("spatial:off", "/spatial", {"enabled": False}),
     ],
 )
 def test_perform_posts_to_the_right_endpoint(monkeypatch, action, path, body):
@@ -383,3 +385,19 @@ def test_quit_label_says_it_stops_pairvoice():
     # 「終了」はアイコンだけでなくサーバーも落とす。ラベルでそう伝える。
     items = menubar.menu_spec(health(), NOW)
     assert find(items, "quit").label == "pairvoice を終了"
+
+
+def test_spatial_item_is_hidden_unless_the_server_reports_it():
+    labels = [row.label for row in menubar.menu_spec(health(), NOW)]
+
+    assert "耳元で動かす" not in labels
+
+
+@pytest.mark.parametrize(("enabled", "action"), [(False, "spatial:on"), (True, "spatial:off")])
+def test_spatial_item_shows_a_check_and_toggles(enabled, action):
+    rows = menubar.menu_spec({**health(), "spatial": {"enabled": enabled}}, NOW)
+
+    (row,) = [row for row in rows if row.label == "耳元で動かす"]
+    assert row.checked is enabled
+    assert row.action == action
+    assert row.enabled

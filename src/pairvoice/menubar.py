@@ -113,6 +113,7 @@ class MenuItem:
     action: str | None
     enabled: bool
     separator: bool = False
+    checked: bool = False
 
 
 SEPARATOR = MenuItem(label="", action=None, enabled=False, separator=True)
@@ -163,6 +164,14 @@ def menu_spec(health: dict | None, now: datetime) -> list[MenuItem]:
     manual = reachable and health.get("mute", {}).get("reason") == "manual"
     rows.append(MenuItem("ミュートを解除", "unmute", manual))
     rows.append(SEPARATOR)
+
+    # 隠し機能（spatial.py）。有効にした人の /health にだけ spatial が載る
+    if reachable and "spatial" in health:
+        on = bool(health["spatial"].get("enabled"))
+        rows.append(
+            MenuItem("耳元で動かす", "spatial:off" if on else "spatial:on", True, checked=on)
+        )
+        rows.append(SEPARATOR)
 
     # studio の画面はサーバーが配るので、届かないあいだは開けない
     rows.append(MenuItem("studio を開く", "studio", reachable))
@@ -219,6 +228,9 @@ def perform(action: str, base: str) -> None:
     try:
         if action.startswith("mute:"):
             client.call(base, "/mute", body={"minutes": int(action.split(":")[1])}, timeout=5)
+        elif action.startswith("spatial:"):
+            enabled = action == "spatial:on"
+            client.call(base, "/spatial", body={"enabled": enabled}, timeout=5)
         elif action == "unmute":
             client.call(base, "/unmute", timeout=5)
         elif action == "stop":
@@ -284,6 +296,7 @@ def _controller_class(appkit, objc):
                 )
                 item.setTarget_(self)
                 item.setEnabled_(spec.enabled)
+                item.setState_(appkit.NSControlStateValueOn if spec.checked else 0)
                 item.setRepresentedObject_(spec.action)
                 self._menu.addItem_(item)
 

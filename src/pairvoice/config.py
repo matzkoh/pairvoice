@@ -156,6 +156,14 @@ class EvalConfig:
     style: str = "any"
 
 
+@dataclass(frozen=True)
+class ExperimentalConfig:
+    """隠し機能。`pairvoice config` の一覧にも説明にも出さない。"""
+
+    # メニューバーに「耳元で動かす」を出す（spatial.py）
+    spatial: bool = False
+
+
 # 常駐サーバーの API はすべてこの下にある。根は studio の画面が使う
 API_PREFIX = "/api"
 
@@ -170,6 +178,7 @@ class Config:
     mute: MuteConfig = field(default_factory=MuteConfig)
     playback: PlaybackConfig = field(default_factory=PlaybackConfig)
     eval: EvalConfig = field(default_factory=EvalConfig)
+    experimental: ExperimentalConfig = field(default_factory=ExperimentalConfig)
     source_path: Path | None = None
     source_mtime: float | None = None
 
@@ -250,7 +259,7 @@ def _build(cls, raw: dict, section: str, base: Path, *, nested: tuple[str, ...] 
     return cls(**kwargs)
 
 
-_SECTIONS = ("port", "llm", "tts", "stt", "curate", "mute", "playback", "eval")
+_SECTIONS = ("port", "llm", "tts", "stt", "curate", "mute", "playback", "eval", "experimental")
 
 
 def load_config(path: Path | None = None) -> Config:
@@ -287,6 +296,9 @@ def load_config(path: Path | None = None) -> Config:
         mute=_build(MuteConfig, _section(raw, "mute"), "mute", base),
         playback=_build(PlaybackConfig, _section(raw, "playback"), "playback", base),
         eval=_build(EvalConfig, _section(raw, "eval"), "eval", base),
+        experimental=_build(
+            ExperimentalConfig, _section(raw, "experimental"), "experimental", base
+        ),
         source_path=resolved,
         source_mtime=resolved.stat().st_mtime,
     )

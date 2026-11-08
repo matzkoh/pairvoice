@@ -50,10 +50,15 @@ def write_mono(path: Path, samples: np.ndarray, sample_rate: int) -> None:
 
 def mono_wav(samples: np.ndarray, sample_rate: int) -> bytes:
     """-1〜1 の float を 16bit モノラルの wav のバイト列にする。"""
+    return pcm_wav(samples, sample_rate)
+
+
+def pcm_wav(samples: np.ndarray, sample_rate: int) -> bytes:
+    """-1〜1 の float（(frames,) ならモノラル、(frames, channels) なら多チャンネル）を 16bit の wav のバイト列にする。"""
     pcm = (np.clip(samples, -1.0, 1.0) * 32767.0).astype("<i2")
     out = io.BytesIO()
     with wave.open(out, "wb") as writer:
-        writer.setnchannels(1)
+        writer.setnchannels(1 if pcm.ndim == 1 else pcm.shape[1])
         writer.setsampwidth(2)
         writer.setframerate(sample_rate)
         writer.writeframes(pcm.tobytes())

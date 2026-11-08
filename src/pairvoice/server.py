@@ -110,6 +110,10 @@ _MODEL_UNAVAILABLE = _error(
 _STYLE_INVALID = _error("`style_invalid`（styles.json が壊れている）")
 
 
+class SpatialRequest(BaseModel):
+    enabled: bool
+
+
 class MutedResponse(BaseModel):
     error: Literal["muted"] = Field(description="ミュート中で、合成・要約しなかった")
     reason: str = Field(
@@ -637,6 +641,14 @@ def create_app(engine: Engine) -> FastAPI:
     async def unmute():
         state = engine.mute.unmute()
         return {"active": state.active}
+
+    if (switch := engine.spatial) is not None:
+
+        @api.post("/spatial", include_in_schema=False)
+        async def set_spatial(request: SpatialRequest):
+            """隠し機能（spatial.py）。読み上げを耳元で動かすかを切り替える。"""
+            await asyncio.to_thread(switch.set, request.enabled)
+            return {"enabled": switch.enabled}
 
     @api.post("/restart", status_code=202, summary="常駐サーバーを再起動する", tags=["運用"])
     async def restart(background: BackgroundTasks):

@@ -17,7 +17,7 @@ from enum import StrEnum
 from pathlib import Path
 from typing import Protocol
 
-from . import curate, generations
+from . import curate, generations, spatial
 from .config import Config
 from .curate import Analysis, Outcome
 from .player import Player
@@ -345,7 +345,13 @@ class Engine:
         self._stt_backend = stt_backend
         self._curate_backend = curate_backend
         self.mute = mute
-        self.player = player or Player(config.playback, mute)
+        # 隠し機能。フラグを立てていなければスイッチごと作らない
+        self.spatial = (
+            spatial.SpatialSwitch(config.tts.data_root) if config.experimental.spatial else None
+        )
+        self.player = player or Player(
+            config.playback, mute, prepare=self._spatialize if self.spatial else None
+        )
         self._clock = clock
         self._runner = Runner(clock=clock)
         self._llm = ManagedModel(
@@ -481,6 +487,9 @@ class Engine:
             droppable=False,
             download=self._tts if wait_download else None,
         )
+
+    def _spatialize(self, path: Path) -> Path | None:
+        return spatial.spatialize(path) if self.spatial and self.spatial.enabled else None
 
     async def speak(
         self,
@@ -625,6 +634,8 @@ class Engine:
             # 常駐サーバーが読んだ設定ファイル。launchd に --config で渡すと既定の場所と違う
             "config_path": str(self._config.source_path) if self._config.source_path else None,
             "config_stale": config_is_stale(self._config),
+            # 隠し機能。有効にしていない人には項目ごと見せない（メニューはこれの有無で出し分ける）
+            **({"spatial": {"enabled": self.spatial.enabled}} if self.spatial else {}),
         }
 
     def _describe(self, model: ManagedModel) -> dict:

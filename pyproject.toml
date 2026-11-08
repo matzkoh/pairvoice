@@ -29,6 +29,7 @@ dependencies = [
     "pyobjc-framework-Cocoa>=13,<14",
     "pyobjc-framework-avfoundation>=13,<14",
     "python-multipart>=0.0.33,<0.1",
+    "scipy>=1.14,<2",
 ]
 
 [project.urls]

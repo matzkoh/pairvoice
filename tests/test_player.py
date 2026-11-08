@@ -32,7 +32,16 @@ class FakeSound:
 class Rig:
     """Player と、時計・音・ミュートの偽物一式。on_tick(n) は見張りの n 回目の後に呼ばれる。"""
 
-    def __init__(self, *, ticks=3, mute_config=None, playback=None, on_tick=None, before_open=None):
+    def __init__(
+        self,
+        *,
+        ticks=3,
+        mute_config=None,
+        playback=None,
+        on_tick=None,
+        before_open=None,
+        prepare=None,
+    ):
         self.now = 0.0
         self.probe = FakeProbe()
         self.mute = MuteController(
@@ -67,6 +76,7 @@ class Rig:
             opener=opener,
             clock=lambda: self.now,
             sleep=sleep,
+            prepare=prepare,
         )
 
     def enqueue(self, name, **kwargs):
@@ -302,3 +312,33 @@ async def test_waits_only_until_the_sound_ends():
         task.cancel()
 
     assert sleeps == [0.1]
+
+
+async def test_plays_the_prepared_file_and_removes_it_afterwards(tmp_path):
+    prepared = tmp_path / "a.spatial.wav"
+
+    def prepare(path):
+        prepared.write_bytes(b"")
+        return prepared
+
+    rig = Rig(prepare=prepare)
+    rig.enqueue("a.wav")
+
+    await rig.drain(1)
+
+    assert rig.sounds[0].path == prepared
+    assert not prepared.exists()
+
+
+async def test_plays_the_original_when_preparing_fails_or_is_skipped():
+    def prepare(path):
+        if path.name == "a.wav":
+            raise ValueError("broken")
+
+    rig = Rig(prepare=prepare)
+    rig.enqueue("a.wav")
+    rig.enqueue("b.wav")
+
+    await rig.drain(2)
+
+    assert [sound.path.name for sound in rig.sounds] == ["a.wav", "b.wav"]

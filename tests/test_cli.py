@@ -119,6 +119,14 @@ def test_config_prints_every_item_with_defaults(calls, capsys, tmp_path):
     assert calls == []
 
 
+def test_config_hides_experimental_flags(calls, capsys, tmp_path):
+    path = tmp_path / "config.toml"
+    path.write_text("[experimental]\nspatial = true\n", encoding="utf-8")
+
+    assert cli.main(["--config", str(path), "config"]) == 0
+    assert "experimental" not in json.loads(capsys.readouterr().out)["values"]
+
+
 def test_status_gets_health(calls, config_path):
     assert cli.main(["--config", config_path, "status"]) == 0
 

@@ -211,6 +211,7 @@ def main(argv: list[str] | None = None) -> int:
         values = dataclasses.asdict(config)
         path = values.pop("source_path")
         values.pop("source_mtime")
+        values.pop("experimental")
         print(
             json.dumps({"path": path, "values": values}, ensure_ascii=False, indent=2, default=str)
         )

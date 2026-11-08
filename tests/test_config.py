@@ -310,6 +310,16 @@ def test_integers_are_accepted_for_float_fields(tmp_path):
     assert load_config(path).mute.audio_output_wait_seconds == 3.0
 
 
+def test_experimental_flags_are_off_by_default_and_read_quietly(tmp_path, caplog):
+    assert load_config(write_config(tmp_path, "")).experimental.spatial is False
+
+    with caplog.at_level("WARNING", logger="pairvoice.config"):
+        config = load_config(write_config(tmp_path, "[experimental]\nspatial = true\n"))
+
+    assert config.experimental.spatial is True
+    assert caplog.text == ""
+
+
 def test_unknown_keys_are_warned_but_not_fatal(tmp_path, caplog):
     path = write_config(tmp_path, "[llm]\nmax_token = 64\n[unknown]\nx = 1\n")
 

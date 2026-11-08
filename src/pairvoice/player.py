@@ -131,8 +131,11 @@ class Player:
         opener: Callable[[Path, float], Sound] = open_sound,
         clock: Callable[[], float] = time.monotonic,
         sleep: Callable[[float], Awaitable[None]] = asyncio.sleep,
+        prepare: Callable[[Path], Path | None] | None = None,
     ) -> None:
         self._config = config
+        # 鳴らす直前に音を加工する（spatial.py）。別のファイルを返せばそれを鳴らし、鳴り終われば消す
+        self._prepare = prepare
         self._mute = mute
         self._opener = opener
         self._clock = clock
@@ -205,10 +208,28 @@ class Player:
             raise OSError(f"CoreAudio が応答しないので鳴らせません: {path.name}")
         return opening.result()
 
+    async def _prepared(self, path: Path) -> Path | None:
+        """加工した音の場所。加工しないとき・できなかったときは None（元の音を鳴らす）。"""
+        if self._prepare is None:
+            return None
+        try:
+            return await asyncio.to_thread(self._prepare, path)
+        except Exception as error:
+            _log.warning("加工できないのでそのまま鳴らします（%s）: %s", path.name, error)
+            return None
+
     async def _play(self, job: _Job) -> None:
+        prepared = await self._prepared(job.path)
+        try:
+            await self._play_file(job, prepared or job.path)
+        finally:
+            if prepared is not None:
+                prepared.unlink(missing_ok=True)
+
+    async def _play_file(self, job: _Job, path: Path) -> None:
         volume = self._config.volume
         watch = self._mute.watch(bypass_mute=job.bypass_mute)
-        sound = await self._open(job.path, volume)
+        sound = await self._open(path, volume)
         self._playing = True
         ducked = False
         try:

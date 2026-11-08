@@ -669,6 +669,7 @@ dependencies = [
     { name = "pyobjc-framework-avfoundation" },
     { name = "pyobjc-framework-cocoa" },
     { name = "python-multipart" },
+    { name = "scipy" },
     { name = "uvicorn" },
 ]
 
@@ -689,6 +690,7 @@ requires-dist = [
     { name = "pyobjc-framework-avfoundation", specifier = ">=13,<14" },
     { name = "pyobjc-framework-cocoa", specifier = ">=13,<14" },
     { name = "python-multipart", specifier = ">=0.0.33,<0.1" },
+    { name = "scipy", specifier = ">=1.14,<2" },
     { name = "uvicorn", specifier = ">=0.54,<1" },
 ]
 

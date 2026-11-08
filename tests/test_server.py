@@ -5,7 +5,7 @@ from pathlib import Path
 import pytest
 from fastapi.testclient import TestClient
 
-from pairvoice.config import Config, LLMConfig, MuteConfig, TTSConfig
+from pairvoice.config import Config, ExperimentalConfig, LLMConfig, MuteConfig, TTSConfig
 from pairvoice.lifecycle import Engine, Superseded
 from pairvoice.mute import MuteController
 from pairvoice.profiles import ProfileNotFound
@@ -15,7 +15,15 @@ from tests.test_engine import FakeLLM, FakeSTT, FakeTTS
 
 
 def build(
-    *, probe=None, llm=None, tts=None, stt=None, curate=None, mute_config=None, data_root=None
+    *,
+    probe=None,
+    llm=None,
+    tts=None,
+    stt=None,
+    curate=None,
+    mute_config=None,
+    data_root=None,
+    experimental=None,
 ):
     config = Config(
         llm=LLMConfig(model="fake/llm", load_timeout_seconds=1),
@@ -26,6 +34,7 @@ def build(
             output_dir=(data_root or Path(tempfile.mkdtemp())) / "generations",
         ),
         mute=mute_config or MuteConfig(),
+        experimental=experimental or ExperimentalConfig(),
     )
     engine = Engine(
         config=config,
@@ -728,3 +737,25 @@ def test_transcribe_rejects_non_wav():
     assert response.status_code == 400
     assert response.json()["error"] == "invalid_audio"
     assert stt.calls == []
+
+
+def test_spatial_is_hidden_unless_the_flag_is_on():
+    _, client = build()
+
+    assert "spatial" not in client.get("/health").json()
+    assert client.post("/spatial", json={"enabled": True}).status_code in (404, 405)
+    assert "/api/spatial" not in client.get("http://127.0.0.1:17495/openapi.json").json()["paths"]
+
+
+def test_spatial_toggle_persists_across_restarts(tmp_path):
+    flag = ExperimentalConfig(spatial=True)
+    _, client = build(data_root=tmp_path, experimental=flag)
+    assert client.get("/health").json()["spatial"] == {"enabled": False}
+
+    assert client.post("/spatial", json={"enabled": True}).json() == {"enabled": True}
+
+    _, restarted = build(data_root=tmp_path, experimental=flag)
+    assert restarted.get("/health").json()["spatial"] == {"enabled": True}
+    assert (
+        "/api/spatial" not in restarted.get("http://127.0.0.1:17495/openapi.json").json()["paths"]
+    )
