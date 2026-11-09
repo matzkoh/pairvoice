@@ -3,7 +3,7 @@ import { expect, it } from 'vitest'
 import { initialValues } from './samplerKnobs'
 import { tomlSnippet } from './tomlSnippet'
 
-it('モデル既定のままなら null（貼る必要がない）', () => {
+it('既定のままなら null（貼る必要がない）', () => {
   expect(tomlSnippet(initialValues())).toBeNull()
 })
 
@@ -16,11 +16,11 @@ it('既定と異なる項目だけを [tts.sampler] に出す', () => {
 it('文字列は引用符で、真偽値は小文字で出す', () => {
   const snippet = tomlSnippet({
     ...initialValues(),
-    t_schedule_mode: 'sway',
+    t_schedule_mode: 'linear',
     context_kv_cache: false,
   })
 
-  expect(snippet).toBe('[tts.sampler]\nt_schedule_mode = "sway"\ncontext_kv_cache = false\n')
+  expect(snippet).toBe('[tts.sampler]\nt_schedule_mode = "linear"\ncontext_kv_cache = false\n')
 })
 
 it('埋めた optionalNumber も差分として出す', () => {

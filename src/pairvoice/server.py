@@ -186,19 +186,19 @@ class WarmupRequest(BaseModel):
 
 
 class SamplerOverrides(BaseModel):
-    """Irodori-TTS のサンプラーの上書き。省いた項目はスタイル → config.toml → モデル既定の順で決まる。
+    """Irodori-TTS のサンプラーの上書き。省いた項目はスタイル → config.toml → SamplerConfig の既定 → モデル既定の順で決まる。
 
     フィールド名は mlx-audio の generate() の引数名そのまま。名前がずれた値は
     黙って捨てられるので、途中で変換しない。extra="forbid" は、キーの打ち間違いを
     422 にして「指定したのに効かない」を起こさないため。
 
-    未指定（None）は「config.toml とモデル既定に任せる」の意味で、そのまま送ると
+    未指定（None）は「config.toml と既定に任せる」の意味で、そのまま送ると
     config の値を潰してしまうので model_dump(exclude_none=True) で落とす。
     """
 
     model_config = ConfigDict(extra="forbid")
 
-    # 説明に既定値を書かない。正本はモデルの config.json と config.toml（SamplerConfig と同じ方針）
+    # 説明に既定値を書かない。正本はモデルの config.json と SamplerConfig と config.toml
     num_steps: int | None = Field(default=None, description="サンプリングのステップ数")
     cfg_guidance_mode: str | None = Field(
         default=None, description="`independent`、`joint`、`alternating` のどれか"

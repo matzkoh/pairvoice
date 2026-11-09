@@ -53,7 +53,11 @@ it('空欄可の項目は生の文字列で通知する（入力途中を丸め�
 
 it('Time Schedule が linear のとき Sway Coeff は無効', () => {
   const { unmount } = render(
-    <SamplerFields values={initialValues()} onChange={vi.fn()} disabled={false} />,
+    <SamplerFields
+      values={initialValues({ t_schedule_mode: 'linear' })}
+      onChange={vi.fn()}
+      disabled={false}
+    />,
   )
   expect(screen.getByLabelText(/Sway Coeff/)).toHaveProperty('disabled', true)
   unmount()

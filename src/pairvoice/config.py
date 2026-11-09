@@ -38,9 +38,16 @@ def default_data_root() -> Path:
 class SamplerConfig:
     """mlx-audio の generate() に渡すサンプラー。
 
-    すべて None 既定で、None は「モデルの既定に任せる」を意味する（キーごと渡さない）。
-    既定値を写さないのは、正本がモデルの config.json 側にあり、pairvoice に複製すると
-    二重管理になるためである。
+    None は「モデルの既定に任せる」を意味する（キーごと渡さない）。モデルの既定値を
+    写さないのは、正本がモデルの config.json 側にあり、pairvoice に複製すると二重管理に
+    なるためである。None 以外を既定にするのは、モデルの既定から意図して外す項目だけ:
+
+    - num_steps / t_schedule_mode / sway_coeff: モデル既定の 40 段 linear に対し、
+      10 段の Sway Sampling で読み上げが約2倍速い。聴き比べで、10 段 linear はうっすら
+      音質が落ち、8 段 sway はたまに崩れ、6 段は使えなかった
+
+    ここで既定を変えたら、studio の KNOBS（samplerKnobs.ts）の init もそろえる。
+    「TOML でコピー」はその init との差分を書き出す。
 
     フィールド名は generate() の引数名そのままにしてある。名前がずれた値は黙って
     捨てられるので、途中で変換する層を作らない。項目を増やすときはここに1行足すだけで
@@ -51,13 +58,13 @@ class SamplerConfig:
     ここを動かすときは1項目ずつ A/B すること。
     """
 
-    num_steps: int | None = None
+    num_steps: int | None = 10
     cfg_guidance_mode: str | None = None
     cfg_scale_text: float | None = None
     cfg_scale_caption: float | None = None
     cfg_scale_speaker: float | None = None
-    t_schedule_mode: str | None = None
-    sway_coeff: float | None = None
+    t_schedule_mode: str | None = "sway"
+    sway_coeff: float | None = -1.0
     duration_scale: float | None = None
     seconds: float | None = None
     rng_seed: int | None = None

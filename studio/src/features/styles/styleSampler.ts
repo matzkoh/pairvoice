@@ -2,7 +2,7 @@ import type { SamplerOverrides } from '@/lib/api-types'
 
 import { initialValues, type SamplerValues, toSamplerPayload } from '../profiles/samplerKnobs'
 
-// 画面に出す値は、いま pairvoice が渡している値（config.toml とモデル既定）にスタイルを重ねたもの
+// 画面に出す値は、いま pairvoice が渡している値（config.toml と既定）にスタイルを重ねたもの
 export function styleValues(base: SamplerOverrides | undefined, style: SamplerOverrides) {
   return initialValues({ ...base, ...style })
 }

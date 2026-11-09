@@ -22,7 +22,7 @@ export type TScheduleMode = 'linear' | 'sway'
 
 // pairvoice が generate() に渡すサンプラー。キー名は mlx-audio の generate() の
 // 引数名そのままで、途中で変換しない（名前がずれた値は黙って捨てられる）。
-// 未設定は「config.toml とモデル既定に任せる」の意味。
+// 未設定は「config.toml と pairvoice・モデルの既定に任せる」の意味。
 export type SamplerOverrides = {
   num_steps?: number
   cfg_guidance_mode?: CfgGuidanceMode

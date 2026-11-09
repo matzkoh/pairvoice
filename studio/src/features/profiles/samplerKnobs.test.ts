@@ -1,12 +1,6 @@
 import { expect, it } from 'vitest'
 
-import {
-  KNOBS,
-  MODEL_DEFAULTS,
-  type SamplerKey,
-  initialValues,
-  toSamplerPayload,
-} from './samplerKnobs'
+import { KNOBS, DEFAULTS, type SamplerKey, initialValues, toSamplerPayload } from './samplerKnobs'
 
 it('17項目すべてにノブがあり、Advanced は7項目', () => {
   expect(KNOBS).toHaveLength(17)
@@ -49,16 +43,16 @@ it('17項目すべてに説明がある', () => {
   expect(missing).toEqual([])
 })
 
-it('初期値はモデル既定で、/health の値がその上に重なる', () => {
-  const values = initialValues({ cfg_scale_speaker: 1.5, t_schedule_mode: 'sway' })
+it('初期値は既定で、/health の値がその上に重なる', () => {
+  const values = initialValues({ cfg_scale_speaker: 1.5, t_schedule_mode: 'linear' })
 
-  expect(values.num_steps).toBe(40) // 触られていない項目はモデル既定のまま
+  expect(values.num_steps).toBe(10) // 触られていない項目は既定のまま
   expect(values.cfg_scale_speaker).toBe(1.5)
-  expect(values.t_schedule_mode).toBe('sway')
+  expect(values.t_schedule_mode).toBe('linear')
 })
 
-it('/health が無くてもモデル既定で埋まる', () => {
-  expect(initialValues()).toEqual(MODEL_DEFAULTS)
+it('/health が無くても既定で埋まる', () => {
+  expect(initialValues()).toEqual(DEFAULTS)
 })
 
 it('空欄の optionalNumber はペイロードに載らない', () => {
@@ -76,7 +70,7 @@ it('空欄の optionalNumber はペイロードに載らない', () => {
 it('空欄でない項目は常に送る（触っていないから既定に落ちる、という暗黙の経路を作らない）', () => {
   const { sampler } = toSamplerPayload(initialValues())
 
-  expect(sampler.num_steps).toBe(40)
+  expect(sampler.num_steps).toBe(10)
   expect(sampler.cfg_guidance_mode).toBe('independent')
   expect(sampler.context_kv_cache).toBe(true)
   expect(sampler.cfg_min_t).toBe(0.5)

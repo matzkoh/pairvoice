@@ -622,7 +622,7 @@ class Engine:
                 # ときと同じ文にそろえるため、正本はバックエンドの1か所に置く
                 "anchor_text": self._tts_backend.anchor_text,
                 # caption と同じ理由。studio のプレイグラウンドが「いま渡している値」を
-                # 初期値にするために要る。モデル既定は studio 側の表が持つ
+                # 初期値にするために要る。既定は studio 側の表も持つ
                 "sampler": self._tts_backend.resolve_sampler(),
             },
             "stt": self._describe(self._stt),

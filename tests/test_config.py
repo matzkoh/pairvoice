@@ -22,8 +22,8 @@ def test_defaults_when_file_missing(tmp_path):
     assert config.llm.model == "mlx-community/gemma-4-e4b-it-8bit"
     assert config.llm.max_tokens == 128
     assert config.tts.model == "mlx-community/Irodori-TTS-v4.1-Small-8bit"
-    # サンプラーは全項目 None（モデル既定に任せる）。値の一覧は
-    # test_sampler_defaults_to_none_so_model_defaults_apply で見る
+    # サンプラーは Sway Sampling の3項目以外 None（モデル既定に任せる）。値の一覧は
+    # test_sampler_defaults_to_none_except_sway_sampling で見る
     assert config.tts.sampler.cfg_guidance_mode is None
     assert config.tts.sampler.cfg_scale_speaker is None
     assert config.mute.auto_microphone is True
@@ -153,18 +153,19 @@ def test_default_profile_does_not_name_a_person():
     assert config.tts.profile.caption.startswith("落ち着いた")
 
 
-def test_sampler_defaults_to_none_so_model_defaults_apply():
+def test_sampler_defaults_to_none_except_sway_sampling():
     config = load_config(Path("/nonexistent/config.toml"))
 
-    # None は「モデル既定に任せる」。モデル既定の値を pairvoice 側に写すと二重管理になる
+    # None は「モデル既定に任せる」。モデル既定の値を pairvoice 側に写すと二重管理になる。
+    # 速さのために意図して外した Sway Sampling の3項目だけが値を持つ
     assert dataclasses.asdict(config.tts.sampler) == {
-        "num_steps": None,
+        "num_steps": 10,
         "cfg_guidance_mode": None,
         "cfg_scale_text": None,
         "cfg_scale_caption": None,
         "cfg_scale_speaker": None,
-        "t_schedule_mode": None,
-        "sway_coeff": None,
+        "t_schedule_mode": "sway",
+        "sway_coeff": -1.0,
         "duration_scale": None,
         "seconds": None,
         "rng_seed": None,

@@ -125,7 +125,7 @@ export function TakeCard({
           variant="ghost"
           size="sm"
           disabled={!snippet}
-          title={snippet ? undefined : 'サンプラーはモデル既定のまま'}
+          title={snippet ? undefined : 'サンプラーは既定のまま'}
           onClick={copy}
         >
           {copied ? 'コピーしました' : 'サンプラーを TOML でコピー'}

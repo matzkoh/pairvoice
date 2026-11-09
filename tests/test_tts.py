@@ -54,6 +54,10 @@ def _tone(seconds, sample_rate):
     return (0.3 * np.sin(2 * np.pi * 200 * t)).astype(np.float32)
 
 
+# SamplerConfig が None 以外を既定に持つ項目
+SWAY_DEFAULTS = {"num_steps": 10, "t_schedule_mode": "sway", "sway_coeff": -1.0}
+
+
 @pytest.fixture
 def config(tmp_path):
     ref = tmp_path / "profiles" / "reference.wav"
@@ -465,8 +469,10 @@ def test_speak_override_does_not_touch_caption_file(config, tmp_path, monkeypatc
 def test_resolve_sampler_drops_none_so_model_defaults_apply(config, tmp_path):
     backend = MlxAudioBackend(config, data_dir=tmp_path)
 
-    # fixture が指定した2項目だけが残る。残りは渡さないことでモデル既定に委ねる
+    # fixture が指定した2項目と、pairvoice が既定で外す Sway Sampling だけが残る。
+    # 残りは渡さないことでモデル既定に委ねる
     assert backend.resolve_sampler() == {
+        **SWAY_DEFAULTS,
         "cfg_guidance_mode": "alternating",
         "cfg_scale_speaker": 2.5,
     }
@@ -478,6 +484,7 @@ def test_resolve_sampler_overlays_override_on_config(config, tmp_path):
     resolved = backend.resolve_sampler({"num_steps": 60, "cfg_scale_speaker": 4.0})
 
     assert resolved == {
+        **SWAY_DEFAULTS,
         "cfg_guidance_mode": "alternating",  # 上書きされていない項目は config のまま
         "cfg_scale_speaker": 4.0,
         "num_steps": 60,
@@ -504,6 +511,7 @@ def test_speak_without_sampler_keeps_config_values(config, tmp_path, monkeypatch
 
     call = model.calls[0]
     assert {k: v for k, v in call.items() if k not in ("text", "lead", "ref_audio", "caption")} == {
+        **SWAY_DEFAULTS,
         "cfg_guidance_mode": "alternating",
         "cfg_scale_speaker": 2.5,
     }

@@ -77,7 +77,7 @@ def _save_upload(upload: UploadFile, path: Path) -> None:
 # テイクをつなぐときの数の上限と、間に挟む無音
 MAX_TAKES = 8
 TAKE_GAP_SECONDS = 0.3
-# 伸ばすときの合成の段数（モデル既定は 40）。参照音声は一度しか作らないので丁寧に作る。
+# 伸ばすときの合成の段数（読み上げの既定は 10）。参照音声は一度しか作らないので丁寧に作る。
 # studio の MASTER_STEPS と同じ値にしておく
 MASTER_STEPS = 80
 # 伸ばすときにテイクの声で読ませる文。Irodori-TTS は同じ話者の短い発話を合わせて 30 秒ほどの

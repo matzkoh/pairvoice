@@ -4,10 +4,10 @@ import { speakOnce } from '@/lib/speak'
 
 import type { MixPart } from './voiceRegion'
 
-// 保存する声の合成の段数（モデル既定は 40）。増やすほど丁寧で遅い
+// 保存する声の合成の段数（読み上げの既定は 10）。増やすほど丁寧で遅い
 export const MASTER_STEPS = 80
 
-// 混ぜた声を合成する。試聴は速さ優先でモデル既定の段数、保存する声は numSteps を増やす
+// 混ぜた声を合成する。試聴は速さ優先で読み上げと同じ段数、保存する声は numSteps を増やす
 export async function synth(
   text: string,
   caption: string,

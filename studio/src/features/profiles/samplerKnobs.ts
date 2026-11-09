@@ -23,7 +23,9 @@ export type Knob =
   | (Common & { kind: 'bool'; init: boolean })
   | (Common & { kind: 'optionalNumber'; placeholder: string })
 
-// 既定値はモデルの config.json に従う（mlx-audio の SamplerConfig のクラス既定と一致）。
+// 既定値は pairvoice が config.toml なしで渡す値に従う。ほとんどはモデルの config.json の
+// 値（mlx-audio の SamplerConfig のクラス既定と一致）で、Num Steps と Time Schedule だけは
+// pairvoice の SamplerConfig が速さのために外した値（10 段の Sway Sampling）にしてある。
 // デモの UI は cfg_scale_caption を 4.0 で始めるが、ここは 3.0 にしてある。初期状態を
 // 「いまこのモデルとこの設定で鳴っている音」に合わせるほうが、差分として結果を読める。
 export const KNOBS: readonly Knob[] = [
@@ -36,7 +38,7 @@ export const KNOBS: readonly Knob[] = [
     min: 1,
     max: 120,
     step: 1,
-    init: 40,
+    init: 10,
   },
   {
     key: 'cfg_guidance_mode',
@@ -87,7 +89,7 @@ export const KNOBS: readonly Knob[] = [
     group: 'sampling',
     kind: 'select',
     options: ['linear', 'sway'],
-    init: 'linear',
+    init: 'sway',
   },
   {
     key: 'sway_coeff',
@@ -200,12 +202,12 @@ const DEFAULT_ENTRIES = KNOBS.map((knob) => [
 ])
 // KNOBS が SamplerKey を網羅することは型では強制できず、samplerKnobs.test.ts が固定している。
 // oxlint-disable-next-line typescript/no-unsafe-type-assertion
-export const MODEL_DEFAULTS = Object.fromEntries(DEFAULT_ENTRIES) as SamplerValues
+export const DEFAULTS = Object.fromEntries(DEFAULT_ENTRIES) as SamplerValues
 
-// /health の sampler は「pairvoice がいま渡している値」なので、モデル既定の上に重ねる。
-// pairvoice が停止していれば undefined で来て、モデル既定のままになる。
+// /health の sampler は「pairvoice がいま渡している値」なので、既定の上に重ねる。
+// pairvoice が停止していれば undefined で来て、既定のままになる。
 export function initialValues(sampler?: SamplerOverrides): SamplerValues {
-  const values = { ...MODEL_DEFAULTS }
+  const values = { ...DEFAULTS }
   if (!sampler) return values
   for (const knob of KNOBS) {
     const value = sampler[knob.key]
