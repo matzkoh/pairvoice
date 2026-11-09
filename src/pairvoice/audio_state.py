@@ -136,10 +136,14 @@ class AudioProbe:
         sampler: Callable[[], tuple[AudioProcess, ...]] = sample_processes,
         own_pid: int | None = None,
     ) -> None:
-        self._ignored_output = {name.lower() for name in ignore_output}
-        self._ignored_input = {name.lower() for name in ignore_input}
+        self.configure(ignore_output=ignore_output, ignore_input=ignore_input)
         self._sampler = sampler
         self._own_pid = os.getpid() if own_pid is None else own_pid
+
+    def configure(self, *, ignore_output: tuple[str, ...], ignore_input: tuple[str, ...]) -> None:
+        """見ないプロセス名を差し替える（設定ファイルを読み直したとき）。"""
+        self._ignored_output = {name.lower() for name in ignore_output}
+        self._ignored_input = {name.lower() for name in ignore_input}
 
     def sample(self) -> AudioActivity:
         processes = self._sampler()

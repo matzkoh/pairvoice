@@ -3,12 +3,13 @@
 鳴らす直前にモノラルの wav を2ch にする。保存する wav はモノラルのままで、studio・聞き取り・
 記録は影響を受けない。やり方は2つある。
 
-- 頭の外で鳴らす（`outside`、`config.toml` の `[playback] spatial`。既定で入り）: 声を正面に置き、部屋の反射と残響を足す。
+どれにするかは `config.toml` の `[playback] spatial` で決める（`off` なら2ch にせずそのまま鳴らす）。
+
+- 頭の外で鳴らす（`outside`、既定）: 声を正面に置き、部屋の反射と残響を足す。
   ヘッドホンで声が頭の中に貼りつくのは、左右の耳に届く音が同じだからである。声は正面のまま、
   左右それぞれ別の方位から届く反射と、左右で無相関な残響で、両耳の音をずらす
-- 耳元で動かす（`orbit`、隠し機能）: `config.toml` の `[experimental] spatial = true` のときだけ
-  メニューに出る。通る点・速さ・近さを鳴らすたびにくじで決め、声が耳元を行き来する。
-  入れているあいだは `outside` より優先する
+- 耳元で動かす（`orbit`、隠し機能）: `[experimental] spatial = true` のときだけメニューに出る。
+  通る点・速さ・近さを鳴らすたびにくじで決め、声が耳元を行き来する
 
 頭の形を測ったデータ（HRTF）は使わず、遠い側の耳を遅らせ（最大 0.63ms）、小さくし、
 こもらせる（頭の陰で高い音が届かない）だけで左右を作る。近さは低音（近接効果）と
@@ -17,7 +18,6 @@
 
 from __future__ import annotations
 
-import json
 import wave
 from collections.abc import Callable
 from functools import cache
@@ -26,10 +26,8 @@ from pathlib import Path
 import numpy as np
 from scipy.signal import butter, fftconvolve, sosfilt
 
-from .files import atomic_write
 from .wav import pcm_wav
 
-ORBIT_STATE_FILENAME = "spatial.json"
 SUFFIX = ".spatial.wav"
 
 # 両耳の時間差の最大（頭の幅から決まる）
@@ -66,21 +64,6 @@ ROOM_SEED = 20261110
 SECONDS_PER_POINT = 2.5
 MIN_POINTS = 2
 MAX_POINTS = 5
-
-
-class OrbitSwitch:
-    """耳元で動かすかの入り切り。データの置き場所に書き、再起動しても残す。"""
-
-    def __init__(self, data_root: Path) -> None:
-        self._path = data_root / ORBIT_STATE_FILENAME
-        try:
-            self.enabled = bool(json.loads(self._path.read_text(encoding="utf-8"))["enabled"])
-        except (OSError, ValueError, KeyError, TypeError):
-            self.enabled = False
-
-    def set(self, enabled: bool) -> None:
-        atomic_write(self._path, json.dumps({"enabled": enabled}))
-        self.enabled = enabled
 
 
 def _lowpass(x: np.ndarray, hz: float, rate: int) -> np.ndarray:
@@ -206,6 +189,12 @@ def orbit(samples: np.ndarray, rate: int, rng: np.random.Generator | None = None
     """モノラルを、耳元を行き来する (frames, 2) の2ch にする。"""
     azimuth, near = path(len(samples), rate, rng or np.random.default_rng())
     return render(samples, rate, azimuth, near)
+
+
+PLACEMENTS: dict[str, Callable[[np.ndarray, int], np.ndarray]] = {
+    "outside": outside,
+    "orbit": orbit,
+}
 
 
 def spatialize(source: Path, place: Callable[[np.ndarray, int], np.ndarray]) -> Path:

@@ -32,7 +32,7 @@ export function pairvoiceStatus(health: PairvoiceHealth | null): PairvoiceStatus
   if (health.dropped_recent >= DROPPED_RECENT_THRESHOLD) {
     return { tone: 'warn', label: `キュー詰まり（${health.dropped_recent}件破棄）` }
   }
-  if (health.config_stale) return { tone: 'warn', label: '設定が未反映（再起動が必要）' }
+  if (health.config_stale) return { tone: 'warn', label: '設定ファイルを読めない（ログを確認）' }
 
   return { tone: 'ok', label: 'pairvoice' }
 }

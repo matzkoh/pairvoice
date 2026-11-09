@@ -87,15 +87,9 @@ def test_room_is_the_same_every_time():
     assert np.array_equal(first, spatial.room(RATE))
 
 
-def test_orbit_switch_remembers_its_state(tmp_path):
-    assert spatial.OrbitSwitch(tmp_path).enabled is False
+def test_every_configurable_mode_has_a_placement():
+    import typing
 
-    spatial.OrbitSwitch(tmp_path).set(True)
+    from pairvoice.config import Spatial
 
-    assert spatial.OrbitSwitch(tmp_path).enabled is True
-
-
-def test_orbit_switch_survives_a_broken_state_file(tmp_path):
-    (tmp_path / spatial.ORBIT_STATE_FILENAME).write_text("{")
-
-    assert spatial.OrbitSwitch(tmp_path).enabled is False
+    assert set(spatial.PLACEMENTS) | {"off"} == set(typing.get_args(Spatial))

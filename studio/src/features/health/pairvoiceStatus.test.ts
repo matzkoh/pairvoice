@@ -79,10 +79,10 @@ describe('pairvoiceStatus の8分岐', () => {
     expect(pairvoiceStatus(health({ dropped_recent: 2 })).label).toBe('pairvoice')
   })
 
-  it('config_stale は再起動を促す', () => {
+  it('config_stale は設定ファイルを直すよう促す', () => {
     expect(pairvoiceStatus(health({ config_stale: true }))).toEqual({
       tone: 'warn',
-      label: '設定が未反映（再起動が必要）',
+      label: '設定ファイルを読めない（ログを確認）',
     })
   })
 

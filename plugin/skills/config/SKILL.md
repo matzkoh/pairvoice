@@ -5,13 +5,12 @@ description: pairvoice の設定（config.toml）を変えるときに使う。�
 
 # pairvoice の設定を変える
 
-設定は常駐サーバーが起動時に1回だけ読む TOML。読んだファイルは `pairvoice status` の `config_path` にある（無ければ作る）。`pairvoice --config <そのパス> config` が、書ける項目すべてを今の値（書いていない項目は既定値）とともに出す。入れ子は TOML の表になる（`values.mute` は `[mute]`、`values.tts.sampler` は `[tts.sampler]`）。
+設定は TOML で、常駐サーバーは保存されると数秒のうちに読み直す。読んだファイルは `pairvoice status` の `config_path` にある（無ければ作る）。`pairvoice --config <そのパス> config` が、書ける項目すべてを今の値（書いていない項目は既定値）とともに出す。入れ子は TOML の表になる（`values.mute` は `[mute]`、`values.tts.sampler` は `[tts.sampler]`）。
 
 ## 手順
 
 1. 今のファイルを読み、変える項目だけを書き足す・書き換える。利用者のコメントや他の項目はそのまま残す。
-2. `pairvoice restart` で反映する。
-3. `pairvoice status` で確かめる。`config_stale` が `false` なら新しい設定で動いている。設定が壊れていると常駐サーバーが立ち上がらないので、`~/Library/Logs/pairvoice.stderr.log` を見て直す。
+2. 数秒待って `pairvoice status` で確かめる。`config_stale` が `false` なら新しい設定で動いている。`port`・`[tts] output_dir`・モデル名を変えたときは常駐サーバーが自分で再起動するので、応答が戻るまで待つ。`true` のままなら書き間違いで読めていないので、`~/Library/Logs/pairvoice.log` の「設定ファイルを読めない」を見て直す。
 4. 変えた項目と、変わる振る舞いを利用者に伝える。
 
 ## 自動ミュートからアプリを外す

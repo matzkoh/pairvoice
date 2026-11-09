@@ -69,6 +69,14 @@ class MuteController:
         self._stalled_sample = None
         self._last_activity = None
 
+    def configure(self, config: MuteConfig) -> None:
+        """読み直した設定を当てる。"""
+        self._config = config
+        self._probe.configure(
+            ignore_output=config.audio_output_ignore_processes,
+            ignore_input=config.microphone_ignore_processes,
+        )
+
     def mute(self, minutes) -> MuteState:
         if not isinstance(minutes, int) or isinstance(minutes, bool):
             raise InvalidMinutes(f"{MIN_MINUTES}〜{MAX_MINUTES} の整数を指定してください")

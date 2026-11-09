@@ -14,11 +14,12 @@ from collections.abc import Callable
 from concurrent.futures import ThreadPoolExecutor
 from datetime import datetime
 from enum import StrEnum
+from operator import attrgetter
 from pathlib import Path
 from typing import Protocol
 
-from . import curate, generations, spatial
-from .config import Config
+from . import curate, generations, launchd, spatial
+from .config import Config, config_is_stale, load_config
 from .curate import Analysis, Outcome
 from .player import Player
 
@@ -26,6 +27,19 @@ _log = logging.getLogger(__name__)
 
 DROP_WINDOW_SECONDS = 300.0
 MAINTENANCE_INTERVAL_SECONDS = 30.0
+# 設定ファイルの変更を見に行く間隔
+CONFIG_POLL_SECONDS = 1.0
+# 動かしたまま差し替えられない項目。変わったら再起動する（ポートは待ち受け、置き場所は
+# studio の API、モデルは読み込んだ重みが握っている）
+RESTART_FIELDS = (
+    "port",
+    "tts.output_dir",
+    "llm.model",
+    "tts.model",
+    "stt.model",
+    "curate.diarize_model",
+    "curate.enhance_model",
+)
 PRUNE_INTERVAL_SECONDS = 86400.0
 
 # MLX のストリームはスレッドごとに持たれる。モデルを読み込んだスレッドと別のスレッドで
@@ -71,6 +85,7 @@ class Backend(Protocol):
     def download(self) -> None: ...
     def load(self) -> None: ...
     def unload(self) -> None: ...
+    def configure(self, config) -> None: ...
 
 
 class ModelUnavailable(Exception):
@@ -110,6 +125,12 @@ class ManagedModel:
         self._loading_deadline = 0.0
         self._loaded_at: float | None = None
         self._last_used: float | None = None
+
+    def configure(self, config) -> None:
+        """読み直した設定を当てる。モデル名は変わらない（変わるなら再起動する）。"""
+        self._backend.configure(config)
+        self._idle_unload_seconds = config.idle_unload_seconds
+        self._load_timeout_seconds = config.load_timeout_seconds
 
     async def ensure_loaded(self, wait_download: bool = True) -> None:
         """wait_download=False なら、ダウンロードを始める（続ける）だけで待たずに断る。
@@ -338,6 +359,7 @@ class Engine:
         *,
         stt_backend,
         curate_backend,
+        restart: Callable[[], object] = launchd.restart,
     ) -> None:
         self._config = config
         self._llm_backend = llm_backend
@@ -345,10 +367,9 @@ class Engine:
         self._stt_backend = stt_backend
         self._curate_backend = curate_backend
         self.mute = mute
-        # 隠し機能。フラグを立てていなければスイッチごと作らない
-        self.orbit = (
-            spatial.OrbitSwitch(config.tts.data_root) if config.experimental.spatial else None
-        )
+        self._restart = restart
+        # 当てられなかった設定ファイルの mtime。直るまで同じ版を読み直さない
+        self._rejected_mtime: float | None = None
         self.player = player or Player(config.playback, mute, prepare=self._spatialize)
         self._clock = clock
         self._runner = Runner(clock=clock)
@@ -487,11 +508,52 @@ class Engine:
         )
 
     def _spatialize(self, path: Path) -> Path | None:
-        if self.orbit and self.orbit.enabled:
-            return spatial.spatialize(path, spatial.orbit)
-        if self._config.playback.spatial:
-            return spatial.spatialize(path, spatial.outside)
-        return None
+        place = spatial.PLACEMENTS.get(self._config.playback.spatial)
+        return spatial.spatialize(path, place) if place else None
+
+    def reload_config(self) -> None:
+        """設定ファイルが変わっていれば読み直して当てる。
+
+        読めない（壊れている）ときは今の設定のまま動き、config_stale で知らせる。
+        動かしたまま差し替えられない項目（RESTART_FIELDS）が変わったら、常駐サーバーを再起動する。
+        どちらも同じ版を何度も試さない（直して保存し直すか、再起動が済むまで待つ）。
+        """
+        path = self._config.source_path
+        if path is None or not config_is_stale(self._config):
+            return
+        try:
+            mtime = path.stat().st_mtime
+        except OSError:
+            return
+        if mtime == self._rejected_mtime:
+            return
+        try:
+            new = load_config(path)
+        except (OSError, ValueError) as error:  # ConfigError と TOMLDecodeError は ValueError
+            self._rejected_mtime = mtime
+            _log.warning("設定ファイルを読めないので、今の設定のまま動きます: %s", error)
+            return
+        if changed := [
+            name
+            for name in RESTART_FIELDS
+            if attrgetter(name)(self._config) != attrgetter(name)(new)
+        ]:
+            self._rejected_mtime = mtime
+            _log.info("設定の %s が変わったので再起動します", "・".join(changed))
+            self._restart()
+            return
+        self._rejected_mtime = None
+        self._config = new
+        self.player.configure(new.playback)
+        self.mute.configure(new.mute)
+        for model, section in (
+            (self._llm, new.llm),
+            (self._tts, new.tts),
+            (self._stt, new.stt),
+            (self._curate, new.curate),
+        ):
+            model.configure(section)
+        _log.info("設定ファイルを読み直しました")
 
     async def speak(
         self,
@@ -600,7 +662,6 @@ class Engine:
         return {"started": started, "already": already}
 
     def health(self) -> dict:
-        from .config import config_is_stale
 
         # unloaded / misconfigured の間は毎回 preflight を取り直す。一度もロードしていない
         # 起動直後でも、参照音声の欠落などを health() の時点で見せるため
@@ -635,11 +696,12 @@ class Engine:
             "dropped_recent": self._runner.dropped_recent(),
             # 常駐サーバーが読んだ設定ファイル。launchd に --config で渡すと既定の場所と違う
             "config_path": str(self._config.source_path) if self._config.source_path else None,
-            "config_stale": config_is_stale(self._config),
+            # 変えたのに当てられていない（読めない・再起動待ち）。読み直すまでの1秒は含めない
+            "config_stale": self._rejected_mtime is not None,
             "spatial": {
-                "enabled": self._config.playback.spatial,
+                "mode": self._config.playback.spatial,
                 # 隠し機能。有効にしていない人には項目ごと見せない（メニューはこれの有無で出し分ける）
-                **({"orbit": self.orbit.enabled} if self.orbit else {}),
+                **({"orbit_menu": True} if self._config.experimental.spatial else {}),
             },
         }
 
@@ -668,6 +730,7 @@ class Engine:
         self._tasks = [
             asyncio.create_task(self._maintain_loop()),
             asyncio.create_task(self.player.run()),
+            asyncio.create_task(self._watch_config()),
         ]
 
     async def stop(self) -> None:
@@ -677,6 +740,15 @@ class Engine:
             with contextlib.suppress(asyncio.CancelledError):
                 await task
         self._tasks = []
+
+    async def _watch_config(self) -> None:
+        while True:
+            await asyncio.sleep(CONFIG_POLL_SECONDS)
+            try:
+                # 小さなファイルを stat して読むだけなので、ループの上でそのまま当てる
+                self.reload_config()
+            except Exception as error:
+                _log.warning("設定ファイルを読み直せませんでした: %s", error)
 
     async def _maintain_loop(self) -> None:
         while True:

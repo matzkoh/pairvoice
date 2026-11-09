@@ -929,6 +929,10 @@ class MlxCurateBackend:
         self._diarizer = None
         self._enhancer = None
 
+    def configure(self, config: CurateConfig) -> None:
+        """読み直した設定を当てる。モデル名は変わらない（変わるなら再起動する）。"""
+        self._config = config
+
     def preflight(self) -> str | None:
         return None
 

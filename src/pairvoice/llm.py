@@ -23,6 +23,10 @@ class MlxLmBackend:
         self._model = None
         self._tokenizer = None
 
+    def configure(self, config: LLMConfig) -> None:
+        """読み直した設定を当てる。モデル名は変わらない（変わるなら再起動する）。"""
+        self._config = config
+
     def preflight(self) -> str | None:
         return None
 

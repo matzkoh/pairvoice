@@ -146,6 +146,10 @@ class Player:
         self._epoch = 0
         self._playing = False
 
+    def configure(self, config: PlaybackConfig) -> None:
+        """読み直した設定を当てる。鳴っている音には、次に音量を変えるときから効く。"""
+        self._config = config
+
     @property
     def epoch(self) -> int:
         """読み上げを受け付けた時点で取り、enqueue() に渡す。間に stop() があれば鳴らさない。"""

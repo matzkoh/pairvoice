@@ -145,6 +145,9 @@ class MuteConfig:
     microphone_ignore_processes: tuple[str, ...] = ()
 
 
+Spatial = typing.Literal["outside", "orbit", "off"]
+
+
 @dataclass(frozen=True)
 class PlaybackConfig:
     """常駐サーバーが読み上げを鳴らすときの音量と待ち時間。"""
@@ -154,8 +157,9 @@ class PlaybackConfig:
     duck_volume: float = 0.3
     # 先の読み上げが終わるのをこれ以上待ったものは、古くなったとみなして捨てる
     max_wait_seconds: float = 60.0
-    # 頭の外で鳴らす（spatial.py）。ヘッドホン向けで、スピーカーなら切る。メニューバーからも切り替える
-    spatial: bool = True
+    # 鳴らし方（spatial.py）。outside は頭の外で鳴らす（ヘッドホン向け）、off はそのまま鳴らす。
+    # orbit（耳元で動かす）は隠し機能
+    spatial: Spatial = "outside"
 
 
 @dataclass(frozen=True)
@@ -169,7 +173,7 @@ class EvalConfig:
 class ExperimentalConfig:
     """隠し機能。`pairvoice config` の一覧にも説明にも出さない。"""
 
-    # メニューバーに「耳元で動かす」を出す（spatial.py）
+    # メニューバーに「耳元で動かす」（[playback] spatial = "orbit"）を出す（spatial.py）
     spatial: bool = False
 
 
@@ -213,7 +217,11 @@ def _coerce(where: str, value: object, hint: object) -> object:
     if isinstance(hint, types.UnionType) or typing.get_origin(hint) is typing.Union:
         # TOML に null は無いので、X | None の None 側は来ない
         (hint,) = [arg for arg in typing.get_args(hint) if arg is not type(None)]
-    if typing.get_origin(hint) is tuple:
+    if typing.get_origin(hint) is typing.Literal:
+        if value in typing.get_args(hint):
+            return value
+        expected = " / ".join(f'"{choice}"' for choice in typing.get_args(hint)) + " のどれか"
+    elif typing.get_origin(hint) is tuple:
         # 1つだけなら配列でなく文字列で書きたくなる。tuple("zoom.us") は1文字ずつに割れる
         items = [value] if isinstance(value, str) else value
         if isinstance(items, list) and all(isinstance(item, str) for item in items):
@@ -329,7 +337,7 @@ def set_value(path: Path, section: str, key: str, value: object) -> None:
 
 
 def config_is_stale(config: Config) -> bool:
-    """設定ファイルが読み込み後に更新されていれば True。再起動が必要なことを知らせる。"""
+    """設定ファイルが読み込み後に更新されていれば True。常駐サーバーはこれを見て読み直す。"""
     if config.source_path is None or not config.source_path.exists():
         return False
     if config.source_mtime is None:

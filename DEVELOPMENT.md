@@ -106,7 +106,7 @@ pairvoice eval --model mlx-community/<モデル>       # 別のモデルをこ�
 | `mute` | ミュート中か、その理由（`manual` / `microphone` / `audio_output`）と期限 |
 | `playback` | 鳴っているか（`playing`）と、順番待ちの数（`waiting`） |
 | `dropped_recent` | 直近で後続に追い越されて捨てた要約の数。3件以上ならキューが詰まっている |
-| `config_stale` | 設定ファイルが起動後に変わった（`pairvoice restart` が要る） |
+| `config_stale` | 設定ファイルが変わったのに当てられていない（書き間違いで読めない、または再起動待ち。理由はログ） |
 | `version` / `plugin` | 常駐サーバーの版と、最後に来たフックが名乗った版（`mismatch` なら食い違い。0.6.0 までのフックは名乗らないので、古い道筋を叩いたことで見分ける） |
 
 ログは、常駐サーバーが `~/Library/Logs/pairvoice.log`、フックが `~/Library/Logs/speak-summary.log`。

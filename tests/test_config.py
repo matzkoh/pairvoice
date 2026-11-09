@@ -371,17 +371,25 @@ def test_set_value_keeps_comments_and_other_items(tmp_path):
     path = tmp_path / "config.toml"
     path.write_text("# 自分用\nport = 1\n", encoding="utf-8")
 
-    set_value(path, "playback", "spatial", False)
-    set_value(path, "playback", "spatial", True)
+    set_value(path, "playback", "spatial", "off")
+    set_value(path, "playback", "spatial", "orbit")
 
     assert path.read_text(encoding="utf-8").startswith("# 自分用\nport = 1\n")
-    assert load_config(path).playback.spatial is True
+    assert load_config(path).playback.spatial == "orbit"
 
 
 def test_set_value_creates_the_file(tmp_path):
     from pairvoice.config import set_value
 
     path = tmp_path / "pairvoice" / "config.toml"
-    set_value(path, "playback", "spatial", False)
+    set_value(path, "playback", "spatial", "off")
 
-    assert load_config(path).playback.spatial is False
+    assert load_config(path).playback.spatial == "off"
+
+
+def test_spatial_accepts_only_known_modes(tmp_path):
+    path = tmp_path / "config.toml"
+    path.write_text('[playback]\nspatial = "inside"\n', encoding="utf-8")
+
+    with pytest.raises(ConfigError, match='"outside" / "orbit" / "off"'):
+        load_config(path)

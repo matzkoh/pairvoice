@@ -125,6 +125,10 @@ class MlxAudioBackend:
         self._speaker_injection_ready = False
         self._speaker_states: OrderedDict[tuple[Path, int], mx.array] = OrderedDict()
 
+    def configure(self, config: TTSConfig) -> None:
+        """読み直した設定を当てる。モデル名と置き場所は変わらない（変わるなら再起動する）。"""
+        self._config = config
+
     @property
     def caption_path(self) -> Path:
         return self._data_dir / CAPTION_FILENAME

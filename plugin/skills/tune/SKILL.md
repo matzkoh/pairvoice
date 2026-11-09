@@ -28,4 +28,4 @@ pairvoice が合成の直前に `dict.tsv` で表記を読みに置き換える�
 
 ## モデルを比べる
 
-`pairvoice eval --model <Hugging Face のモデル ID> --out <tmp>/<名前>.jsonl` は、そのモデルをこのプロセスに読み込んで評価する（常駐サーバーとは別に重みの分のメモリを使う）。乗り換えるなら `config.toml` の `[llm] model` を書き換えて `pairvoice restart` する。プロンプトは今のモデルに合わせて育ててあるので、乗り換えたら手順 1〜4 をやり直す。
+`pairvoice eval --model <Hugging Face のモデル ID> --out <tmp>/<名前>.jsonl` は、そのモデルをこのプロセスに読み込んで評価する（常駐サーバーとは別に重みの分のメモリを使う）。乗り換えるなら `config.toml` の `[llm] model` を書き換える（常駐サーバーが自分で再起動する）。プロンプトは今のモデルに合わせて育ててあるので、乗り換えたら手順 1〜4 をやり直す。

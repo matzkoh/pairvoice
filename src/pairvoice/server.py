@@ -110,10 +110,6 @@ _MODEL_UNAVAILABLE = _error(
 _STYLE_INVALID = _error("`style_invalid`（styles.json が壊れている）")
 
 
-class OrbitRequest(BaseModel):
-    enabled: bool
-
-
 class MutedResponse(BaseModel):
     error: Literal["muted"] = Field(description="ミュート中で、合成・要約しなかった")
     reason: str = Field(
@@ -642,17 +638,9 @@ def create_app(engine: Engine) -> FastAPI:
         state = engine.mute.unmute()
         return {"active": state.active}
 
-    if (orbit := engine.orbit) is not None:
-
-        @api.post("/spatial", include_in_schema=False)
-        async def set_orbit(request: OrbitRequest):
-            """隠し機能（spatial.py）。読み上げを耳元で動かすかを切り替える。"""
-            await asyncio.to_thread(orbit.set, request.enabled)
-            return {"enabled": orbit.enabled}
-
     @api.post("/restart", status_code=202, summary="常駐サーバーを再起動する", tags=["運用"])
     async def restart(background: BackgroundTasks):
-        """応答を返してから LaunchAgent に再起動させる。config.toml の変更を反映するのに使う。"""
+        """応答を返してから LaunchAgent に再起動させる。"""
         background.add_task(launchd.restart)
         return {"restarting": True}
 

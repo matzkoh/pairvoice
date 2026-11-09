@@ -144,8 +144,9 @@ def warmup_item(health: dict | None) -> MenuItem:
     return MenuItem(label, "warmup", not busy and bool(states & WARMABLE_STATES))
 
 
-def _toggle(label: str, name: str, on: bool) -> MenuItem:
-    return MenuItem(label, f"{name}:off" if on else f"{name}:on", True, checked=on)
+def _placement(label: str, mode: str, current: str | None) -> MenuItem:
+    on = current == mode
+    return MenuItem(label, "spatial:off" if on else f"spatial:{mode}", True, checked=on)
 
 
 def menu_spec(health: dict | None, now: datetime) -> list[MenuItem]:
@@ -171,12 +172,13 @@ def menu_spec(health: dict | None, now: datetime) -> list[MenuItem]:
     rows.append(MenuItem("ミュートを解除", "unmute", manual))
     rows.append(SEPARATOR)
 
-    # 頭の外で鳴らす（spatial.py）。耳元で動かすは隠し機能で、有効にした人の /health にだけ orbit が載る
+    # 鳴らし方（spatial.py）。2つは背反で、入っている方を押すと切る。
+    # 耳元で動かすは隠し機能で、有効にした人の /health にだけ orbit_menu が載る
     if reachable and "spatial" in health:
         spatial = health["spatial"]
-        rows.append(_toggle("頭の外で鳴らす", "spatial", bool(spatial.get("enabled"))))
-        if "orbit" in spatial:
-            rows.append(_toggle("耳元で動かす", "orbit", bool(spatial["orbit"])))
+        rows.append(_placement("頭の外で鳴らす", "outside", spatial.get("mode")))
+        if spatial.get("orbit_menu"):
+            rows.append(_placement("耳元で動かす", "orbit", spatial.get("mode")))
         rows.append(SEPARATOR)
 
     # studio の画面はサーバーが配るので、届かないあいだは開けない
@@ -238,12 +240,9 @@ def perform(action: str, base: str, config_path: str | None = None) -> None:
         if action.startswith("mute:"):
             client.call(base, "/mute", body={"minutes": int(action.split(":")[1])}, timeout=5)
         elif action.startswith("spatial:"):
-            # 正本は設定ファイル。書き換えて、常駐サーバーに読み直させる
+            # 正本は設定ファイル。書き換えれば常駐サーバーが読み直す
             path = Path(config_path) if config_path else DEFAULT_CONFIG_PATH.expanduser()
-            set_value(path, "playback", "spatial", action == "spatial:on")
-            launchd.restart()
-        elif action.startswith("orbit:"):
-            client.call(base, "/spatial", body={"enabled": action == "orbit:on"}, timeout=5)
+            set_value(path, "playback", "spatial", action.partition(":")[2])
         elif action == "unmute":
             client.call(base, "/unmute", timeout=5)
         elif action == "stop":

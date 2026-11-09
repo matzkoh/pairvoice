@@ -52,6 +52,9 @@ class FakeBackend:
             raise RuntimeError("load failed")
         self.loaded = True
 
+    def configure(self, config):
+        self.config = config
+
     def unload(self):
         self.unload_calls += 1
         self.loaded = False
@@ -69,6 +72,9 @@ class FakeProbe:
         self.output = output
         self.error = error
         self.samples = 0
+
+    def configure(self, *, ignore_output, ignore_input):
+        self.ignored = (ignore_output, ignore_input)
 
     def sample(self):
         self.samples += 1

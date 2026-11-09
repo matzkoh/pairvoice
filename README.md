@@ -178,7 +178,7 @@ studio は常駐サーバーが根（`/`）で配っている。メニューの�
 | `pairvoice say "テスト"` | 読み上げてみる（ミュート中でも鳴る。`--voice` `--style` `--caption` で声とスタイルを選ぶ） |
 | `pairvoice stop` | 鳴っている読み上げと、順番待ちの読み上げを止める |
 | `pairvoice warmup` | モデルを読み込み、終わるまで待つ（初回はダウンロードも） |
-| `pairvoice restart` | 常駐サーバーを再起動する（設定を変えたら要る） |
+| `pairvoice restart` | 常駐サーバーを再起動する |
 | `pairvoice studio` | studio をブラウザで開く |
 | `pairvoice url` | 常駐サーバーの接続先（`http://127.0.0.1:<port>`）を出す。スクリプトからは `curl "$(pairvoice url)/api/health"` のように使う |
 | `pairvoice config` | 設定ファイルの場所と、既定値を含めたすべての項目の値を出す |
@@ -197,14 +197,15 @@ studio は常駐サーバーが根（`/`）で配っている。メニューの�
 
 既定で入っている。鳴らす直前にモノラルの読み上げを2ch にし、声を正面に置いて、壁からの反射と残響を足す。
 左右の耳に届く音がずれることで、ヘッドホンでも声が頭の外から聴こえる。
-スピーカーで聴くなら、メニューバーの「頭の外で鳴らす」を外す。外すと `config.toml` の `[playback] spatial` を書き換え、常駐サーバーを再起動する。
+スピーカーで聴くなら、メニューバーの「頭の外で鳴らす」を外す（`config.toml` の `[playback] spatial = "off"` と同じ）。
 保存する wav はモノラルのままなので、studio・聞き取り・記録は影響を受けない。
 
 ## 設定
 
 `~/.config/pairvoice/config.toml`。
 無くても既定値で動く。
-変えたら `pairvoice restart` する。
+保存すると常駐サーバーが数秒のうちに読み直す。`port`、`[tts] output_dir`、モデル名を変えたときは、常駐サーバーが自分で再起動する。
+書き間違いで読めないときは、前の設定のまま動き続け、`~/Library/Logs/pairvoice.log` に理由が出る。
 Claude Code からはプラグインの `config` スキルで頼める。
 
 | 表 | よく触る項目 |
@@ -217,7 +218,7 @@ Claude Code からはプラグインの `config` スキルで頼める。
 | `[curate]` | `diarize_model`（`/api/profiles/curate` の話者分離のモデル）、`enhance_model`（雑音除去のモデル） |
 | `[tts.sampler]` | 音声合成の細かい調整。studio の「声」画面で試して、表示される設定を写す |
 | `[mute]` | `auto_microphone`（既定 true）、`auto_audio_output`（既定 true）、`audio_output_wait_seconds`（既定 5）、`microphone_ignore_processes` / `audio_output_ignore_processes`（自動ミュートで見ないプロセス名。マイクを切ったまま入っている通話など。名前は `GET /api/mute` の `processes` で分かる） |
-| `[playback]` | `volume`（既定 1.0）、`duck_volume`（ほかのアプリの音が鳴っている間の音量。既定 0.3）、`max_wait_seconds`（順番待ちがこれを超えたら捨てる。既定 60）、`spatial`（頭の外で鳴らす。既定 true） |
+| `[playback]` | `volume`（既定 1.0）、`duck_volume`（ほかのアプリの音が鳴っている間の音量。既定 0.3）、`max_wait_seconds`（順番待ちがこれを超えたら捨てる。既定 60）、`spatial`（`"outside"` で頭の外で鳴らす、`"off"` でそのまま鳴らす。既定 `"outside"`） |
 | `[eval]` | `style = "casual"` で、`pairvoice eval` がです/ます調を違反にする（タメ口に育てるとき） |
 
 メモリが少ない機種では、要約のモデルを小さくすると要約側のピークが約 8GB から約 4.7GB に下がる。
@@ -254,7 +255,7 @@ claude plugin update pairvoice@pairvoice
   何も書かれていなければプラグインが読まれていないので、Claude Code を起動し直す。
   書かれていれば理由が `SKIP (...)` に出る（一覧は [plugin/README.md](https://github.com/matzkoh/pairvoice/blob/main/plugin/README.md)）
 - **更新したら鳴らなくなった**: 常駐サーバーとプラグインの版がずれている。「更新する」の手順で両方を上げる
-- **設定を変えたのに効かない**: `pairvoice restart`
+- **設定を変えたのに効かない**: `~/Library/Logs/pairvoice.log` に「設定ファイルを読めない」と出ていれば、書き間違いを直して保存し直す
 - **辞書を直したのに効かない**: studio の「保存」を押すまでは書き換わらない
 
 ## やめるとき
