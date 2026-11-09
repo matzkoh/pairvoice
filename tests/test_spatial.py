@@ -1,6 +1,7 @@
 import wave
 
 import numpy as np
+import pytest
 
 from pairvoice import spatial
 from pairvoice.wav import write_mono
@@ -52,7 +53,9 @@ def test_spatialize_writes_a_stereo_wav_next_to_the_source(tmp_path):
     source = tmp_path / "a.wav"
     write_mono(source, tone(2.0), RATE)
 
-    target = spatial.spatialize(source, np.random.default_rng(0))
+    target = spatial.spatialize(
+        source, lambda x, rate: spatial.orbit(x, rate, np.random.default_rng(0))
+    )
 
     assert target == tmp_path / "a.spatial.wav"
     with wave.open(str(target)) as reader:
@@ -61,15 +64,38 @@ def test_spatialize_writes_a_stereo_wav_next_to_the_source(tmp_path):
         assert reader.getnframes() == RATE * 2
 
 
-def test_switch_remembers_its_state(tmp_path):
-    assert spatial.SpatialSwitch(tmp_path).enabled is False
+def test_outside_keeps_the_voice_centered_with_an_uncorrelated_room():
+    # 純音だと反射と打ち消し合って片耳だけ小さくなるので、声に近い広い帯域の音で測る
+    x = 0.3 * np.random.default_rng(0).standard_normal(RATE)
 
-    spatial.SpatialSwitch(tmp_path).set(True)
+    stereo = spatial.outside(x, RATE)
 
-    assert spatial.SpatialSwitch(tmp_path).enabled is True
+    assert stereo.shape == (len(x) + len(spatial.room(RATE)) - 1, 2)
+    assert np.abs(stereo).max() == pytest.approx(spatial.PEAK)
+    db = channel_db(stereo)
+    assert abs(db[1] - db[0]) < 1.5
+    # 響きが左右で無相関なので、左右の耳に届く音が同じにならない（同じだと頭の中で鳴る）
+    tail = spatial.room(RATE)[int(spatial.TAIL_START_MS / 1000 * RATE) :]
+    assert abs(np.corrcoef(tail[:, 0], tail[:, 1])[0, 1]) < 0.2
 
 
-def test_switch_survives_a_broken_state_file(tmp_path):
-    (tmp_path / spatial.STATE_FILENAME).write_text("{")
+def test_room_is_the_same_every_time():
+    spatial.room.cache_clear()
+    first = spatial.room(RATE).copy()
+    spatial.room.cache_clear()
 
-    assert spatial.SpatialSwitch(tmp_path).enabled is False
+    assert np.array_equal(first, spatial.room(RATE))
+
+
+def test_orbit_switch_remembers_its_state(tmp_path):
+    assert spatial.OrbitSwitch(tmp_path).enabled is False
+
+    spatial.OrbitSwitch(tmp_path).set(True)
+
+    assert spatial.OrbitSwitch(tmp_path).enabled is True
+
+
+def test_orbit_switch_survives_a_broken_state_file(tmp_path):
+    (tmp_path / spatial.ORBIT_STATE_FILENAME).write_text("{")
+
+    assert spatial.OrbitSwitch(tmp_path).enabled is False

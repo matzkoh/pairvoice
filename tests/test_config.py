@@ -363,3 +363,25 @@ def test_relative_data_root_env_is_made_absolute(tmp_path, monkeypatch):
     monkeypatch.setenv("PAIRVOICE_DATA_ROOT", "data")
 
     assert default_data_root() == Path.cwd() / "data"
+
+
+def test_set_value_keeps_comments_and_other_items(tmp_path):
+    from pairvoice.config import set_value
+
+    path = tmp_path / "config.toml"
+    path.write_text("# 自分用\nport = 1\n", encoding="utf-8")
+
+    set_value(path, "playback", "spatial", False)
+    set_value(path, "playback", "spatial", True)
+
+    assert path.read_text(encoding="utf-8").startswith("# 自分用\nport = 1\n")
+    assert load_config(path).playback.spatial is True
+
+
+def test_set_value_creates_the_file(tmp_path):
+    from pairvoice.config import set_value
+
+    path = tmp_path / "pairvoice" / "config.toml"
+    set_value(path, "playback", "spatial", False)
+
+    assert load_config(path).playback.spatial is False

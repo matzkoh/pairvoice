@@ -5,7 +5,14 @@ from pathlib import Path
 import pytest
 from fastapi.testclient import TestClient
 
-from pairvoice.config import Config, ExperimentalConfig, LLMConfig, MuteConfig, TTSConfig
+from pairvoice.config import (
+    Config,
+    ExperimentalConfig,
+    LLMConfig,
+    MuteConfig,
+    PlaybackConfig,
+    TTSConfig,
+)
 from pairvoice.lifecycle import Engine, Superseded
 from pairvoice.mute import MuteController
 from pairvoice.profiles import ProfileNotFound
@@ -24,6 +31,7 @@ def build(
     mute_config=None,
     data_root=None,
     experimental=None,
+    playback=None,
 ):
     config = Config(
         llm=LLMConfig(model="fake/llm", load_timeout_seconds=1),
@@ -35,6 +43,7 @@ def build(
         ),
         mute=mute_config or MuteConfig(),
         experimental=experimental or ExperimentalConfig(),
+        playback=playback or PlaybackConfig(),
     )
     engine = Engine(
         config=config,
@@ -320,6 +329,7 @@ def test_health_shape():
         "dropped_recent",
         "config_path",
         "config_stale",
+        "spatial",
         "version",
         "plugin",
     }
@@ -739,23 +749,48 @@ def test_transcribe_rejects_non_wav():
     assert stt.calls == []
 
 
-def test_spatial_is_hidden_unless_the_flag_is_on():
-    _, client = build()
+def test_spatial_follows_the_config_and_orbit_is_hidden_unless_the_flag_is_on(tmp_path):
+    _, client = build(data_root=tmp_path)
 
-    assert "spatial" not in client.get("/health").json()
+    assert client.get("/health").json()["spatial"] == {"enabled": True}
     assert client.post("/spatial", json={"enabled": True}).status_code in (404, 405)
     assert "/api/spatial" not in client.get("http://127.0.0.1:17495/openapi.json").json()["paths"]
 
 
-def test_spatial_toggle_persists_across_restarts(tmp_path):
+def test_orbit_toggle_persists_across_restarts(tmp_path):
     flag = ExperimentalConfig(spatial=True)
     _, client = build(data_root=tmp_path, experimental=flag)
-    assert client.get("/health").json()["spatial"] == {"enabled": False}
+    assert client.get("/health").json()["spatial"] == {"enabled": True, "orbit": False}
 
     assert client.post("/spatial", json={"enabled": True}).json() == {"enabled": True}
 
     _, restarted = build(data_root=tmp_path, experimental=flag)
-    assert restarted.get("/health").json()["spatial"] == {"enabled": True}
+    assert restarted.get("/health").json()["spatial"] == {"enabled": True, "orbit": True}
     assert (
         "/api/spatial" not in restarted.get("http://127.0.0.1:17495/openapi.json").json()["paths"]
     )
+
+
+def test_playback_is_placed_outside_unless_orbit_or_off(tmp_path):
+    import wave
+
+    import numpy as np
+
+    from pairvoice.wav import write_mono
+
+    source = tmp_path / "a.wav"
+    write_mono(source, 0.3 * np.sin(np.arange(24000) / 10), 24000)
+
+    def frames(path):
+        with wave.open(str(path)) as reader:
+            assert reader.getnchannels() == 2
+            return reader.getnframes()
+
+    engine, client = build(data_root=tmp_path, experimental=ExperimentalConfig(spatial=True))
+    # 頭の外で鳴らすと部屋の響きのぶん長くなる。耳元で動かすは長さを変えない
+    assert frames(engine._spatialize(source)) > 24000
+    client.post("/spatial", json={"enabled": True})
+    assert frames(engine._spatialize(source)) == 24000
+
+    engine, _ = build(data_root=tmp_path / "off", playback=PlaybackConfig(spatial=False))
+    assert engine._spatialize(source) is None

@@ -262,8 +262,8 @@ def test_fetch_health_returns_none_when_unreachable(monkeypatch):
         ("unmute", "/unmute", None),
         ("stop", "/stop", None),
         ("warmup", "/warmup", None),
-        ("spatial:on", "/spatial", {"enabled": True}),
-        ("spatial:off", "/spatial", {"enabled": False}),
+        ("orbit:on", "/spatial", {"enabled": True}),
+        ("orbit:off", "/spatial", {"enabled": False}),
     ],
 )
 def test_perform_posts_to_the_right_endpoint(monkeypatch, action, path, body):
@@ -276,6 +276,22 @@ def test_perform_posts_to_the_right_endpoint(monkeypatch, action, path, body):
     monkeypatch.setattr(menubar.client, "call", record)
     menubar.perform(action, "http://127.0.0.1:17495")
     assert calls == [(path, "POST", body)]
+
+
+@pytest.mark.parametrize(("action", "value"), [("spatial:on", "true"), ("spatial:off", "false")])
+def test_perform_spatial_rewrites_the_config_and_restarts(monkeypatch, tmp_path, action, value):
+    path = tmp_path / "config.toml"
+    path.write_text("# 自分用\n[playback]\nvolume = 0.5\n", encoding="utf-8")
+    restarted = []
+    monkeypatch.setattr(menubar.launchd, "restart", lambda: restarted.append(True) or 0)
+
+    menubar.perform(action, "http://127.0.0.1:17495", str(path))
+
+    assert (
+        path.read_text(encoding="utf-8")
+        == f"# 自分用\n[playback]\nvolume = 0.5\nspatial = {value}\n"
+    )
+    assert restarted == [True]
 
 
 def test_perform_restart_restarts_the_server(monkeypatch):
@@ -387,17 +403,28 @@ def test_quit_label_says_it_stops_pairvoice():
     assert find(items, "quit").label == "pairvoice を終了"
 
 
-def test_spatial_item_is_hidden_unless_the_server_reports_it():
-    labels = [row.label for row in menubar.menu_spec(health(), NOW)]
+def test_orbit_item_is_hidden_unless_the_server_reports_it():
+    labels = [
+        row.label for row in menubar.menu_spec({**health(), "spatial": {"enabled": True}}, NOW)
+    ]
 
+    assert "頭の外で鳴らす" in labels
     assert "耳元で動かす" not in labels
 
 
-@pytest.mark.parametrize(("enabled", "action"), [(False, "spatial:on"), (True, "spatial:off")])
-def test_spatial_item_shows_a_check_and_toggles(enabled, action):
-    rows = menubar.menu_spec({**health(), "spatial": {"enabled": enabled}}, NOW)
+@pytest.mark.parametrize(
+    ("spatial", "label", "checked", "action"),
+    [
+        ({"enabled": False}, "頭の外で鳴らす", False, "spatial:on"),
+        ({"enabled": True}, "頭の外で鳴らす", True, "spatial:off"),
+        ({"enabled": True, "orbit": False}, "耳元で動かす", False, "orbit:on"),
+        ({"enabled": True, "orbit": True}, "耳元で動かす", True, "orbit:off"),
+    ],
+)
+def test_spatial_items_show_a_check_and_toggle(spatial, label, checked, action):
+    rows = menubar.menu_spec({**health(), "spatial": spatial}, NOW)
 
-    (row,) = [row for row in rows if row.label == "耳元で動かす"]
-    assert row.checked is enabled
+    (row,) = [row for row in rows if row.label == label]
+    assert row.checked is checked
     assert row.action == action
     assert row.enabled

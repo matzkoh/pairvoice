@@ -1,6 +1,6 @@
 ---
 name: config
-description: pairvoice の設定（config.toml）を変えるときに使う。ポート、要約・合成・聞き取りのモデル、自動ミュートの条件と除外するアプリ、音量。声・プロンプト・辞書は api、要約の改善は tune。
+description: pairvoice の設定（config.toml）を変えるときに使う。ポート、要約・合成・聞き取りのモデル、自動ミュートの条件と除外するアプリ、音量、頭の外で鳴らすか。声・プロンプト・辞書は api、要約の改善は tune。
 ---
 
 # pairvoice の設定を変える

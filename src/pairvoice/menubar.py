@@ -15,9 +15,11 @@ import sys
 import threading
 from dataclasses import dataclass
 from datetime import datetime
+from pathlib import Path
 from typing import Any
 
 from . import client, launchd
+from .config import DEFAULT_CONFIG_PATH, set_value
 from .lifecycle import WARMABLE_STATES, ModelState
 from .studio_web import open_studio
 
@@ -142,6 +144,10 @@ def warmup_item(health: dict | None) -> MenuItem:
     return MenuItem(label, "warmup", not busy and bool(states & WARMABLE_STATES))
 
 
+def _toggle(label: str, name: str, on: bool) -> MenuItem:
+    return MenuItem(label, f"{name}:off" if on else f"{name}:on", True, checked=on)
+
+
 def menu_spec(health: dict | None, now: datetime) -> list[MenuItem]:
     """メニューの並びを決める。AppKit を知らないので、そのままテストできる。"""
     reachable = health is not None
@@ -165,12 +171,12 @@ def menu_spec(health: dict | None, now: datetime) -> list[MenuItem]:
     rows.append(MenuItem("ミュートを解除", "unmute", manual))
     rows.append(SEPARATOR)
 
-    # 隠し機能（spatial.py）。有効にした人の /health にだけ spatial が載る
+    # 頭の外で鳴らす（spatial.py）。耳元で動かすは隠し機能で、有効にした人の /health にだけ orbit が載る
     if reachable and "spatial" in health:
-        on = bool(health["spatial"].get("enabled"))
-        rows.append(
-            MenuItem("耳元で動かす", "spatial:off" if on else "spatial:on", True, checked=on)
-        )
+        spatial = health["spatial"]
+        rows.append(_toggle("頭の外で鳴らす", "spatial", bool(spatial.get("enabled"))))
+        if "orbit" in spatial:
+            rows.append(_toggle("耳元で動かす", "orbit", bool(spatial["orbit"])))
         rows.append(SEPARATOR)
 
     # studio の画面はサーバーが配るので、届かないあいだは開けない
@@ -223,14 +229,21 @@ def request_shutdown(parent_pid: int | None) -> None:
         _log.warning("親プロセス %s に終了を伝えられなかった: %s", parent_pid, failed)
 
 
-def perform(action: str, base: str) -> None:
-    """メニューの動作を実行する。失敗しても常駐は続ける。"""
+def perform(action: str, base: str, config_path: str | None = None) -> None:
+    """メニューの動作を実行する。失敗しても常駐は続ける。
+
+    config_path は常駐サーバーが読んだ設定ファイル（/health の config_path）。
+    """
     try:
         if action.startswith("mute:"):
             client.call(base, "/mute", body={"minutes": int(action.split(":")[1])}, timeout=5)
         elif action.startswith("spatial:"):
-            enabled = action == "spatial:on"
-            client.call(base, "/spatial", body={"enabled": enabled}, timeout=5)
+            # 正本は設定ファイル。書き換えて、常駐サーバーに読み直させる
+            path = Path(config_path) if config_path else DEFAULT_CONFIG_PATH.expanduser()
+            set_value(path, "playback", "spatial", action == "spatial:on")
+            launchd.restart()
+        elif action.startswith("orbit:"):
+            client.call(base, "/spatial", body={"enabled": action == "orbit:on"}, timeout=5)
         elif action == "unmute":
             client.call(base, "/unmute", timeout=5)
         elif action == "stop":
@@ -336,7 +349,7 @@ def _controller_class(appkit, objc):
 
         @objc.python_method
         def _perform(self, action):
-            perform(action, self._base)
+            perform(action, self._base, (self._health or {}).get("config_path"))
             self._fetch()
 
     return MenuBarApp

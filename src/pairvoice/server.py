@@ -110,7 +110,7 @@ _MODEL_UNAVAILABLE = _error(
 _STYLE_INVALID = _error("`style_invalid`（styles.json が壊れている）")
 
 
-class SpatialRequest(BaseModel):
+class OrbitRequest(BaseModel):
     enabled: bool
 
 
@@ -642,13 +642,13 @@ def create_app(engine: Engine) -> FastAPI:
         state = engine.mute.unmute()
         return {"active": state.active}
 
-    if (switch := engine.spatial) is not None:
+    if (orbit := engine.orbit) is not None:
 
         @api.post("/spatial", include_in_schema=False)
-        async def set_spatial(request: SpatialRequest):
+        async def set_orbit(request: OrbitRequest):
             """隠し機能（spatial.py）。読み上げを耳元で動かすかを切り替える。"""
-            await asyncio.to_thread(switch.set, request.enabled)
-            return {"enabled": switch.enabled}
+            await asyncio.to_thread(orbit.set, request.enabled)
+            return {"enabled": orbit.enabled}
 
     @api.post("/restart", status_code=202, summary="常駐サーバーを再起動する", tags=["運用"])
     async def restart(background: BackgroundTasks):

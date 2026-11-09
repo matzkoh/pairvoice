@@ -154,6 +154,8 @@ class PlaybackConfig:
     duck_volume: float = 0.3
     # 先の読み上げが終わるのをこれ以上待ったものは、古くなったとみなして捨てる
     max_wait_seconds: float = 60.0
+    # 頭の外で鳴らす（spatial.py）。ヘッドホン向けで、スピーカーなら切る。メニューバーからも切り替える
+    spatial: bool = True
 
 
 @dataclass(frozen=True)
@@ -309,6 +311,21 @@ def load_config(path: Path | None = None) -> Config:
         source_path=resolved,
         source_mtime=resolved.stat().st_mtime,
     )
+
+
+def set_value(path: Path, section: str, key: str, value: object) -> None:
+    """設定ファイルの1項目だけを書き換える。利用者のコメントや他の項目はそのまま残す。"""
+    import tomlkit
+
+    from .files import atomic_write
+
+    document = (
+        tomlkit.parse(path.read_text(encoding="utf-8")) if path.exists() else tomlkit.document()
+    )
+    if section not in document:
+        document[section] = tomlkit.table()
+    document[section][key] = value  # type: ignore[index]
+    atomic_write(path, tomlkit.dumps(document))
 
 
 def config_is_stale(config: Config) -> bool:

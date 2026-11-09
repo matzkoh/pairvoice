@@ -346,12 +346,10 @@ class Engine:
         self._curate_backend = curate_backend
         self.mute = mute
         # 隠し機能。フラグを立てていなければスイッチごと作らない
-        self.spatial = (
-            spatial.SpatialSwitch(config.tts.data_root) if config.experimental.spatial else None
+        self.orbit = (
+            spatial.OrbitSwitch(config.tts.data_root) if config.experimental.spatial else None
         )
-        self.player = player or Player(
-            config.playback, mute, prepare=self._spatialize if self.spatial else None
-        )
+        self.player = player or Player(config.playback, mute, prepare=self._spatialize)
         self._clock = clock
         self._runner = Runner(clock=clock)
         self._llm = ManagedModel(
@@ -489,7 +487,11 @@ class Engine:
         )
 
     def _spatialize(self, path: Path) -> Path | None:
-        return spatial.spatialize(path) if self.spatial and self.spatial.enabled else None
+        if self.orbit and self.orbit.enabled:
+            return spatial.spatialize(path, spatial.orbit)
+        if self._config.playback.spatial:
+            return spatial.spatialize(path, spatial.outside)
+        return None
 
     async def speak(
         self,
@@ -634,8 +636,11 @@ class Engine:
             # 常駐サーバーが読んだ設定ファイル。launchd に --config で渡すと既定の場所と違う
             "config_path": str(self._config.source_path) if self._config.source_path else None,
             "config_stale": config_is_stale(self._config),
-            # 隠し機能。有効にしていない人には項目ごと見せない（メニューはこれの有無で出し分ける）
-            **({"spatial": {"enabled": self.spatial.enabled}} if self.spatial else {}),
+            "spatial": {
+                "enabled": self._config.playback.spatial,
+                # 隠し機能。有効にしていない人には項目ごと見せない（メニューはこれの有無で出し分ける）
+                **({"orbit": self.orbit.enabled} if self.orbit else {}),
+            },
         }
 
     def _describe(self, model: ManagedModel) -> dict:
