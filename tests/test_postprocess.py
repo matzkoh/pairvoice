@@ -128,8 +128,19 @@ def test_cut_lead_gives_up_without_a_gap():
     assert cut_lead(_signal((2.0, 0.5)), SR) is None
 
 
+def test_cut_lead_measures_from_where_speech_starts():
+    # 話し始めまでに 1 秒の無音があっても、前置きの後の長い間で切れる
+    samples = _signal((1.0, 0.0), (0.6, 0.5), (0.9, 0.0), (2.0, 0.5))
+
+    body = cut_lead(samples, SR)
+
+    assert body is not None
+    assert len(body) == int(2.05 * SR)
+
+
 def test_cut_lead_does_not_cut_at_a_pause_inside_the_body():
-    # 本文が始まるはずの範囲（1.5 秒）を過ぎた間では切らない
+    # 前置きが本文とつながって読まれると、最初のかたまりが前置きより長くなる。
+    # その後の本文の中の間では切らない
     samples = _signal((1.6, 0.5), (0.3, 0.0), (1.0, 0.5))
 
     assert cut_lead(samples, SR) is None

@@ -92,23 +92,27 @@ def trim(samples: np.ndarray, sample_rate: int) -> np.ndarray:
     return trimmed
 
 
-# 前置き（tts.LEAD_TEXT）の後の間を探す範囲。前置きは 0.2〜1.1 秒で読み終わり、本文は
-# 0.3〜1.2 秒から始まった（corpus の 40 文）。本文の中の間で切らないよう、探すのは
-# 本文の始まりが CUT_LEAD_MAX_SECONDS までの間だけにする
+# 前置き（tts.LEAD_TEXT）とみなす長さ。話し始めから測る。前置きは 0.15〜0.66 秒で
+# 読み終わり、その後に 0.13〜0.95 秒の間が空いた（声11人 × 12文 × seed 2 の 264 本）。
+# 話し始めまでの無音は声によって 0〜1 秒とばらつくので、ファイルの頭からは測らない。
+# 前置きが本文とつながって読まれると最初のかたまりが長くなるので、上限を超えたら諦める
+# （本文の中の間で切らないため）
 CUT_LEAD_MIN_SECONDS = 0.15
+CUT_LEAD_MAX_SECONDS = 0.8
 CUT_LEAD_GAP_SECONDS = 0.1
-CUT_LEAD_MAX_SECONDS = 1.5
 
 
 def cut_lead(samples: np.ndarray, sample_rate: int) -> np.ndarray | None:
     """前置きと、その後の間を切り落とす。間が見つからなければ None（前置きなしで合成し直す）。"""
     hop = max(1, int(sample_rate * FRAME_SECONDS))
     segments = _segments(samples, hop)
+    if not segments:
+        return None
+    origin = segments[0][0]
     for (_, lead_end), (start, _) in pairwise(segments):
-        if start * FRAME_SECONDS > CUT_LEAD_MAX_SECONDS:
-            break
+        lead = (lead_end - origin) * FRAME_SECONDS
         if (
-            lead_end * FRAME_SECONDS >= CUT_LEAD_MIN_SECONDS
+            CUT_LEAD_MIN_SECONDS <= lead <= CUT_LEAD_MAX_SECONDS
             and (start - lead_end) * FRAME_SECONDS >= CUT_LEAD_GAP_SECONDS
         ):
             # 本文の弱い語頭（息・無声子音）を残すため、trim と同じだけ手前から残す
