@@ -89,10 +89,12 @@ class FakeProbe:
 class FakeCurate(FakeBackend):
     """音の大きさで話者を分ける（0.3 より大きい所は 0 番、それより小さい声は 1 番）。雑音は除かない。"""
 
-    def __init__(self, **kwargs):
+    def __init__(self, dereverbs=False, **kwargs):
         super().__init__(name="curate", model="fake/curate", **kwargs)
+        self.dereverbs = dereverbs
         self.diarize_calls = 0
         self.enhance_calls = 0
+        self.dereverb_calls = 0
 
     def diarize(self, chunk, state):
         import numpy as np
@@ -113,3 +115,7 @@ class FakeCurate(FakeBackend):
     def enhance(self, samples):
         self.enhance_calls += 1
         return samples * 0.999
+
+    def dereverb(self, chunk):
+        self.dereverb_calls += 1
+        return chunk * 0.999

@@ -104,10 +104,11 @@ studio の「プロファイル」画面で、
 API なら、声の描写を渡すだけで1回でプロファイルにできる（`POST /api/profiles/design`）。
 何も作らなくても、最初の読み上げのときに既定の声が1つ作られる。
 
-雑多なファイルから作るとき（studio の「素材から作る」、API なら `POST /api/profiles/curate`）は、ファイルをまとめて話者を分け、いちばん多く話す人の声から BGM や雑音の少ない区間を合わせて 26〜28 秒ほど選び、雑音を除いてつなぐ。
+雑多なファイルから作るとき（studio の「素材から作る」、API なら `POST /api/profiles/curate`）は、ファイルをまとめて話者を分け、いちばん多く話す人の声から BGM や雑音の少ない区間を合わせて 26〜28 秒ほど選び、雑音と部屋の響きを除いてつなぐ。
 ファイルをまたいでも同じ人は同じ人とみなす（全体で4人まで）。
 どのファイルのどの区間を使ったかが返るので、聞いて違和感があれば素材を変えて作り直す。
-ファイルの読み込みに [ffmpeg](https://ffmpeg.org/)（`brew install ffmpeg`）を使い、話者分離（[Sortformer](https://huggingface.co/mlx-community/diar_streaming_sortformer_4spk-v2.1-fp16)）と雑音除去（[MossFormer2 SE 48K](https://huggingface.co/starkdmi/MossFormer2_SE_48K_MLX)、Apache-2.0）のモデルを初めて使うときにダウンロードする。
+ファイルの読み込みに [ffmpeg](https://ffmpeg.org/)（`brew install ffmpeg`）を使い、話者分離（[Sortformer](https://huggingface.co/mlx-community/diar_streaming_sortformer_4spk-v2.1-fp16)）、雑音除去（[MossFormer2 SE 48K](https://huggingface.co/starkdmi/MossFormer2_SE_48K_MLX)、Apache-2.0）、残響除去（[anvuew/dereverb_mel_band_roformer](https://huggingface.co/anvuew/dereverb_mel_band_roformer) のモノラル版、GPL-3.0、約 0.9GB）のモデルを初めて使うときにダウンロードする。
+響きを除かないなら、設定の `[curate]` に `dereverb_model = ""` と書く。
 
 ```bash
 # 日本語の名前は URL に符号化して渡す（--url-query が符号化する。そのまま書くと 400 になる）
@@ -215,7 +216,7 @@ Claude Code からはプラグインの `config` スキルで頼める。
 | `[tts]` | `model`（音声合成のモデル）、`output_max_age_days`（合成した wav を消すまでの日数。既定 7、0 で消さない）、`split_sentences`（読み上げを文ごとに合成し、できた文から鳴らす。鳴り始めは早くなるが文の間の抑揚がつながらない。既定 false） |
 | `[tts.profile]` | 最初の声を作るときだけ使う。`ref_audio`（取り込む wav）、`caption`（声の描写） |
 | `[stt]` | `model`（`/api/transcribe` の聞き取りのモデル。既定は whisper-large-v3-turbo）、`language`（モデルに渡す言語。既定 `ja`） |
-| `[curate]` | `diarize_model`（`/api/profiles/curate` の話者分離のモデル）、`enhance_model`（雑音除去のモデル） |
+| `[curate]` | `diarize_model`（`/api/profiles/curate` の話者分離のモデル）、`enhance_model`（雑音除去のモデル）、`dereverb_model`（残響除去のモデル。空にすると響きを除かない） |
 | `[tts.sampler]` | 音声合成の細かい調整。studio の「声」画面で試して、表示される設定を写す |
 | `[mute]` | `auto_microphone`（既定 true）、`auto_audio_output`（既定 true）、`audio_output_wait_seconds`（既定 5）、`microphone_ignore_processes` / `audio_output_ignore_processes`（自動ミュートで見ないプロセス名。マイクを切ったまま入っている通話など。名前は `GET /api/mute` の `processes` で分かる） |
 | `[playback]` | `volume`（既定 1.0）、`duck_volume`（ほかのアプリの音が鳴っている間の音量。既定 0.3）、`max_wait_seconds`（順番待ちがこれを超えたら捨てる。既定 60）、`spatial`（`"outside"` で頭の外で鳴らす、`"off"` でそのまま鳴らす。既定 `"outside"`） |

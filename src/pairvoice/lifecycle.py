@@ -39,6 +39,7 @@ RESTART_FIELDS = (
     "stt.model",
     "curate.diarize_model",
     "curate.enhance_model",
+    "curate.dereverb_model",
 )
 PRUNE_INTERVAL_SECONDS = 86400.0
 
@@ -628,15 +629,24 @@ class Engine:
         return await curate.analyze(material, diarize, asyncio.to_thread)
 
     async def curate_render(self, analysis: Analysis, selection: list[int] | None) -> Outcome:
-        """解析した区間の雑音を除いてつなぐ。selection は区間の番号で、None なら自動で選ぶ。
+        """解析した区間の雑音と響きを除いてつなぐ。selection は区間の番号で、None なら自動で選ぶ。
 
-        雑音除去は区間ごとに列に並べる。
+        雑音除去は区間ごとに、残響除去は 8 秒ずつ列に並べる。
         """
 
         async def enhance(samples):
             return await self._measure(self._curate, self._curate_backend.enhance, samples)
 
-        return await curate.render(analysis, selection, enhance, asyncio.to_thread)
+        async def dereverb(samples):
+            return await self._measure(self._curate, self._curate_backend.dereverb, samples)
+
+        return await curate.render(
+            analysis,
+            selection,
+            enhance,
+            asyncio.to_thread,
+            dereverb if self._curate_backend.dereverbs else None,
+        )
 
     async def warmup(self, respect_mute: bool = False) -> dict:
         if respect_mute:

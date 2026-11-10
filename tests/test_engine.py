@@ -9,7 +9,7 @@ import pytest
 
 import pairvoice.lifecycle as lifecycle_module
 from pairvoice.config import Config, LLMConfig, MuteConfig, TTSConfig
-from pairvoice.curate import EDGE_PAD_SECONDS
+from pairvoice.curate import DEREVERB_CHUNK, DEREVERB_RATE, EDGE_PAD_SECONDS
 from pairvoice.lifecycle import Engine, ModelUnavailable, MutedError, Superseded
 from pairvoice.mute import MuteController
 from pairvoice.wav import write_mono
@@ -742,3 +742,19 @@ async def test_curate_queues_each_chunk_and_ignores_mute(tmp_path):
     assert curate.load_calls == 1
     assert curate.diarize_calls == 2
     assert engine.health()["curate"]["state"] == "loaded"
+    assert curate.dereverb_calls == 0
+
+
+@needs_ffmpeg
+async def test_curate_dereverbs_in_chunks_when_configured(tmp_path):
+    curate = FakeCurate(dereverbs=True)
+    engine = make_engine(curate=curate)
+    audio = tmp_path / "a.wav"
+    write_mono(audio, synth([(1 + 7 * k, 7 + 7 * k, 0.5, 220) for k in range(10)], 16000), 16000)
+
+    analysis = await engine.curate_analyze([("a.wav", audio)], tmp_path)
+    outcome = await engine.curate_render(analysis, None)
+
+    # 8 秒ずつ、半分重ねて列に並べる
+    samples = len(outcome.samples) * DEREVERB_RATE // outcome.sample_rate
+    assert curate.dereverb_calls == samples // (DEREVERB_CHUNK // 2) + 2

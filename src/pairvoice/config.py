@@ -125,11 +125,13 @@ class STTConfig:
 
 @dataclass(frozen=True)
 class CurateConfig:
-    """`/profiles/curate` の、素材から参照音声を作る話者分離と雑音除去のモデル。"""
+    """`/profiles/curate` の、素材から参照音声を作る話者分離・雑音除去・残響除去のモデル。"""
 
     diarize_model: str = "mlx-community/diar_streaming_sortformer_4spk-v2.1-fp16"
     # 重みは curate.ENHANCE_WEIGHTS の1ファイルだけを使う
     enhance_model: str = "starkdmi/MossFormer2_SE_48K_MLX"
+    # 残響除去のモデル。重みは curate.DEREVERB_WEIGHTS の1ファイルだけを使う。空にすると響きを除かない
+    dereverb_model: str = "anvuew/dereverb_mel_band_roformer"
     idle_unload_seconds: int = 600
     load_timeout_seconds: int = 120
 

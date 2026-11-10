@@ -415,6 +415,30 @@ async def test_render_uses_the_selection_and_keeps_the_analysis():
     assert [p["index"] for p in again.report["pieces"]] == [0, 4]
 
 
+async def test_render_dereverbs_the_whole_reference_in_chunks():
+    plan = [(1 + 7 * k, 6 + 7 * k, 0.4, 220) for k in range(5)]
+    analysis = await run_analyze(material(plan))
+    plain = await run_render(analysis, [3, 1])
+    chunks = []
+
+    async def enhance(samples):
+        return FakeCurate().enhance(samples)
+
+    async def dereverb(chunk):
+        chunks.append(len(chunk))
+        return chunk
+
+    outcome = await render(analysis, [3, 1], enhance, offload, dereverb)
+
+    # 半分ずつ重ねるので、どのサンプルも2つのチャンクに入る
+    hop = curate.DEREVERB_CHUNK // 2
+    seconds = len(plain.samples) / OUTPUT_RATE
+    assert chunks == [curate.DEREVERB_CHUNK] * (int(seconds * curate.DEREVERB_RATE) // hop + 2)
+    # 何もしない残響除去なら、窓で継いでも元の音に戻る
+    assert len(outcome.samples) == len(plain.samples)
+    np.testing.assert_allclose(outcome.samples, plain.samples, atol=1e-3)
+
+
 @pytest.mark.parametrize(
     ("selection", "message"),
     [([0, 0], "2度"), ([9], "番号"), ([0], "以上"), ([0, 1, 2, 3, 4, 5], "まで")],
