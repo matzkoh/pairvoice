@@ -514,6 +514,12 @@ def snap_edges(piece: Piece, audio: np.ndarray, offset: float) -> tuple[float, f
         while 0 <= edge - outward < frames and mask[edge - outward]:
             edge -= outward
         target = edge + outward * pad
+        # 静かな所の奥で切っていれば、声の際から pad の所まで詰める（区間の端に長い無音を
+        # 残さない。話者分離は間の間も話していると付けることがあり、長い区間を割った所も
+        # 間の途中になる）。言葉にはかからないので、内側へ縮めても途中から始まらない
+        inner = at(hi) if outward < 0 else at(lo)
+        if (target - best) * outward < 0 and (target - inner) * outward > 0:
+            return offset + float(target) * FRAME_SECONDS
         # 外側の限り（ほかの人の声やファイルの継ぎ目の手前）は探した範囲に関わらず守る
         limit = at(lo) if outward < 0 else at(hi)
         while (target - best) * outward > 0 and (limit - best) * outward > 0:

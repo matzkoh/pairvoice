@@ -314,6 +314,15 @@ def test_snap_edges_moves_cuts_into_the_nearest_quiet():
     assert end == pytest.approx(6.0 + curate.EDGE_PAD_SECONDS, abs=0.02)
 
 
+def test_snap_edges_trims_long_silence_at_the_edges():
+    # 声は 3.0〜6.0 秒。区間は前後に 2 秒ずつの無音を含めて付いた（振幅 0 は音の長さを延ばすだけ）
+    audio = synth([(3.0, 6.0, 0.5, 220), (8.0, 9.0, 0.0, 220)], OUTPUT_RATE, noise=0.0001)
+    piece = curate.Piece(1.0, 8.0, 40.0, min_start=0.5, max_end=8.5)
+    start, end = curate.snap_edges(piece, audio, 0.0)
+    assert start == pytest.approx(3.0 - curate.EDGE_PAD_SECONDS, abs=0.02)
+    assert end == pytest.approx(6.0 + curate.EDGE_PAD_SECONDS, abs=0.02)
+
+
 class LateDiarizer(FakeCurate):
     """区間の頭を 0.2 秒遅れて付ける。"""
 
