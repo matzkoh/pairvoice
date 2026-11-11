@@ -8,6 +8,7 @@ import pytest
 from pairvoice.data_api import MASTER_STEPS, REFERENCE_TEXTS, TAKE_GAP_SECONDS
 from pairvoice.tts import ANCHOR_TEXT, SpeechResult, resolve_data_audio
 from pairvoice.wav import write_mono
+from tests.fakes import FakeCurate
 from tests.test_curate import heads, needs_ffmpeg, synth
 from tests.test_engine import FakeSTT, FakeTTS
 from tests.test_server import build
@@ -579,3 +580,109 @@ def test_random_profile_needs_two_voices(client):
     assert response.json()["error"] == "invalid_profile"
     missing = client.post("/profiles/random", json={"name": "ランダム", "members": [first, "p-x"]})
     assert missing.status_code == 404
+
+
+# ---- 候補の比較 ----
+
+
+class WritingTTS(FakeTTS):
+    """合成するたびに wav を書く（聞き取りがファイルを読むので）。"""
+
+    def __init__(self, root: Path):
+        super().__init__()
+        self.root = root
+
+    def speak(
+        self, text, caption=None, sampler=None, design=False, profile_id=None, mix=None, style=None
+    ):
+        super().speak(text, caption, sampler, design, profile_id, mix, style)
+        path = self.root / "generations" / f"{len(self.calls)}.wav"
+        path.parent.mkdir(exist_ok=True)
+        path.write_bytes(make_wav(b"\x01\x00" * 3))
+        # 「伸びる声」だけ長く伸びる
+        duration = 4.0 if profile_id == "伸びる声" else 2.0
+        return SpeechResult(path, f"generations/{path.name}", duration, None)
+
+    def save(self, samples, sample_rate):
+        path = (
+            self.root
+            / "generations"
+            / f"saved-{len(list(self.root.glob('generations/saved-*')))}.wav"
+        )
+        path.parent.mkdir(exist_ok=True)
+        write_mono(path, samples, sample_rate)
+        return SpeechResult(path, f"generations/{path.name}", len(samples) / sample_rate, None)
+
+
+def test_evaluate_reads_every_text_with_every_seed_and_ranks(tmp_path):
+    tts, stt = WritingTTS(tmp_path), FakeSTT()
+    _, client = build(data_root=tmp_path, tts=tts, stt=stt)
+
+    response = client.post(
+        "/voices/evaluate",
+        json={
+            "candidates": [
+                {"voice": "伸びる声"},
+                {"audio": "generations/ref.wav", "caption": "落ち着いて"},
+                {"audio": "generations/ref.wav"},
+            ],
+            "texts": ["テスト全部通ったよ。", "ビルドが落ちた。"],
+            "seeds": [1, 2],
+        },
+    )
+
+    assert response.status_code == 200
+    body = response.json()
+    assert len(tts.calls) == len(stt.calls) == 3 * 2 * 2
+    # どの候補も同じ種で読む。audio は参照音声として mix に渡す
+    assert [c["sampler"] for c in tts.calls[:2]] == [{"rng_seed": 1}, {"rng_seed": 2}]
+    assert tts.calls[0]["profile_id"] == "伸びる声"
+    assert tts.calls[4]["mix"] == [(Path("/data/generations/ref.wav"), 1.0)]
+    assert tts.calls[4]["caption"] == "落ち着いて"
+    assert tts.calls[8]["caption"] is None
+    # 伸びた候補は最後。残りは読み崩れの少ない順（聞き取りは1文目と同じ文を返す）
+    assert body["ranking"] == [1, 2, 0]
+    assert body["candidates"][0]["broken"] == 4
+    first = body["candidates"][1]["samples"][0]
+    assert first["transcript"] == "テスト全部通ったよ。"
+    assert first["cer"] == 0.0
+
+
+def test_evaluate_needs_exactly_one_source(client):
+    both = {"voice": "a", "audio": "generations/a.wav"}
+    for candidate in (both, {"caption": "x"}):
+        response = client.post("/voices/evaluate", json={"candidates": [candidate]})
+        assert response.status_code == 422
+
+
+@needs_ffmpeg
+def test_render_builds_a_reference_and_profile_reuses_it(tmp_path):
+    curate = FakeCurate()
+    _, client = build(data_root=tmp_path, curate=curate, tts=WritingTTS(tmp_path))
+    plan = [(1 + 7 * k, 6 + 7 * k, 0.5, 220) for k in range(6)]
+    job = analyze_upload(client, [("配信.wav", speech_wav(tmp_path, plan))]).json()
+
+    rendered = client.post(f"/curate/{job['job_id']}/render", json={"pieces": [4, 0]})
+
+    assert rendered.status_code == 201
+    body = rendered.json()
+    assert [p["index"] for p in body["report"]["pieces"]] == [0, 4]
+    reference = resolve_data_audio(tmp_path, body["audio"])
+    assert client.get("/profiles").json()["items"] == []
+    enhanced = curate.enhance_calls
+
+    created = client.post(
+        f"/curate/{job['job_id']}/profile", json={"name": "配信の声", "pieces": [0, 4]}
+    )
+
+    assert created.status_code == 201
+    # 組んだ参照音声をそのまま使い、雑音を除き直さない
+    assert curate.enhance_calls == enhanced
+    # 自動で選んだ結果も、同じ区間を指定すれば使い回す
+    auto = client.post(f"/curate/{job['job_id']}/render", json={}).json()
+    enhanced = curate.enhance_calls
+    pieces = [p["index"] for p in auto["report"]["pieces"]]
+    client.post(f"/curate/{job['job_id']}/profile", json={"name": "自動", "pieces": pieces})
+    assert curate.enhance_calls == enhanced
+    profile_id = created.json()["profile"]["id"]
+    assert client.get(f"/profiles/{profile_id}/audio").content == reference.read_bytes()

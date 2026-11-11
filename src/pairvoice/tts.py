@@ -399,6 +399,11 @@ class MlxAudioBackend:
         )
         return _Voice(ref_audio, resolved_caption, self.resolve_sampler(sampler), speaker)
 
+    def save(self, samples: np.ndarray, sample_rate: int) -> SpeechResult:
+        """合成していない音（素材から組んだ参照音声など）を、合成した wav と同じ所に置く。"""
+        self._config.output_dir.mkdir(parents=True, exist_ok=True)
+        return self._save(samples, sample_rate, None)
+
     def _save(self, samples: np.ndarray, sample_rate: int, peak: float | None) -> SpeechResult:
         path = self._new_output_path()
         write_mono(path, samples, sample_rate)

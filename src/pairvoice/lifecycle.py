@@ -16,12 +16,17 @@ from datetime import datetime
 from enum import StrEnum
 from operator import attrgetter
 from pathlib import Path
-from typing import Protocol
+from typing import TYPE_CHECKING, Protocol
+
+import numpy as np
 
 from . import curate, generations, launchd, spatial
 from .config import Config, config_is_stale, load_config
 from .curate import Analysis, Outcome
 from .player import Player
+
+if TYPE_CHECKING:
+    from .tts import SpeechResult
 
 _log = logging.getLogger(__name__)
 
@@ -606,6 +611,10 @@ class Engine:
         """データの置き場所の wav の話者ベクトル。2択でもとの声どうしの位置を測る。"""
         path = self._tts_backend.resolve_audio(audio)
         return await self._measure(self._tts, self._tts_backend.speaker_vector, path)
+
+    async def save_audio(self, samples: np.ndarray, sample_rate: int) -> SpeechResult:
+        """合成した wav と同じ所に置く（日が経つと消える）。モデルは使わない。"""
+        return await asyncio.to_thread(self._tts_backend.save, samples, sample_rate)
 
     async def transcribe(self, path: Path) -> str:
         """wav を聞き取った文。合成した音声が原稿どおりに読めているかを確かめるのに使う。"""

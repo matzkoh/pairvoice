@@ -276,6 +276,9 @@ class Analysis:
     # 候補のセリフの聞き取り（区間の番号 → 文を返す仕事）。一度頼んだものは使い回し、
     # 聞き取りの最中に同じ候補を頼まれても、同じ仕事の答えを待つ
     transcripts: dict[int, asyncio.Future[str]] = field(default_factory=dict)
+    # 組み立てた参照音声（選んだ区間の番号の昇順。自動で選んだときは None → 結果）。
+    # 試しに組んで比べたものから声を作るとき、雑音と響きを除き直さない
+    renders: dict[tuple[int, ...] | None, Outcome] = field(default_factory=dict)
 
 
 def decode(files: list[tuple[str, Path]], directory: Path) -> Material:
@@ -757,8 +760,12 @@ async def render(
 
     enhance と dereverb はモデルを、offload は重い numpy をスレッドで回す。dereverb はつないだ
     あとの全体にかける（聴いて確かめたのと同じかけ方）。
-    analysis の区間は書き換えない（同じ解析から選び方を変えて何度でも作れるように）
+    analysis の区間は書き換えない（同じ解析から選び方を変えて何度でも作れるように）。
+    組んだ結果は analysis に覚え、同じ選び方（自動で選んだ結果と同じ区間の指定も含む）なら使い回す
     """
+    key = None if selection is None else tuple(sorted(selection))
+    if key in analysis.renders:
+        return analysis.renders[key]
     if selection is None:
         chosen = await _render_auto(analysis, enhance)
     else:
@@ -772,7 +779,9 @@ async def render(
     samples = await offload(assemble, chosen)
     if dereverb is not None:
         samples = await remove_reverb(samples, dereverb, offload)
-    return Outcome(samples, OUTPUT_RATE, _report(analysis, chosen))
+    outcome = Outcome(samples, OUTPUT_RATE, _report(analysis, chosen))
+    analysis.renders[key] = analysis.renders[tuple(p.index for p in chosen)] = outcome
+    return outcome
 
 
 async def remove_reverb(samples: np.ndarray, dereverb: Dereverb, offload: Offload) -> np.ndarray:

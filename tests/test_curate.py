@@ -428,6 +428,8 @@ async def test_render_dereverbs_the_whole_reference_in_chunks():
         chunks.append(len(chunk))
         return chunk
 
+    # 組んだ結果は覚えているので、忘れさせてから残響除去つきで組み直す
+    analysis.renders.clear()
     outcome = await render(analysis, [3, 1], enhance, offload, dereverb)
 
     # 半分ずつ重ねるので、どのサンプルも2つのチャンクに入る

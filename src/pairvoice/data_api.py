@@ -13,6 +13,7 @@ import tempfile
 from pathlib import Path
 from typing import Annotated, Literal, Protocol
 
+import numpy as np
 from fastapi import APIRouter, Body, Query, Request
 from fastapi.openapi.models import Example
 from fastapi.responses import FileResponse, JSONResponse, Response
@@ -26,7 +27,7 @@ from pydantic import (
 )
 from starlette.datastructures import UploadFile
 
-from . import curate, reading
+from . import curate, reading, voice_eval
 from .api_errors import BodyTooLarge
 from .api_errors import error_doc as _error
 from .api_errors import fail as _fail
@@ -111,6 +112,12 @@ class CurateRender(Protocol):
     async def __call__(self, analysis: Analysis, selection: list[int] | None) -> Outcome: ...
 
 
+class SaveAudio(Protocol):
+    """Engine.save_audio。合成した wav と同じ所に置く。"""
+
+    async def __call__(self, samples: np.ndarray, sample_rate: int) -> SpeechResult: ...
+
+
 class Synthesize(Protocol):
     """Engine.synthesize のうち、声を作る・伸ばすのに使う引数。"""
 
@@ -120,6 +127,7 @@ class Synthesize(Protocol):
         caption: str | None = None,
         sampler: dict | None = None,
         design: bool = False,
+        profile_id: str | None = None,
         *,
         mix: list[tuple[str, float]] | None = None,
     ) -> SpeechResult: ...
@@ -412,6 +420,89 @@ class CurateProfileBody(BaseModel):
     )
 
 
+class CurateRenderBody(BaseModel):
+    pieces: list[int] | None = Field(
+        default=None,
+        description="使う候補の番号。省くか null なら自動で選ぶ（`POST /profiles/curate` と同じ）",
+    )
+
+
+class CurateRenderResponse(BaseModel):
+    audio: str = Field(
+        description="組み立てた参照音声（データの置き場所からの相対パス）。"
+        "`POST /voices/evaluate` の `audio` や `/synthesize` の `mix` に渡せる。合成した wav と同じく日が経つと消える"
+    )
+    report: CurateReport = Field(description="どの区間を選んだか")
+
+
+class EvalCandidateBody(BaseModel):
+    voice: str | None = Field(default=None, description="比べる声（プロファイル）の名前か ID")
+    audio: str | None = Field(
+        default=None,
+        description="比べる参照音声（データの置き場所からの相対パスの wav）。"
+        "`POST /curate/{job_id}/render` や `/synthesize` で作ったもの",
+    )
+    caption: Caption | None = Field(
+        default=None,
+        description="話し方の指示。省くと、`voice` はその声の caption、`audio` は caption なしで読む",
+    )
+
+    @model_validator(mode="after")
+    def _one_source(self):
+        if (self.voice is None) == (self.audio is None):
+            raise ValueError("exactly one of voice or audio is required")
+        return self
+
+
+class VoiceEvalBody(BaseModel):
+    candidates: list[EvalCandidateBody] = Field(
+        min_length=1, max_length=8, description="比べる候補"
+    )
+    texts: list[Annotated[NonBlank, StringConstraints(max_length=200)]] = Field(
+        default=list(voice_eval.EVAL_TEXTS),
+        min_length=1,
+        max_length=10,
+        description="読ませる文。声を作るときに読ませた文とは別の文にする",
+    )
+    seeds: list[int] = Field(
+        default=list(voice_eval.DEFAULT_SEEDS),
+        min_length=1,
+        max_length=5,
+        description="乱数の種。どの候補も同じ種で読ませる",
+    )
+
+
+class EvalSample(BaseModel):
+    text: str = Field(description="読ませた文")
+    seed: int = Field(description="乱数の種")
+    audio: str = Field(description="合成した wav（データの置き場所からの相対パス）")
+    duration: float = Field(description="長さ（秒）")
+    duration_ratio: float = Field(
+        description="同じ文を全候補・全種で合成した長さの中央値に対する比"
+    )
+    transcript: str = Field(description="聞き取った文")
+    cer: float = Field(description="文字誤り率（記号・空白・カタカナとひらがなの違いは数えない）")
+    broken: bool = Field(
+        description=f"長さの比が {voice_eval.SHORT_RATIO}〜{voice_eval.LONG_RATIO} を外れた"
+        "（無音が居座る・途中で止まる）"
+    )
+
+
+class EvalCandidateResult(BaseModel):
+    index: int = Field(description="`candidates` の何番目か")
+    cer: float = Field(description="文字誤り率の平均")
+    worst_cer: float = Field(description="文字誤り率のいちばん悪い値")
+    broken: int = Field(description="`broken` の合成の数")
+    samples: list[EvalSample] = Field(description="文・種ごとの合成")
+
+
+class VoiceEvalResponse(BaseModel):
+    ranking: list[int] = Field(
+        description="良い順の候補の番号。`broken` の少ない順、同じなら `cer` の小さい順"
+    )
+    candidates: list[EvalCandidateResult] = Field(description="`candidates` の順")
+
+
 class ProfilesResponse(BaseModel):
     active: str | None = Field(description="使用中の声の ID")
     items: list[ProfileItem] = Field(description="新しく作った順")
@@ -494,6 +585,7 @@ def data_router(
     curate_analyze: CurateAnalyze,
     curate_render: CurateRender,
     transcribe: Transcribe,
+    save_audio: SaveAudio,
 ) -> APIRouter:
     router = APIRouter()
     curate_jobs = CurateJobs()
@@ -914,10 +1006,79 @@ def data_router(
         },
     )
     async def create_curated_profile(job_id: str, body: CurateProfileBody):
-        """選んだ区間の雑音を除いてつなぐ。解析は残るので、選び直して何度でも作れる。"""
+        """選んだ区間の雑音を除いてつなぐ。解析は残るので、選び直して何度でも作れる。
+
+        `POST /curate/{job_id}/render` で組んだのと同じ区間なら、組んだ参照音声をそのまま使う。
+        """
         analysis = curate_jobs.get(job_id)
         outcome = await curate_render(analysis, body.pieces)
         return await _create_curated(body.name, body.caption, outcome)
+
+    @router.post(
+        "/curate/{job_id}/render",
+        status_code=201,
+        response_model=CurateRenderResponse,
+        summary="選んだ区間から参照音声だけを作る",
+        tags=["声"],
+        responses={
+            **_CURATE_JOB_NOT_FOUND,
+            400: _error("`invalid_selection`（番号が無い・重なる・長さが足りない・長すぎる）"),
+            422: _error("`too_little_speech`（自動で選んだとき、きれいな声が足りない）"),
+            503: _error("モデルを使えない"),
+        },
+    )
+    async def render_curated(job_id: str, body: CurateRenderBody):
+        """`POST /curate/{job_id}/profile` と同じく組み立てるが、声は作らない。
+
+        区間の選び方を変えて組んだ候補を `POST /voices/evaluate` で比べ、良かったものの
+        `report.pieces` の番号を `POST /curate/{job_id}/profile` に渡すと、組み直さずに声にする。
+        """
+        outcome = await curate_render(curate_jobs.get(job_id), body.pieces)
+        saved = await save_audio(outcome.samples, outcome.sample_rate)
+        return {"audio": saved.relative_path, "report": outcome.report}
+
+    @router.post(
+        "/voices/evaluate",
+        response_model=VoiceEvalResponse,
+        summary="声の候補を崩れにくさで比べる",
+        tags=["声"],
+        responses={
+            404: _error(
+                "`profile_not_found`（`voice` の声が無い）、`audio_not_found`（`audio` の wav が無い）"
+            ),
+            503: _error("モデルを使えない"),
+        },
+    )
+    async def evaluate_voices(body: VoiceEvalBody):
+        """どの候補にも同じ文を同じ種で読ませ、聞き取って原稿とのずれと長さのずれを測る。
+
+        本人に似ているかは測らない。上位の候補を人に聴いてもらって決める。
+        合成と聞き取りを 候補 × 文 × 種 の数だけ1件ずつ列に並べるので（その合間に読み上げが
+        割り込む）、既定の3文・2種なら1候補あたり数十秒かかる。
+        """
+        samples = []
+        for index, candidate in enumerate(body.candidates):
+            for text in body.texts:
+                for seed in body.seeds:
+                    result = await synthesize(
+                        text,
+                        # mix は caption を省くと caption なしで読む
+                        caption=candidate.caption,
+                        sampler={"rng_seed": seed},
+                        profile_id=candidate.voice,
+                        mix=[(candidate.audio, 1.0)] if candidate.audio is not None else None,
+                    )
+                    samples.append(
+                        voice_eval.Sample(
+                            candidate=index,
+                            text=text,
+                            seed=seed,
+                            audio=result.relative_path,
+                            duration=result.duration,
+                            transcript=await transcribe(result.path),
+                        )
+                    )
+        return voice_eval.score(samples, len(body.candidates))
 
     @router.delete(
         "/curate/{job_id}",
