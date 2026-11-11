@@ -119,6 +119,8 @@ MIN_PITCHED_FRAMES = 10
 # ふだんの声からの離れを測るとき、ばらつき（MAD）の下限。区間がそろいすぎていると、
 # わずかな差が大きな離れに見える。高さと明るさは半音、大きさは dB
 SPREAD_FLOOR = {"loudness": 1.5, "pitch": 1.0, "brightness": 1.0}
+# 同じファイルの区間の大きさの中央値よりこれ以上小さい区間は、声がほとんど無いとみなす（dB）
+QUIET_DB = 15.0
 # 高さを測れなかった区間の、高さの離れ（ふつうより少し外れたものとして扱う）
 UNPITCHED_DEVIATION = 1.5
 # 選んだ区間を聴き比べるときに一度に返す長さの上限
@@ -628,13 +630,20 @@ def score_deviation(pieces: list[Piece], material: Material) -> None:
     usable = [
         (p, p.voice) for p in pieces if p.voice is not None and p.background_snr >= MIN_SNR_DB
     ]
+    by_source: dict[str, list[float]] = {}
+    for p, voice in usable:
+        by_source.setdefault(material.source_at(p.start).name, []).append(voice.loudness_db)
+    source_level = {name: float(np.median(levels)) for name, levels in by_source.items()}
+    # 同じファイルの声よりずっと小さい区間は、声がほとんど入っていない（かすかな音に高さが
+    # 付くので、高さで選ぶと先頭に来る）。離れを付けず、自動では使わない
+    usable = [
+        (p, v)
+        for p, v in usable
+        if v.loudness_db >= source_level[material.source_at(p.start).name] - QUIET_DB
+    ]
     if not usable:
         return
     sources = [material.source_at(p.start).name for p, _ in usable]
-    by_source: dict[str, list[float]] = {}
-    for name, (_, voice) in zip(sources, usable, strict=True):
-        by_source.setdefault(name, []).append(voice.loudness_db)
-    source_level = {name: float(np.median(levels)) for name, levels in by_source.items()}
     features = {
         "loudness": [
             v.loudness_db - source_level[name] for name, (_, v) in zip(sources, usable, strict=True)

@@ -483,3 +483,15 @@ def test_envelope_and_excerpt():
     clip = curate.excerpt(m, 0.5, 1.5)
     assert len(clip) == OUTPUT_RATE
     assert curate.excerpt(m, 5.0, 6.0).size == 0
+
+
+def test_score_deviation_skips_pieces_with_hardly_any_voice():
+    material = Material(np.zeros(16000), np.zeros((48000, 1)), [Source("a.wav", 0.0, 1.0)])
+    voices = [-28.0, -27.0, -29.0, -28.5, -54.0]
+    pieces = [
+        curate.Piece(0, 1, 40.0, voice=curate.Voice(level, 300.0, 1500.0)) for level in voices
+    ]
+
+    curate.score_deviation(pieces, material)
+
+    assert [p.deviation is None for p in pieces] == [False] * 4 + [True]
