@@ -135,6 +135,9 @@ narrate() {
 }
 
 main() {
+  # claude -p（CLAUDE_CODE_ENTRYPOINT=sdk-cli）や Agent SDK のアプリ（sdk-ts / sdk-py）は
+  # 人が聞いていないので読まない。スクリプトやエージェントの返事まで鳴ると、対話中の読み上げを邪魔する
+  case "${CLAUDE_CODE_ENTRYPOINT:-}" in sdk-*) return 0 ;; esac
   # 接続先は設定の port で変わるので pairvoice に訊く。url を持たない 0.11 以前の pairvoice は既定のポートで待つ
   PAIRVOICE_API="$(pairvoice url 2>/dev/null || echo http://127.0.0.1:17495)/api"
   mkdir -p "$STATE_DIR"
