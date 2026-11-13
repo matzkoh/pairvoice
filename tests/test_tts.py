@@ -576,6 +576,9 @@ class MixModel(FakeModel):
         self.encoded.append(audios)
         return "latent", "mask"
 
+    def _load_ref_waveform(self, audio):
+        return audio[None] if audio.ndim == 1 else audio
+
     def generate(self, text, **kwargs):
         refs = self._encode_ref_audios(["wav"])
         with_ref = self.model.encode_conditions_full(ref_latent="ref")
@@ -917,7 +920,6 @@ def test_speaker_tokens_encodes_samples_as_one_batch(no_ref_config, tmp_path, mo
     import mlx.core as mx
 
     model = MixModel(FakeResult(np.zeros(480, dtype=np.float32)))
-    model._load_ref_waveform = lambda audio: audio[None] if audio.ndim == 1 else audio
     backend = make_backend(no_ref_config, model, tmp_path, monkeypatch)
     seen = []
     monkeypatch.setattr(
