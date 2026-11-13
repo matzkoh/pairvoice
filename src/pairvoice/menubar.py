@@ -59,7 +59,7 @@ def _broken(health: dict) -> str | None:
 
 
 def update_available(health: dict | None) -> bool:
-    """新しい版が出ているか。メニューを開かないと気づけないので、アイコンにも点を付ける。"""
+    """新しいバージョンが出ているか。メニューを開かないと気づけないので、アイコンにも点を付ける。"""
     # 古い常駐サーバーは update を返さない
     return bool(((health or {}).get("update") or {}).get("available"))
 
@@ -109,11 +109,11 @@ def models_line(health: dict | None) -> str:
 
 
 def plugin_mismatch_line(health: dict) -> str | None:
-    """プラグインと常駐サーバーの版が食い違うと、API の道筋が合わず読み上げが止まる。"""
+    """プラグインと常駐サーバーのバージョンが食い違うと、API の道筋が合わず読み上げが止まる。"""
     plugin = health.get("plugin") or {}
     if not plugin.get("mismatch"):
         return None
-    return f"プラグイン {plugin['version']} と pairvoice {health['version']} の版が違う"
+    return f"プラグイン {plugin['version']} と pairvoice {health['version']} のバージョンが違う"
 
 
 @dataclass(frozen=True)
@@ -129,7 +129,7 @@ SEPARATOR = MenuItem(label="", action=None, enabled=False, separator=True)
 
 
 def update_items(health: dict, updating: bool) -> list[MenuItem]:
-    """PyPI に新しい版が出ていれば、更新する項目と変更点を開く項目を出す。
+    """PyPI に新しいバージョンが出ていれば、更新する項目と変更点を開く項目を出す。
 
     更新が済むと常駐サーバーごと再起動する。
     """
@@ -138,7 +138,7 @@ def update_items(health: dict, updating: bool) -> list[MenuItem]:
     if not update_available(health):
         return []
     return [
-        MenuItem(f"新しい版 {health['update']['latest']} に更新する", "update", True),
+        MenuItem(f"pairvoice {health['update']['latest']} に更新する", "update", True),
         MenuItem("変更点を見る", "release_notes", True),
     ]
 
@@ -347,18 +347,18 @@ def open_release_notes() -> None:
 
 
 def check_update(base: str) -> None:
-    """いま確かめて、結果をダイアログで伝える。新しい版があれば、その場で更新もできる。"""
+    """いま確かめて、結果をダイアログで伝える。新しいバージョンがあれば、その場で更新もできる。"""
     try:
         state = client.call(base, "/update/check", timeout=20)
     except Exception as failed:
-        _log.warning("新しい版を確かめられなかった: %s", failed)
-        alert("新しい版を確かめられなかった", "PyPI に届かない。ネットワークを確かめる")
+        _log.warning("アップデートを確かめられなかった: %s", failed)
+        alert("アップデートを確かめられなかった", "PyPI に届かない。ネットワークを確かめる")
         return
     if not state["available"]:
         alert(f"pairvoice は最新（{state['latest']}）")
         return
     choice = alert(
-        f"新しい版 {state['latest']} が出ている",
+        f"pairvoice {state['latest']} が出ている",
         buttons=("更新する", "変更点を見る", "あとで"),
     )
     if choice == "更新する":

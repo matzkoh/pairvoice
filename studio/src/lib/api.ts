@@ -19,7 +19,7 @@ export class ApiError extends Error {
 }
 
 // 404 は「そのルートがまだ無い」の意味になる。画面のタブを開いたまま pairvoice を
-// 古い版に戻すと起きる。原因の説明を例外の側に持たせて、画面が黙って固まらないようにする。
+// 古いバージョンに戻すと起きる。原因の説明を例外の側に持たせて、画面が黙って固まらないようにする。
 export class StaleServerError extends ApiError {
   constructor(body: string) {
     super(

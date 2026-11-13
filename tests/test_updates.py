@@ -10,9 +10,9 @@ def test_is_newer_compares_by_order():
     assert is_newer("0.21.0", "0.20.0")
     assert is_newer("0.10.0", "0.9.0")
     assert not is_newer("0.20.0", "0.20.0")
-    # 手元で版を上げて公開する前は PyPI より進む。そのとき知らせない
+    # 手元でバージョンを上げて公開する前は PyPI より進む。そのとき知らせない
     assert not is_newer("0.20.0", "0.21.0")
-    assert not is_newer("壊れた版", "0.20.0")
+    assert not is_newer("壊れたバージョン", "0.20.0")
 
 
 async def test_checker_reports_the_latest_version():

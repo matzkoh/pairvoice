@@ -79,5 +79,5 @@ def mount_studio(app: FastAPI, dist_dir: Path = DIST_DIR) -> None:
                 return FileResponse(asset, headers={"Cache-Control": _IMMUTABLE})
             return FileResponse(asset)
         # SPA なので、実ファイルに対応しないパス（/review など）も index.html を返し、
-        # 画面の側でルーティングする。版を上げたら新しい index.html を読ませるため覚えさせない
+        # 画面の側でルーティングする。バージョンを上げたら新しい index.html を読ませるため覚えさせない
         return FileResponse(index, headers={"Cache-Control": "no-cache"})

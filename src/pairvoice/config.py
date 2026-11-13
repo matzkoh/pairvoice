@@ -260,7 +260,7 @@ def _section(raw: dict, name: str) -> dict:
 def _build(cls, raw: dict, section: str, base: Path, *, nested: tuple[str, ...] = ()):
     """dataclass のフィールド名と一致するキーだけを拾い、残りは既定値に任せる。
 
-    知らないキーは打ち間違いのことが多いが、版をまたいで設定を使い回すこともあるので
+    知らないキーは打ち間違いのことが多いが、バージョンをまたいで設定を使い回すこともあるので
     止めずに警告する。nested は呼び出し側が別に組み立てる下位の表。
     """
     hints = typing.get_type_hints(cls)

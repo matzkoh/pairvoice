@@ -133,7 +133,7 @@ def test_menu_warns_when_plugin_and_server_versions_differ():
         items = menubar.menu_spec({**health(), "version": "0.8.0", "plugin": plugin}, NOW)
         return [item.label for item in items if item.action is None]
 
-    warning = "プラグイン 0.6.0 以前 と pairvoice 0.8.0 の版が違う"
+    warning = "プラグイン 0.6.0 以前 と pairvoice 0.8.0 のバージョンが違う"
     assert warning in labels({"version": "0.6.0 以前", "mismatch": True})
     assert warning not in labels({"version": "0.8.0", "mismatch": False})
     # 古い常駐サーバーは plugin を返さない
@@ -152,7 +152,7 @@ def test_menu_offers_an_update_only_when_pypi_is_ahead():
 
     update, notes = update_items({"latest": "0.21.0", "available": True})
     assert (update.label, update.action, update.enabled) == (
-        "新しい版 0.21.0 に更新する",
+        "pairvoice 0.21.0 に更新する",
         "update",
         True,
     )
@@ -212,7 +212,7 @@ def test_check_update_tells_the_result(monkeypatch):
 
     monkeypatch.setattr(menubar.client, "call", offline)
     menubar.perform("check_update", "http://127.0.0.1:17495")
-    assert shown == ["pairvoice は最新（0.20.0）", "新しい版を確かめられなかった"]
+    assert shown == ["pairvoice は最新（0.20.0）", "アップデートを確かめられなかった"]
 
 
 @pytest.mark.parametrize(

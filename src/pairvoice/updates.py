@@ -1,7 +1,7 @@
-"""PyPI に新しい版が出ているかを確かめ、頼まれたら常駐サーバーとプラグインを上げる。
+"""PyPI に新しいバージョンが出ているかを確かめ、頼まれたら常駐サーバーとプラグインを上げる。
 
 確かめるのは常駐サーバーで、起動時と1日ごとに引いて /health に載せる。上げるのは
-`pairvoice update` とメニューバーで、片方だけ上げると版がずれるので、プラグインも一緒に上げる。
+`pairvoice update` とメニューバーで、片方だけ上げるとバージョンがずれるので、プラグインも一緒に上げる。
 """
 
 from __future__ import annotations
@@ -30,7 +30,7 @@ FETCH_TIMEOUT_SECONDS = 10.0
 
 
 def releases_url() -> str:
-    """リリースノート（GitHub Releases）の一覧。飛ばした版の分も読めるよう、版ごとでなく一覧を開く。"""
+    """リリースノート（GitHub Releases）の一覧。飛ばしたバージョンの分も読めるよう、バージョンごとでなく一覧を開く。"""
     urls = dict(
         entry.split(", ", 1) for entry in metadata("pairvoice").get_all("Project-URL") or []
     )
@@ -38,14 +38,14 @@ def releases_url() -> str:
 
 
 def fetch_latest() -> str:
-    """PyPI の最新の安定版。利用者や機械を見分けられる情報は送らない。"""
+    """PyPI の最新の安定バージョン。利用者や機械を見分けられる情報は送らない。"""
     req = request.Request(PYPI_URL, headers={"User-Agent": "pairvoice"})
     with request.urlopen(req, timeout=FETCH_TIMEOUT_SECONDS) as response:
         return json.loads(response.read())["info"]["version"]
 
 
 def is_newer(latest: str, current: str) -> bool:
-    """手元の wheel は公開前に PyPI より進むので、!= でなく大小で比べる。読めない版は知らせない。"""
+    """手元の wheel は公開前に PyPI より進むので、!= でなく大小で比べる。読めないバージョンは知らせない。"""
     try:
         return Version(latest) > Version(current)
     except InvalidVersion:
@@ -64,7 +64,7 @@ class UpdateChecker:
         try:
             latest = await asyncio.to_thread(self._fetch)
         except Exception as error:
-            _log.debug("PyPI の最新版を取れなかった: %s", error)
+            _log.debug("PyPI の最新バージョンを取れなかった: %s", error)
             return False
         self.state = {"latest": latest, "available": is_newer(latest, self._current)}
         return True
@@ -114,14 +114,14 @@ def _run(command: list[str]) -> subprocess.CompletedProcess[str]:
 
 
 def upgrade(run: Callable[[list[str]], subprocess.CompletedProcess[str]] = _run) -> list[str]:
-    """常駐サーバーを PyPI の最新版に入れ替え、プラグインも上げる。再起動は呼び出し側が行う。
+    """常駐サーバーを PyPI の最新バージョンに入れ替え、プラグインも上げる。再起動は呼び出し側が行う。
 
     戻り値は、プラグインを上げられなかったときの知らせ（常駐サーバーは上がっている）。
     """
     uv = find_command("uv")
     if uv is None:
         raise UpgradeError("uv が見つからない")
-    # upgrade でなく @latest で入れ直す。wheel のファイルから入れた版も PyPI の版に戻せる
+    # upgrade でなく @latest で入れ直す。wheel のファイルから入れたものも PyPI のものに戻せる
     done = run([uv, "tool", "install", "pairvoice@latest"])
     if done.returncode != 0:
         raise UpgradeError(_tail(done) or "uv tool install が失敗した")

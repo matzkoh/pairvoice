@@ -26,12 +26,12 @@ jobs:
           node-version: "24"
           cache: pnpm
           cache-dependency-path: studio/pnpm-lock.yaml
-      # タグと pyproject の版がずれたまま公開すると、PyPI の版は取り消せない
-      - name: タグと版がそろっているか確かめる
+      # タグと pyproject のバージョンがずれたまま公開すると、PyPI に出したものは取り消せない
+      - name: タグとバージョンがそろっているか確かめる
         run: |
           version=$(uv version --short)
           if [ "v$version" != "$GITHUB_REF_NAME" ]; then
-            echo "タグ $GITHUB_REF_NAME と pyproject の版 $version が違う" >&2
+            echo "タグ $GITHUB_REF_NAME と pyproject のバージョン $version が違う" >&2
             exit 1
           fi
       - run: pnpm install --frozen-lockfile

@@ -35,7 +35,7 @@ Claude Code の `MessageDisplay` フック。アシスタントの出力を pair
 ## エージェントから操作する
 
 `api` スキルが、常駐サーバーの API（読み上げ・声・ミュート・辞書など）をエージェントに知らせる。
-仕様は常駐サーバーが配る `/openapi.json` を引かせるので、スキルは API の版に追従する。
+仕様は常駐サーバーが配る `/openapi.json` を引かせるので、スキルは API のバージョンに追従する。
 
 ## 設定を変える
 
@@ -74,7 +74,7 @@ tail -30 ~/Library/Logs/speak-summary.log
 | `prompt.txt missing or empty` | データの置き場所に `prompt.txt` が無い |
 | `muted: <reason>` | ミュート中（`microphone` なら会議中の自動ミュート、`manual` なら手動） |
 | `server down` | pairvoice の常駐サーバーが応答しない |
-| `version mismatch: plugin <版>` | プラグインと常駐サーバーの版が食い違い、API の道筋が合わない。[README](../README.md#更新する) の手順で両方を上げる |
+| `version mismatch: plugin <バージョン>` | プラグインと常駐サーバーのバージョンが食い違い、API の道筋が合わない。[README](../README.md#更新する) の手順で両方を上げる |
 | `model downloading` | 初回のモデルのダウンロード中（フックは待たない）。`pairvoice warmup` で先に済ませておく |
 | `model loading` | モデルの読み込みが長引き、待ちきれなかった |
 | `timeout` | サーバーは生きているが、要約か音声合成が時間内に終わらなかった |

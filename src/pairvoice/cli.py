@@ -137,7 +137,7 @@ def main(argv: list[str] | None = None) -> int:
     sub.add_parser("config", help="設定ファイルの場所と、既定値を含めたすべての項目を表示する")
     sub.add_parser("restart", help="常駐サーバーを再起動する")
     sub.add_parser(
-        "update", help="常駐サーバーとプラグインを最新版に上げ、常駐サーバーを再起動する"
+        "update", help="常駐サーバーとプラグインを最新バージョンに上げ、常駐サーバーを再起動する"
     )
     sub.add_parser("install", help="常駐サーバーを登録し、データの置き場所に雛形を置く")
     sub.add_parser("uninstall", help="常駐サーバーの登録を外す（データは残す）")

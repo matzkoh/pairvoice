@@ -16,7 +16,7 @@ set -u
 TMP_ROOT="${TMPDIR:-/tmp}"
 STATE_DIR="${CLAUDE_SPEAK_STATE_DIR:-${TMP_ROOT%/}/claude-speak-state}"
 LOG_FILE="${CLAUDE_SPEAK_LOG_FILE:-$HOME/Library/Logs/speak-summary.log}"
-# 常駐サーバーと別々に更新されるので、版を毎回名乗る。食い違うとメニューバーが知らせる
+# 常駐サーバーと別々に更新されるので、バージョンを毎回名乗る。食い違うとメニューバーが知らせる
 PLUGIN_VERSION=$(jq -r '.version' "${0%/*}/../.claude-plugin/plugin.json" 2>/dev/null)
 PLUGIN_VERSION="${PLUGIN_VERSION:-unknown}"
 VERSION_HEADER="X-Pairvoice-Plugin: $PLUGIN_VERSION"
@@ -124,7 +124,7 @@ narrate() {
     profile_not_found) NARRATE_STATUS="voice not found: PAIRVOICE_VOICE=$VOICE" ;;
     style_not_found) NARRATE_STATUS="style not found: PAIRVOICE_STYLE=$STYLE" ;;
     *)
-      # 道筋が無い。常駐サーバーとプラグインの版が食い違っている（何度試しても同じ）
+      # 道筋が無い。常駐サーバーとプラグインのバージョンが食い違っている（何度試しても同じ）
       case "$status" in
         404 | 405) NARRATE_STATUS="version mismatch: plugin ${PLUGIN_VERSION}" ;;
         *) NARRATE_STATUS="narrate failed: http $status: $body" ;;

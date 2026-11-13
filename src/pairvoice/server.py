@@ -337,7 +337,7 @@ def build_engine(config: Config) -> Engine:
     )
 
 
-# フック（プラグイン）が名乗る版。常駐サーバーとは別々に更新されるので、食い違いを知らせる
+# フック（プラグイン）が名乗るバージョン。常駐サーバーとは別々に更新されるので、食い違いを知らせる
 PLUGIN_HEADER = "X-Pairvoice-Plugin"
 LEGACY_PLUGIN = "0.6.0 以前"
 
@@ -346,7 +346,7 @@ def create_app(engine: Engine) -> FastAPI:
     data_root = engine.config.tts.data_root
     server_version = version("pairvoice")
     updates = UpdateChecker(server_version)
-    # 最後に来たフックの版。来るまでは None
+    # 最後に来たフックのバージョン。来るまでは None
     plugin_version: str | None = None
 
     @asynccontextmanager
@@ -392,7 +392,7 @@ def create_app(engine: Engine) -> FastAPI:
         if x_pairvoice_plugin:
             plugin_version = x_pairvoice_plugin
 
-    # 0.6.0 までのフックは /api の付かない道筋を叩き、版を名乗らない
+    # 0.6.0 までのフックは /api の付かない道筋を叩き、バージョンを名乗らない
     @app.post("/llm", include_in_schema=False)
     @app.post("/speak", include_in_schema=False)
     def legacy_hook():
@@ -593,9 +593,9 @@ def create_app(engine: Engine) -> FastAPI:
 
     @api.get("/health", summary="状態", tags=["状態"])
     async def health():
-        """モデルの状態、使用中の声、ミュート、キューの混み具合、常駐サーバーとプラグインの版。
+        """モデルの状態、使用中の声、ミュート、キューの混み具合、常駐サーバーとプラグインのバージョン。
 
-        `update` は PyPI の最新版（`latest`、取れるまでは null）と、それが手元より新しいか（`available`）。
+        `update` は PyPI の最新バージョン（`latest`、取れるまでは null）と、それが手元より新しいか（`available`）。
         起動の1分後と、それから1日ごとに確かめる。"""
         return {
             **engine.health(),
@@ -609,12 +609,12 @@ def create_app(engine: Engine) -> FastAPI:
 
     @api.post(
         "/update/check",
-        summary="新しい版を確かめる",
+        summary="アップデートを確かめる",
         tags=["状態"],
         responses={502: _error("`pypi_unreachable`（PyPI に届かない）")},
     )
     async def check_update():
-        """1日ごとの確認を待たずに、PyPI の最新版をいま確かめる。応答は `/health` の `update` と同じ形。"""
+        """1日ごとの確認を待たずに、PyPI の最新バージョンをいま確かめる。応答は `/health` の `update` と同じ形。"""
         if not await updates.check():
             return fail(502, "pypi_unreachable")
         return updates.state
