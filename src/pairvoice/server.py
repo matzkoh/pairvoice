@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import asyncio
+import contextlib
 import os
 import signal
 import tempfile
@@ -33,6 +34,7 @@ from .prompt import SummaryPrompt
 from .stt import MlxSttBackend
 from .studio_web import mount_studio, open_studio
 from .tts import MlxAudioBackend
+from .updates import UpdateChecker
 
 # ポートは問わない（開発中の Vite の :17493 から来るため）
 LOCAL_HOSTNAMES = frozenset({"127.0.0.1", "localhost", "[::1]"})
@@ -343,15 +345,20 @@ LEGACY_PLUGIN = "0.6.0 以前"
 def create_app(engine: Engine) -> FastAPI:
     data_root = engine.config.tts.data_root
     server_version = version("pairvoice")
+    updates = UpdateChecker(server_version)
     # 最後に来たフックの版。来るまでは None
     plugin_version: str | None = None
 
     @asynccontextmanager
     async def lifespan(app: FastAPI):
         await engine.start()
+        checking = asyncio.create_task(updates.run())
         try:
             yield
         finally:
+            checking.cancel()
+            with contextlib.suppress(asyncio.CancelledError):
+                await checking
             await engine.stop()
 
     app = FastAPI(
@@ -586,7 +593,10 @@ def create_app(engine: Engine) -> FastAPI:
 
     @api.get("/health", summary="状態", tags=["状態"])
     async def health():
-        """モデルの状態、使用中の声、ミュート、キューの混み具合、常駐サーバーとプラグインの版。"""
+        """モデルの状態、使用中の声、ミュート、キューの混み具合、常駐サーバーとプラグインの版。
+
+        `update` は PyPI の最新版（`latest`、取れるまでは null）と、それが手元より新しいか（`available`）。
+        起動の1分後と、それから1日ごとに確かめる。"""
         return {
             **engine.health(),
             "version": server_version,
@@ -594,7 +604,20 @@ def create_app(engine: Engine) -> FastAPI:
                 "version": plugin_version,
                 "mismatch": plugin_version is not None and plugin_version != server_version,
             },
+            "update": updates.state,
         }
+
+    @api.post(
+        "/update/check",
+        summary="新しい版を確かめる",
+        tags=["状態"],
+        responses={502: _error("`pypi_unreachable`（PyPI に届かない）")},
+    )
+    async def check_update():
+        """1日ごとの確認を待たずに、PyPI の最新版をいま確かめる。応答は `/health` の `update` と同じ形。"""
+        if not await updates.check():
+            return fail(502, "pypi_unreachable")
+        return updates.state
 
     @api.post(
         "/warmup",

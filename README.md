@@ -232,17 +232,24 @@ model = "mlx-community/gemma-4-e4b-it-4bit"
 
 ## 更新する
 
-常駐サーバーとプラグインは別々に更新されるので、両方を上げる。
-版がずれると API の道筋が合わず、読み上げが止まる（メニューバーに「版が違う」と出る）。
+新しい版が PyPI に出ると、メニューバーのアイコンの右上に点が付く（常駐サーバーが1日1回確かめる）。待たずに確かめるなら、メニューの「アップデートを確認」を押す。
+メニューの「新しい版 X.Y.Z に更新する」か、次のコマンドで上げる。
 
 ```bash
-uv tool upgrade pairvoice && pairvoice restart
+pairvoice update
+```
+
+常駐サーバーとプラグインは別々に更新されるので、両方を上げて常駐サーバーを再起動する。
+版がずれると API の道筋が合わず、読み上げが止まる（メニューバーに「版が違う」と出る）。
+プラグインの更新は、Claude Code を起動し直すと効く。
+
+`pairvoice update` は、次を順に行うのと同じ。
+
+```bash
+uv tool install pairvoice@latest && pairvoice restart
 claude plugin marketplace update pairvoice
 claude plugin update pairvoice@pairvoice
 ```
-
-プラグインの更新は、Claude Code を起動し直すと効く。
-プラグインを自動で上げるには、Claude Code の `/plugin` の Marketplaces で pairvoice を選び、「Enable auto-update」にする（Anthropic 以外のマーケットプレイスは、既定では自動で更新されない）。
 
 ## うまく鳴らないとき
 

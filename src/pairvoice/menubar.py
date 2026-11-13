@@ -11,6 +11,7 @@ import logging
 import math
 import os
 import signal
+import subprocess
 import sys
 import threading
 from dataclasses import dataclass
@@ -18,7 +19,7 @@ from datetime import datetime
 from pathlib import Path
 from typing import Any
 
-from . import client, launchd
+from . import client, launchd, updates
 from .config import DEFAULT_CONFIG_PATH, set_value
 from .lifecycle import WARMABLE_STATES, ModelState
 from .studio_web import open_studio
@@ -55,6 +56,12 @@ def _broken(health: dict) -> str | None:
         if health.get(name, {}).get("state") in BROKEN_STATES:
             return name
     return None
+
+
+def update_available(health: dict | None) -> bool:
+    """新しい版が出ているか。メニューを開かないと気づけないので、アイコンにも点を付ける。"""
+    # 古い常駐サーバーは update を返さない
+    return bool(((health or {}).get("update") or {}).get("available"))
 
 
 def decide_icon(health: dict | None) -> str:
@@ -121,6 +128,15 @@ class MenuItem:
 SEPARATOR = MenuItem(label="", action=None, enabled=False, separator=True)
 
 
+def update_item(health: dict, updating: bool) -> MenuItem | None:
+    """PyPI に新しい版が出ていれば、更新する項目を出す。更新が済むと常駐サーバーごと再起動する。"""
+    if updating:
+        return MenuItem("更新中…", None, False)
+    if not update_available(health):
+        return None
+    return MenuItem(f"新しい版 {health['update']['latest']} に更新する", "update", True)
+
+
 def _preset_label(minutes: int) -> str:
     return "1時間だけ黙らせる" if minutes == 60 else f"{minutes}分だけ黙らせる"
 
@@ -149,7 +165,7 @@ def _placement(label: str, mode: str, current: str | None) -> MenuItem:
     return MenuItem(label, "spatial:off" if on else f"spatial:{mode}", True, checked=on)
 
 
-def menu_spec(health: dict | None, now: datetime) -> list[MenuItem]:
+def menu_spec(health: dict | None, now: datetime, updating: bool = False) -> list[MenuItem]:
     """メニューの並びを決める。AppKit を知らないので、そのままテストできる。"""
     reachable = health is not None
     rows = [MenuItem(describe_state(health, now), None, False)]
@@ -157,6 +173,8 @@ def menu_spec(health: dict | None, now: datetime) -> list[MenuItem]:
         rows.append(MenuItem(models_line(health), None, False))
         if (mismatch := plugin_mismatch_line(health)) is not None:
             rows.append(MenuItem(mismatch, None, False))
+        if (update := update_item(health, updating)) is not None:
+            rows.append(update)
     rows.append(SEPARATOR)
 
     playback = health.get("playback", {}) if reachable else {}
@@ -186,6 +204,7 @@ def menu_spec(health: dict | None, now: datetime) -> list[MenuItem]:
     rows.append(SEPARATOR)
 
     rows.append(warmup_item(health))
+    rows.append(MenuItem("アップデートを確認", "check_update", reachable))
     # 再起動と終了は、サーバーに届かないときこそ押したい項目なので常に有効にする。
     rows.append(MenuItem("再起動", "restart", True))
     rows.append(MenuItem("pairvoice を終了", "quit", True))
@@ -253,10 +272,73 @@ def perform(action: str, base: str, config_path: str | None = None) -> None:
             launchd.restart()
         elif action == "studio":
             open_studio(base)
+        elif action == "update":
+            update()
+        elif action == "check_update":
+            check_update(base)
     except Exception as failed:
         # 続けるが記録は残す。操作は都度1回なのでログは埋まらず、サーバー未起動と
         # 操作側の不具合を後から見分けられる（モーダルは出さない）。
         _log.warning("メニューの操作 %s に失敗した: %s", action, failed)
+
+
+def _badged(appkit, base):
+    """アイコンの右上の外に点を付ける。点の周りを抜いて、絵と点がくっつかないようにする。"""
+    width, height = base.size()
+    dot, gap = 5.0, 1.0
+    canvas = width + 2.5
+    x, y = canvas - dot, height - dot
+
+    def draw(_rect):
+        base.drawInRect_(((0, 0), (width, height)))
+        context = appkit.NSGraphicsContext.currentContext()
+        context.setCompositingOperation_(appkit.NSCompositingOperationClear)
+        ring = ((x - gap, y - gap), (dot + 2 * gap, dot + 2 * gap))
+        appkit.NSBezierPath.bezierPathWithOvalInRect_(ring).fill()
+        context.setCompositingOperation_(appkit.NSCompositingOperationSourceOver)
+        appkit.NSColor.blackColor().set()
+        appkit.NSBezierPath.bezierPathWithOvalInRect_(((x, y), (dot, dot))).fill()
+        return True
+
+    return appkit.NSImage.imageWithSize_flipped_drawingHandler_((canvas, height), False, draw)
+
+
+def notify(message: str) -> None:
+    """通知センターに出す。メニューバーにはほかに結果を伝える場所が無い。
+
+    出し終わるまで待つ。直後の再起動は、このメニューバーの子プロセスごと落とす。
+    """
+    script = 'on run argv\ndisplay notification (item 1 of argv) with title "pairvoice"\nend run'
+    subprocess.run(["osascript", "-e", script, message], check=False, timeout=10)
+
+
+def check_update(base: str) -> None:
+    """いま確かめて、結果を知らせる。新しい版があれば、メニューに更新する項目が出る。"""
+    try:
+        state = client.call(base, "/update/check", timeout=20)
+    except Exception as failed:
+        _log.warning("新しい版を確かめられなかった: %s", failed)
+        notify("新しい版を確かめられなかった（PyPI に届かない）")
+        return
+    if state["available"]:
+        notify(f"新しい版 {state['latest']} が出ている。メニューから更新できる")
+    else:
+        notify(f"pairvoice は最新（{state['latest']}）")
+
+
+def update() -> None:
+    """常駐サーバーとプラグインを上げて、常駐サーバーを再起動する（このメニューバーも起き直す）。"""
+    try:
+        notes = updates.upgrade()
+    except updates.UpgradeError as failed:
+        _log.warning("更新に失敗した: %s", failed)
+        notify(f"更新できなかった: {failed}")
+        return
+    notify(
+        "pairvoice を更新した。"
+        + (" ".join(notes) or "Claude Code を起動し直すと、プラグインの更新も効く")
+    )
+    launchd.restart()
 
 
 def _controller_class(appkit, objc):
@@ -276,6 +358,7 @@ def _controller_class(appkit, objc):
             self._base = base
             self._parent_pid = parent_pid
             self._health = None
+            self._updating = False
             self._item = appkit.NSStatusBar.systemStatusBar().statusItemWithLength_(
                 appkit.NSVariableStatusItemLength
             )
@@ -295,11 +378,13 @@ def _controller_class(appkit, objc):
                 decide_icon(self._health), describe_state(self._health, now)
             )
             if image is not None:
+                if update_available(self._health):
+                    image = _badged(appkit, image)
                 image.setTemplate_(True)
                 self._item.button().setImage_(image)
 
             self._menu.removeAllItems()
-            for spec in menu_spec(self._health, now):
+            for spec in menu_spec(self._health, now, self._updating):
                 if spec.separator:
                     self._menu.addItem_(appkit.NSMenuItem.separatorItem())
                     continue
@@ -348,7 +433,14 @@ def _controller_class(appkit, objc):
 
         @objc.python_method
         def _perform(self, action):
-            perform(action, self._base, (self._health or {}).get("config_path"))
+            # 更新は数十秒かかるので、その間は項目を「更新中…」にして二度押しを防ぐ
+            self._updating = action == "update"
+            if self._updating:
+                self.performSelectorOnMainThread_withObject_waitUntilDone_("redraw:", None, False)
+            try:
+                perform(action, self._base, (self._health or {}).get("config_path"))
+            finally:
+                self._updating = False
             self._fetch()
 
     return MenuBarApp

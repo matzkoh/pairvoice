@@ -30,6 +30,7 @@ dependencies = [
     "pyobjc-framework-avfoundation>=13,<14",
     "python-multipart>=0.0.33,<0.1",
     "scipy>=1.14,<2",
+    "packaging>=24",
     "tomlkit>=0.13,<1",
 ]
 

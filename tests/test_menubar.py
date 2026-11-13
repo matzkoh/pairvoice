@@ -140,6 +140,67 @@ def test_menu_warns_when_plugin_and_server_versions_differ():
     assert len(labels(None)) == len(labels({"version": None, "mismatch": False}))
 
 
+def test_menu_offers_an_update_only_when_pypi_is_ahead():
+    def update_items(update, updating=False):
+        payload = {**health(), **({"update": update} if update is not None else {})}
+        items = menubar.menu_spec(payload, NOW, updating)
+        return [item for item in items if item.label.startswith(("新しい版", "更新中"))]
+
+    (item,) = update_items({"latest": "0.21.0", "available": True})
+    assert (item.label, item.action, item.enabled) == ("新しい版 0.21.0 に更新する", "update", True)
+    assert update_items({"latest": "0.20.0", "available": False}) == []
+    # 古い常駐サーバーは update を返さない
+    assert update_items(None) == []
+    # 更新している間は押せない
+    (item,) = update_items({"latest": "0.21.0", "available": True}, updating=True)
+    assert (item.label, item.enabled) == ("更新中…", False)
+
+
+def test_perform_update_upgrades_then_restarts(monkeypatch):
+    calls = []
+    monkeypatch.setattr(menubar.updates, "upgrade", lambda: calls.append("upgrade") or [])
+    monkeypatch.setattr(menubar, "notify", lambda message: calls.append(message))
+    monkeypatch.setattr(menubar.launchd, "restart", lambda: calls.append("restart") or 0)
+    menubar.perform("update", "http://127.0.0.1:17495")
+    assert calls[0] == "upgrade"
+    assert calls[1].startswith("pairvoice を更新した")
+    assert calls[2] == "restart"
+
+
+def test_perform_update_does_not_restart_when_the_upgrade_fails(monkeypatch):
+    def fail():
+        raise menubar.updates.UpgradeError("uv が見つからない")
+
+    calls = []
+    monkeypatch.setattr(menubar.updates, "upgrade", fail)
+    monkeypatch.setattr(menubar, "notify", lambda message: calls.append(message))
+    monkeypatch.setattr(menubar.launchd, "restart", lambda: calls.append("restart") or 0)
+    menubar.perform("update", "http://127.0.0.1:17495")
+    assert calls == ["更新できなかった: uv が見つからない"]
+
+
+def test_check_update_tells_the_result(monkeypatch):
+    notes = []
+    monkeypatch.setattr(menubar, "notify", notes.append)
+    for state in (
+        {"latest": "0.21.0", "available": True},
+        {"latest": "0.20.0", "available": False},
+    ):
+        monkeypatch.setattr(menubar.client, "call", lambda *args, state=state, **kwargs: state)
+        menubar.perform("check_update", "http://127.0.0.1:17495")
+
+    def offline(*args, **kwargs):
+        raise OSError("offline")
+
+    monkeypatch.setattr(menubar.client, "call", offline)
+    menubar.perform("check_update", "http://127.0.0.1:17495")
+    assert notes == [
+        "新しい版 0.21.0 が出ている。メニューから更新できる",
+        "pairvoice は最新（0.20.0）",
+        "新しい版を確かめられなかった（PyPI に届かない）",
+    ]
+
+
 def test_menu_lists_mute_presets():
     items = menubar.menu_spec(health(), NOW)
     assert [item.label for item in items if item.action and item.action.startswith("mute:")] == [
@@ -203,6 +264,7 @@ def test_menu_has_all_operations_when_healthy():
         "mute:60",
         "studio",
         "warmup",
+        "check_update",
         "restart",
         "quit",
     ]
@@ -422,3 +484,17 @@ def test_spatial_items_are_exclusive(mode, outside, orbit):
     for label, (checked, action) in (("頭の外で鳴らす", outside), ("耳元で動かす", orbit)):
         assert (by_label[label].checked, by_label[label].action) == (checked, action)
         assert by_label[label].enabled
+
+
+def test_badge_draws_a_dot_beside_the_icon():
+    """描画の手順（合成の切り替え・塗り）が pyobjc で通り、点の分だけ幅が広がる。"""
+    import AppKit
+
+    base = AppKit.NSImage.imageWithSystemSymbolName_accessibilityDescription_(
+        menubar.ICON_IDLE, None
+    )
+    badged = menubar._badged(AppKit, base)
+
+    assert badged.size().width > base.size().width
+    # 描画の手順は描くときに初めて走るので、ビットマップに起こして確かめる
+    assert AppKit.NSBitmapImageRep.imageRepWithData_(badged.TIFFRepresentation()) is not None

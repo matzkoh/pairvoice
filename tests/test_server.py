@@ -332,8 +332,30 @@ def test_health_shape():
         "spatial",
         "version",
         "plugin",
+        "update",
     }
     assert body["llm"]["state"] == "unloaded"
+
+
+def test_update_check_asks_pypi_now(monkeypatch):
+    monkeypatch.setattr("pairvoice.updates.fetch_latest", lambda: "999.0.0")
+    _, client = build()
+
+    assert client.get("/health").json()["update"] == {"latest": None, "available": False}
+    assert client.post("/update/check").json() == {"latest": "999.0.0", "available": True}
+    assert client.get("/health").json()["update"] == {"latest": "999.0.0", "available": True}
+
+
+def test_update_check_reports_pypi_unreachable(monkeypatch):
+    def offline():
+        raise OSError("offline")
+
+    monkeypatch.setattr("pairvoice.updates.fetch_latest", offline)
+    _, client = build()
+
+    response = client.post("/update/check")
+    assert response.status_code == 502
+    assert response.json() == {"error": "pypi_unreachable"}
 
 
 def test_health_reports_the_plugin_version_the_hook_named():
