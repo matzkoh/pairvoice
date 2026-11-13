@@ -128,13 +128,19 @@ class MenuItem:
 SEPARATOR = MenuItem(label="", action=None, enabled=False, separator=True)
 
 
-def update_item(health: dict, updating: bool) -> MenuItem | None:
-    """PyPI に新しい版が出ていれば、更新する項目を出す。更新が済むと常駐サーバーごと再起動する。"""
+def update_items(health: dict, updating: bool) -> list[MenuItem]:
+    """PyPI に新しい版が出ていれば、更新する項目と変更点を開く項目を出す。
+
+    更新が済むと常駐サーバーごと再起動する。
+    """
     if updating:
-        return MenuItem("更新中…", None, False)
+        return [MenuItem("更新中…", None, False)]
     if not update_available(health):
-        return None
-    return MenuItem(f"新しい版 {health['update']['latest']} に更新する", "update", True)
+        return []
+    return [
+        MenuItem(f"新しい版 {health['update']['latest']} に更新する", "update", True),
+        MenuItem("変更点を見る", "release_notes", True),
+    ]
 
 
 def _preset_label(minutes: int) -> str:
@@ -173,8 +179,7 @@ def menu_spec(health: dict | None, now: datetime, updating: bool = False) -> lis
         rows.append(MenuItem(models_line(health), None, False))
         if (mismatch := plugin_mismatch_line(health)) is not None:
             rows.append(MenuItem(mismatch, None, False))
-        if (update := update_item(health, updating)) is not None:
-            rows.append(update)
+        rows.extend(update_items(health, updating))
     rows.append(SEPARATOR)
 
     playback = health.get("playback", {}) if reachable else {}
@@ -274,6 +279,8 @@ def perform(action: str, base: str, config_path: str | None = None) -> None:
             open_studio(base)
         elif action == "update":
             update()
+        elif action == "release_notes":
+            subprocess.Popen(["open", updates.releases_url()], stdin=subprocess.DEVNULL)
         elif action == "check_update":
             check_update(base)
     except Exception as failed:

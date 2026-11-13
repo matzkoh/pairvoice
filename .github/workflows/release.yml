@@ -1,4 +1,5 @@
-# v* のタグを push すると、studio をビルドしてから wheel と sdist を作り、PyPI に公開する。
+# v* のタグを push すると、studio をビルドしてから wheel と sdist を作り、PyPI に公開して、
+# GitHub Releases にリリースノート（scripts/release-notes.sh）を載せる。
 # PyPI 側には Trusted Publishing（matzkoh/pairvoice・release.yml・environment pypi）を登録してあり、
 # トークンは置かない
 name: release
@@ -39,3 +40,18 @@ jobs:
         working-directory: studio
       - run: uv build
       - run: uv publish
+
+  # PyPI に出してから、GitHub Releases にリリースノートを載せる（メニューバーの「変更点を見る」が開く）
+  notes:
+    needs: publish
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          # 前のタグからの履歴が要る
+          fetch-depth: 0
+      - run: scripts/release-notes.sh "$GITHUB_REF_NAME" | gh release create "$GITHUB_REF_NAME" --title "$GITHUB_REF_NAME" --notes-file -
+        env:
+          GH_TOKEN: ${{ github.token }}

@@ -144,10 +144,19 @@ def test_menu_offers_an_update_only_when_pypi_is_ahead():
     def update_items(update, updating=False):
         payload = {**health(), **({"update": update} if update is not None else {})}
         items = menubar.menu_spec(payload, NOW, updating)
-        return [item for item in items if item.label.startswith(("新しい版", "更新中"))]
+        return [
+            item
+            for item in items
+            if item.action in ("update", "release_notes") or item.label == "更新中…"
+        ]
 
-    (item,) = update_items({"latest": "0.21.0", "available": True})
-    assert (item.label, item.action, item.enabled) == ("新しい版 0.21.0 に更新する", "update", True)
+    update, notes = update_items({"latest": "0.21.0", "available": True})
+    assert (update.label, update.action, update.enabled) == (
+        "新しい版 0.21.0 に更新する",
+        "update",
+        True,
+    )
+    assert (notes.label, notes.action, notes.enabled) == ("変更点を見る", "release_notes", True)
     assert update_items({"latest": "0.20.0", "available": False}) == []
     # 古い常駐サーバーは update を返さない
     assert update_items(None) == []
@@ -177,6 +186,15 @@ def test_perform_update_does_not_restart_when_the_upgrade_fails(monkeypatch):
     monkeypatch.setattr(menubar.launchd, "restart", lambda: calls.append("restart") or 0)
     menubar.perform("update", "http://127.0.0.1:17495")
     assert calls == ["更新できなかった: uv が見つからない"]
+
+
+def test_perform_release_notes_opens_the_releases_of_the_repository(monkeypatch):
+    opened = []
+    monkeypatch.setattr(
+        menubar.subprocess, "Popen", lambda command, **kwargs: opened.append(command)
+    )
+    menubar.perform("release_notes", "http://127.0.0.1:17495")
+    assert opened == [["open", "https://github.com/matzkoh/pairvoice/releases"]]
 
 
 def test_check_update_tells_the_result(monkeypatch):

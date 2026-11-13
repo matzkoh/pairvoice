@@ -14,6 +14,7 @@ import re
 import shutil
 import subprocess
 from collections.abc import Callable
+from importlib.metadata import metadata
 from pathlib import Path
 from urllib import request
 
@@ -26,6 +27,14 @@ CHECK_INTERVAL_SECONDS = 86400.0
 # 起動直後はモデルの読み込みと並ぶので、少し待ってから引く
 FIRST_CHECK_DELAY_SECONDS = 60.0
 FETCH_TIMEOUT_SECONDS = 10.0
+
+
+def releases_url() -> str:
+    """リリースノート（GitHub Releases）の一覧。飛ばした版の分も読めるよう、版ごとでなく一覧を開く。"""
+    urls = dict(
+        entry.split(", ", 1) for entry in metadata("pairvoice").get_all("Project-URL") or []
+    )
+    return f"{urls['Repository']}/releases"
 
 
 def fetch_latest() -> str:
