@@ -5,6 +5,7 @@ import threading
 import time
 import uuid
 
+import numpy as np
 import pytest
 
 import pairvoice.lifecycle as lifecycle_module
@@ -74,6 +75,13 @@ class FakeTTS(FakeBackend):
     def speaker_vector(self, path):
         self.calls.append({"speaker_vector": path})
         return [0.5, -0.5]
+
+    def speaker_tokens(self, samples):
+        """1秒に6トークン、大きさと何本目かの2次元。"""
+        self.calls.append({"speaker_tokens": len(samples)})
+        count = max(1, len(samples) // 8000)
+        level = float(np.abs(samples).mean())
+        return np.array([[level, i] for i in range(count)], np.float32)
 
     def speak(
         self, text, caption=None, sampler=None, design=False, profile_id=None, mix=None, style=None

@@ -556,7 +556,7 @@ def clipped(samples: np.ndarray) -> bool:
     return bool(np.mean(np.abs(samples) >= CLIP_LEVEL) > CLIP_RATIO)
 
 
-def _louder_channel(frames: np.ndarray) -> np.ndarray:
+def louder_channel(frames: np.ndarray) -> np.ndarray:
     """フレーム × チャンネルのうち、声の大きいチャンネル。左右を混ぜるとこもる。"""
     return frames[:, int(np.argmax((frames**2).sum(axis=0)))]
 
@@ -578,7 +578,7 @@ def refine_edges(pieces: list[Piece], material: Material) -> None:
     for piece in pieces:
         a = max(0, int((piece.start - EDGE_SEARCH_SECONDS) * OUTPUT_RATE))
         b = min(len(material.audio48), int((piece.end + EDGE_SEARCH_SECONDS) * OUTPUT_RATE))
-        audio = _louder_channel(np.asarray(material.audio48[a:b], dtype=np.float32))
+        audio = louder_channel(np.asarray(material.audio48[a:b], dtype=np.float32))
         piece.start, piece.end = snap_edges(piece, audio, a / OUTPUT_RATE)
 
 
@@ -693,19 +693,24 @@ def assemble(pieces: list[Piece]) -> np.ndarray:
     一瞬の大きな音（笑い声や破裂音）のせいで全体が小さくなるので、ピークはリミッターで抑える
     """
     gap = np.zeros(int(PIECE_GAP_SECONDS * OUTPUT_RATE), np.float32)
-    fade = int(FADE_SECONDS * OUTPUT_RATE)
-    ramp = np.linspace(0.0, 1.0, fade, dtype=np.float32)
     parts = []
     for piece in pieces:
         assert piece.audio is not None  # render が雑音を除いた写しだけを渡す
-        body = piece.audio.astype(np.float32, copy=True)
-        rms_db = voiced_rms_db(body, OUTPUT_RATE)
-        if rms_db is not None:
-            body *= np.float32(10 ** (min(TARGET_RMS_DB - rms_db, PIECE_MAX_GAIN_DB) / 20))
-        body[:fade] *= ramp
-        body[-fade:] *= ramp[::-1]
-        parts += [body, gap]
+        parts += [level_piece(piece.audio), gap]
     return limit_peaks(np.concatenate(parts[:-1]), OUTPUT_RATE)
+
+
+def level_piece(samples: np.ndarray) -> np.ndarray:
+    """区間の声の大きさを TARGET_RMS_DB にそろえ（PIECE_MAX_GAIN_DB まで）、つなぎ目が鳴らないよう端をフェードした写し。"""
+    body = samples.astype(np.float32, copy=True)
+    rms_db = voiced_rms_db(body, OUTPUT_RATE)
+    if rms_db is not None:
+        body *= np.float32(10 ** (min(TARGET_RMS_DB - rms_db, PIECE_MAX_GAIN_DB) / 20))
+    fade = min(int(FADE_SECONDS * OUTPUT_RATE), len(body) // 2)
+    ramp = np.linspace(0.0, 1.0, fade, dtype=np.float32)
+    body[:fade] *= ramp
+    body[len(body) - fade :] *= ramp[::-1]
+    return body
 
 
 def limit_peaks(samples: np.ndarray, sample_rate: int) -> np.ndarray:
@@ -865,7 +870,7 @@ def _original(material: Material, piece: Piece) -> tuple[np.ndarray, int]:
     """区間の元の音（声の大きいチャンネル）と、その頭のサンプル位置。"""
     a = max(0, int(piece.start * OUTPUT_RATE))
     b = min(len(material.audio48), int(piece.end * OUTPUT_RATE))
-    return _louder_channel(np.asarray(material.audio48[a:b], dtype=np.float32)), a
+    return louder_channel(np.asarray(material.audio48[a:b], dtype=np.float32)), a
 
 
 async def _enhance_piece(material: Material, source: Piece, enhance: Enhance) -> Piece:
@@ -873,7 +878,7 @@ async def _enhance_piece(material: Material, source: Piece, enhance: Enhance) ->
     piece = replace(source)
     a = max(0, int((piece.start - ENHANCE_CONTEXT_SECONDS) * OUTPUT_RATE))
     b = min(len(material.audio48), int((piece.end + ENHANCE_CONTEXT_SECONDS) * OUTPUT_RATE))
-    original = _louder_channel(np.asarray(material.audio48[a:b], dtype=np.float32))
+    original = louder_channel(np.asarray(material.audio48[a:b], dtype=np.float32))
     enhanced = await enhance(original)
     # 前後の文脈は除くときにだけ使い、頭と末尾を話の切れ目へずらして切る
     piece.start, piece.end = snap_edges(piece, enhanced, a / OUTPUT_RATE)

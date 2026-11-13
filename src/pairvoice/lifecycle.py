@@ -20,7 +20,7 @@ from typing import TYPE_CHECKING, Protocol
 
 import numpy as np
 
-from . import curate, generations, launchd, spatial
+from . import curate, fold, generations, launchd, spatial
 from .config import Config, config_is_stale, load_config
 from .curate import Analysis, Outcome
 from .player import Player
@@ -620,11 +620,8 @@ class Engine:
         """wav を聞き取った文。合成した音声が原稿どおりに読めているかを確かめるのに使う。"""
         return await self._measure(self._stt, self._stt_backend.transcribe, path)
 
-    async def curate_analyze(self, files: list[tuple[str, Path]], directory: Path) -> Analysis:
-        """素材をデコードして話者を分け、区間を採点する。デコードした素材は directory に置く。
-
-        話者分離はチャンクごとに列に並べる。素材が長くても、その合間に読み上げが割り込める。
-        """
+    def _diarizer(self):
+        """話者分離を1チャンクずつ列に並べる関数（続きの状態を持つので、素材ごとに作る）。"""
         state = None
 
         async def diarize(chunk):
@@ -634,27 +631,54 @@ class Engine:
             )
             return segments
 
+        return diarize
+
+    async def _enhance(self, samples: np.ndarray) -> np.ndarray:
+        return await self._measure(self._curate, self._curate_backend.enhance, samples)
+
+    async def _dereverb_chunk(self, samples: np.ndarray) -> np.ndarray:
+        return await self._measure(self._curate, self._curate_backend.dereverb, samples)
+
+    @property
+    def _dereverb(self):
+        return self._dereverb_chunk if self._curate_backend.dereverbs else None
+
+    async def curate_analyze(self, files: list[tuple[str, Path]], directory: Path) -> Analysis:
+        """素材をデコードして話者を分け、区間を採点する。デコードした素材は directory に置く。
+
+        話者分離はチャンクごとに列に並べる。素材が長くても、その合間に読み上げが割り込める。
+        """
         material = await asyncio.to_thread(curate.decode, files, directory)
-        return await curate.analyze(material, diarize, asyncio.to_thread)
+        return await curate.analyze(material, self._diarizer(), asyncio.to_thread)
 
     async def curate_render(self, analysis: Analysis, selection: list[int] | None) -> Outcome:
         """解析した区間の雑音と響きを除いてつなぐ。selection は区間の番号で、None なら自動で選ぶ。
 
         雑音除去は区間ごとに、残響除去は 8 秒ずつ列に並べる。
         """
-
-        async def enhance(samples):
-            return await self._measure(self._curate, self._curate_backend.enhance, samples)
-
-        async def dereverb(samples):
-            return await self._measure(self._curate, self._curate_backend.dereverb, samples)
-
         return await curate.render(
-            analysis,
-            selection,
-            enhance,
-            asyncio.to_thread,
-            dereverb if self._curate_backend.dereverbs else None,
+            analysis, selection, self._enhance, asyncio.to_thread, self._dereverb
+        )
+
+    async def fold_material(
+        self, files: list[tuple[str, Path]], directory: Path, progress: fold.Progress
+    ) -> fold.Folded:
+        """素材を話者の表現1つに畳み込む。雑音除去・残響除去・話者分離・符号化は、どれも
+        小分けにして列に並べる（数十分かかっても、その合間に読み上げが割り込める）。"""
+
+        async def encode(samples):
+            return await self._measure(self._tts, self._tts_backend.speaker_tokens, samples)
+
+        return await fold.fold(
+            files,
+            directory,
+            enhance=self._enhance,
+            dereverb=self._dereverb,
+            diarize=self._diarizer(),
+            encode=encode,
+            model=str(self._tts_backend.model),
+            offload=asyncio.to_thread,
+            progress=progress,
         )
 
     async def warmup(self, respect_mute: bool = False) -> dict:

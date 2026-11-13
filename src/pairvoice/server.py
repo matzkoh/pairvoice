@@ -696,6 +696,7 @@ def create_app(engine: Engine) -> FastAPI:
             engine.curate_render,
             engine.transcribe,
             engine.save_audio,
+            engine.fold_material,
         )
     )
     api.include_router(corpus_router(data_root))

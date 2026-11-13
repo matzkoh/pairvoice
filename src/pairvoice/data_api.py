@@ -27,15 +27,14 @@ from pydantic import (
 )
 from starlette.datastructures import UploadFile
 
-from . import curate, reading, voice_eval
-from .api_errors import BodyTooLarge
+from . import curate, fold, reading, voice_eval
+from .api_errors import BodyTooLarge, describe_error
 from .api_errors import error_doc as _error
 from .api_errors import fail as _fail
 from .curate import Analysis, InvalidAudio, InvalidSelection, Outcome
 from .curate_jobs import CurateJobs
-from .profiles import TakeRejected
+from .profiles import SpeakerTokens, TakeRejected
 from .prompt import SummaryPrompt
-from .studio_web import studio_url
 from .styles import STYLES_FILENAME, StyleStore
 from .tts import ANCHOR_TEXT, AudioNotFound, SpeechResult, resolve_data_audio
 from .wav import concat_wavs, has_wav_header, mono_wav, write_mono
@@ -110,6 +109,14 @@ class CurateRender(Protocol):
     """Engine.curate_render。解析した区間から参照音声を作る。selection が None なら自動で選ぶ。"""
 
     async def __call__(self, analysis: Analysis, selection: list[int] | None) -> Outcome: ...
+
+
+class FoldMaterial(Protocol):
+    """Engine.fold_material。素材を directory で処理し、話者の表現1つに畳み込む。"""
+
+    async def __call__(
+        self, files: list[tuple[str, Path]], directory: Path, progress: fold.Progress
+    ) -> fold.Folded: ...
 
 
 class SaveAudio(Protocol):
@@ -313,6 +320,10 @@ class ProfileItem(BaseModel):
     tone: str = Field(description="要約の口調。空なら既定の口調（`GET /tone`）で読む")
     members: list[str] = Field(description="`random` の声が選ぶ声の ID。ほかの声は空")
     order: Order = Field(description="`random` の声の選び方。ほかの声は `random`")
+    folded: bool = Field(
+        description="素材を畳み込んだ声（`POST /profiles/fold`）。素材全体から要約した話者の表現で読み、"
+        "参照音声（`GET /profiles/{id}/audio`）はその中心に近い 26 秒の素材で、鳴る声とは少し違う"
+    )
 
 
 class CuratedFile(BaseModel):
@@ -346,6 +357,27 @@ class CurateReport(BaseModel):
 class CurateResponse(BaseModel):
     profile: ProfileItem = Field(description="作った声")
     report: CurateReport = Field(description="どの区間を選んだか")
+
+
+class FoldReport(BaseModel):
+    speech_seconds: float = Field(description="使った本人の声の長さ（無音を詰めたあと、秒）")
+    pieces: int = Field(description="話者分離で取れた本人の区間の数")
+    blocks: int = Field(description="話者の表現にした塊の数")
+    pooled_tokens: int = Field(description="溜めたトークンの数")
+    tokens: int = Field(description="要約したトークンの数")
+
+
+class FoldJobResponse(BaseModel):
+    job_id: str = Field(description="`GET /profiles/fold/{job_id}` で問い合わせる ID")
+    status: Literal["running", "done", "failed"] = Field(description="走っている・できた・失敗した")
+    stage: Literal["upload", "decode", "clean", "diarize", "encode", "summarize", "save"] = Field(
+        description="いまの段階。clean（雑音と響きを除く）がいちばん長い"
+    )
+    progress: float = Field(description="その段階の進み具合（0〜1）")
+    profile: ProfileItem | None = Field(default=None, description="作った声（done のとき）")
+    report: FoldReport | None = Field(default=None, description="何を畳み込んだか（done のとき）")
+    error: str | None = Field(default=None, description="失敗のコード（failed のとき）")
+    detail: str | None = Field(default=None, description="失敗の説明（ある場合）")
 
 
 class CurateSource(BaseModel):
@@ -388,9 +420,6 @@ class CurateLimits(BaseModel):
 
 class CurateAnalysisResponse(BaseModel):
     job_id: str = Field(description="解析の ID。区間を選んで声を作るときに使う")
-    studio_url: str = Field(
-        description="この解析を studio の「素材から作る」で開く URL。利用者に区間を選んでもらうときに渡す"
-    )
     files: list[CurateSource] = Field(
         description="送った順の素材。ファイルの間に無音を挟んで1本の流れにつないである"
     )
@@ -586,9 +615,11 @@ def data_router(
     curate_render: CurateRender,
     transcribe: Transcribe,
     save_audio: SaveAudio,
+    fold_material: FoldMaterial,
 ) -> APIRouter:
     router = APIRouter()
     curate_jobs = CurateJobs()
+    fold_jobs = fold.FoldJobs()
     dict_path = data_root / reading.DICT_FILENAME
     styles = StyleStore(data_root / STYLES_FILENAME)
     summary_prompt = SummaryPrompt(data_root)
@@ -839,6 +870,7 @@ def data_router(
 
     @router.post(
         "/profiles/curate",
+        deprecated=True,
         status_code=201,
         response_model=CurateResponse,
         summary="雑多な音声ファイルから声を作る",
@@ -862,6 +894,8 @@ def data_router(
         合わせて 26〜28 秒ほど選び、雑音を除いてつなぐ。ファイルをまたいでも同じ人は同じ人と
         みなす（全体で4人まで）。1時間の素材で数分かかり、その間も読み上げは合間に割り込む。
         使用中の声がまだ無ければ、作った声を使用中にする。区間を自分で選ぶなら `POST /curate`。
+
+        非推奨。30 秒の区間の選び方で声がぶれるので、`POST /profiles/fold` で素材全体を畳み込む。
         """
         with tempfile.TemporaryDirectory() as directory:
             files = await _receive_files(request, Path(directory))
@@ -880,7 +914,68 @@ def data_router(
         return {"profile": created.describe(), "report": outcome.report}
 
     @router.post(
+        "/profiles/fold",
+        status_code=202,
+        response_model=FoldJobResponse,
+        summary="長い素材を畳み込んで声を作る",
+        tags=["声"],
+        openapi_extra=_FILES_BODY,
+        responses={
+            400: _error("`invalid_audio`（ファイルが無い・読めない）"),
+            413: _error(f"`body_too_large`（{CURATE_MAX_BYTES // 1024**3}GB まで）"),
+        },
+    )
+    async def fold_profile(
+        request: Request,
+        name: Annotated[ProfileName, Query(description="声の名前")],
+        caption: Annotated[Caption, Query(description="話し方の指示")] = "",
+    ):
+        """`files` に音声・動画のファイルをいくつでも送る。区間を選ばず、素材全体の平均の声を作る。
+
+        素材を丸ごと雑音と響きを除いてから話者を分け、いちばん多く話す人の声を全部、話者の
+        表現にして 180 トークンに要約する。素材が長いほど選び方で声がぶれない（数十分〜数時間が目安）。
+        受け付けたらすぐ返すので、`GET /profiles/fold/{job_id}` で終わるまで問い合わせる。
+        素材 30 分につき 20 分ほどかかり、その間も読み上げは合間に割り込む。
+        使用中の声がまだ無ければ、作った声を使用中にする。
+        """
+        directory = tempfile.TemporaryDirectory(prefix="pairvoice-fold-")
+        try:
+            files = await _receive_files(request, Path(directory.name))
+        except BaseException:
+            directory.cleanup()
+            raise
+
+        async def work(progress: fold.Progress) -> tuple[dict, dict]:
+            try:
+                folded = await fold_material(files, Path(directory.name), progress)
+            finally:
+                await asyncio.to_thread(directory.cleanup)
+            progress("save", 0.0)
+            created = await asyncio.to_thread(
+                profiles.create,
+                name=name,
+                caption=caption,
+                source="curate",
+                write_reference=lambda path: write_mono(path, folded.reference, curate.OUTPUT_RATE),
+                speaker=SpeakerTokens(lambda path: np.save(path, folded.tokens), folded.model),
+            )
+            return created.describe(), folded.report
+
+        return dataclasses.asdict(fold_jobs.start(work, describe_error))
+
+    @router.get(
+        "/profiles/fold/{job_id}",
+        response_model=FoldJobResponse,
+        summary="畳み込みの進み具合",
+        tags=["声"],
+        responses={404: _error("`fold_job_not_found`（ID の取り違え・常駐サーバーを再起動した）")},
+    )
+    def get_fold(job_id: str):
+        return dataclasses.asdict(fold_jobs.get(job_id))
+
+    @router.post(
         "/curate",
+        deprecated=True,
         status_code=201,
         response_model=CurateAnalysisResponse,
         summary="素材を解析して区間の候補を出す",
@@ -898,8 +993,9 @@ def data_router(
 
         `files` の素材から、いちばん多く話す人だけが話している区間を候補として返す。候補を
         `GET /curate/{job_id}/audio` で聴き、`POST /curate/{job_id}/profile` に番号を渡して声を作る。
-        区間を利用者に選んでもらうなら、`studio_url` を渡す（studio で聴いて選び、そのまま作れる）。
         解析は最後に使ってから1時間か、新しい解析が3つを超えると消える。
+
+        非推奨（`/curate` の下はすべて）。声を作るなら `POST /profiles/fold` で素材全体を畳み込む。
         """
         directory = tempfile.TemporaryDirectory(prefix="pairvoice-curate-")
         try:
@@ -909,27 +1005,27 @@ def data_router(
             directory.cleanup()
             raise
         job_id = curate_jobs.add(analysis, directory)
-        return await _describe_job(request, job_id, analysis)
+        return await _describe_job(job_id, analysis)
 
     @router.get(
         "/curate/{job_id}",
+        deprecated=True,
         response_model=CurateAnalysisResponse,
         summary="解析した候補",
         tags=["声"],
         responses=_CURATE_JOB_NOT_FOUND,
     )
-    async def get_curate(request: Request, job_id: str):
-        """`POST /curate` と同じ形で返す。studio が URL から解析を開くのに使う。"""
-        return await _describe_job(request, job_id, curate_jobs.get(job_id))
+    async def get_curate(job_id: str):
+        """`POST /curate` と同じ形で返す。"""
+        return await _describe_job(job_id, curate_jobs.get(job_id))
 
-    async def _describe_job(request: Request, job_id: str, analysis: Analysis) -> dict:
+    async def _describe_job(job_id: str, analysis: Analysis) -> dict:
         described = await asyncio.to_thread(curate.describe, analysis)
-        # 呼び手が届いた Host のまま返す（設定の URL と違う名前で来ていることがある）
-        url = studio_url(str(request.base_url), "profiles", id="new", curate=job_id)
-        return {"job_id": job_id, "studio_url": url, **described}
+        return {"job_id": job_id, **described}
 
     @router.get(
         "/curate/{job_id}/audio",
+        deprecated=True,
         response_class=Response,
         summary="素材の一部を聴く",
         tags=["声"],
@@ -950,6 +1046,7 @@ def data_router(
 
     @router.post(
         "/curate/{job_id}/candidates/{index}/transcript",
+        deprecated=True,
         response_model=CurateTranscript,
         summary="候補のセリフを聞き取る",
         tags=["声"],
@@ -994,6 +1091,7 @@ def data_router(
 
     @router.post(
         "/curate/{job_id}/profile",
+        deprecated=True,
         status_code=201,
         response_model=CurateResponse,
         summary="選んだ区間から声を作る",
@@ -1016,6 +1114,7 @@ def data_router(
 
     @router.post(
         "/curate/{job_id}/render",
+        deprecated=True,
         status_code=201,
         response_model=CurateRenderResponse,
         summary="選んだ区間から参照音声だけを作る",
@@ -1082,6 +1181,7 @@ def data_router(
 
     @router.delete(
         "/curate/{job_id}",
+        deprecated=True,
         summary="解析を消す",
         tags=["声"],
         responses=_CURATE_JOB_NOT_FOUND,

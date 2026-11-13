@@ -37,6 +37,8 @@ GROUP_RETENTION = timedelta(days=7)
 GROUP_TOUCH_INTERVAL = timedelta(days=1)
 META_FILENAME = "profile.json"
 REFERENCE_FILENAME = "reference.wav"
+# 素材を畳み込んだ声の、話者の表現（トークンの列、numpy の .npy）
+SPEAKER_FILENAME = "speaker.npy"
 PROFILES_DIRNAME = "profiles"
 # 要約の口調（声ごとのものは声のディレクトリに、既定のものはデータの置き場所に置く）
 TONE_FILENAME = "tone.txt"
@@ -66,6 +68,14 @@ _groups_lock = threading.Lock()
 
 
 @dataclass(frozen=True)
+class SpeakerTokens:
+    """素材を畳み込んだ声の話者の表現。write が .npy を書き、model はそれを作った合成モデルの名前。"""
+
+    write: Callable[[Path], object]
+    model: str
+
+
+@dataclass(frozen=True)
 class Profile:
     id: str
     name: str
@@ -79,6 +89,14 @@ class Profile:
     # ランダムの声が選ぶ声の ID と、選び方（ORDERS）
     members: tuple[str, ...] = ()
     order: str = "random"
+    # 素材を畳み込んだ声だけが持つ、話者の表現と、それを作った合成モデルの名前。表現は
+    # そのモデルの空間のものなので、モデルが違えば使わず参照音声で読む
+    speaker: Path | None = None
+    speaker_model: str = ""
+
+    def tokens_for(self, model: str) -> Path | None:
+        """model で読むときに差し込む話者の表現。別のモデルで作った表現は使わない（空間が違う）。"""
+        return self.speaker if self.speaker is not None and self.speaker_model == model else None
 
     @property
     def is_random(self) -> bool:
@@ -95,6 +113,7 @@ class Profile:
             "tone": self.tone,
             "members": list(self.members),
             "order": self.order,
+            "folded": self.speaker is not None,
         }
 
 
@@ -157,6 +176,7 @@ class ProfileStore:
             return None
         members = meta.get("members") if is_random else None
         order = meta.get("order")
+        speaker = directory / SPEAKER_FILENAME
         return Profile(
             id=profile_id,
             name=str(meta.get("name", profile_id)),
@@ -167,6 +187,8 @@ class ProfileStore:
             tone="" if is_random else self.tone(profile_id).read(),
             members=tuple(str(m) for m in members) if isinstance(members, list) else (),
             order=order if order in ORDERS else "random",
+            speaker=speaker if speaker.is_file() else None,
+            speaker_model=str(meta.get("speaker_model", "")),
         )
 
     def require(self, profile_id: str) -> Profile:
@@ -284,8 +306,9 @@ class ProfileStore:
         caption: str,
         source: str,
         write_reference: Callable[[Path], object],
+        speaker: SpeakerTokens | None = None,
     ) -> Profile:
-        """プロファイルを作る。参照音声は write_reference が書く。
+        """プロファイルを作る。参照音声は write_reference が書く。speaker は畳み込んだ声の表現。
 
         使用中のプロファイルがまだ無ければ、作ったものを使用中にする。放っておくと次の
         読み上げで既定の声が自動で作られ、作った声が使われない
@@ -294,6 +317,8 @@ class ProfileStore:
         directory = self.root / profile_id
         try:
             write_reference(directory / REFERENCE_FILENAME)
+            if speaker is not None:
+                speaker.write(directory / SPEAKER_FILENAME)
         except BaseException:
             # 失敗のたびに空のディレクトリが残り、一覧に壊れたプロファイルが溜まる
             shutil.rmtree(directory, ignore_errors=True)
@@ -304,6 +329,8 @@ class ProfileStore:
             "source": source,
             "created_at": now.isoformat(),
         }
+        if speaker is not None:
+            meta["speaker_model"] = speaker.model
         _write_meta(directory, meta)
         with _write_lock:
             if self.active() is None:
@@ -315,6 +342,8 @@ class ProfileStore:
             source=source,
             reference=directory / REFERENCE_FILENAME,
             created_at=meta["created_at"],
+            speaker=None if speaker is None else directory / SPEAKER_FILENAME,
+            speaker_model="" if speaker is None else speaker.model,
         )
 
     def create_random(self, *, name: str, members: list[str], order: str = "random") -> Profile:

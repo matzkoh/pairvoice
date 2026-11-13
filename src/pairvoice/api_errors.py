@@ -12,6 +12,7 @@ from pydantic import BaseModel, Field
 
 from .curate import FfmpegMissing, InvalidAudio, InvalidSelection, TooLittleSpeech
 from .curate_jobs import CurateJobNotFound
+from .fold import FoldJobNotFound
 from .history import InvalidVersion, VersionNotFound
 from .lifecycle import Superseded
 from .narration import NoJapaneseSummary, NothingToSay
@@ -63,8 +64,22 @@ _ERRORS: dict[type[Exception], tuple[int, str, bool]] = {
     FfmpegMissing: (503, "ffmpeg_missing", True),
     InvalidSelection: (400, "invalid_selection", True),
     CurateJobNotFound: (404, "curate_job_not_found", False),
+    FoldJobNotFound: (404, "fold_job_not_found", False),
     BodyTooLarge: (413, "body_too_large", False),
 }
+
+
+def describe_error(error: Exception) -> tuple[str, str | None]:
+    """例外の error のコードと detail。後ろで走らせた仕事の失敗を、問い合わせに返すのに使う。
+
+    応答と同じく、例外の型を親へたどって最初に表にあるものを使う。
+    """
+    for cls in type(error).__mro__:
+        entry = _ERRORS.get(cls)
+        if entry is not None:
+            _, code, with_detail = entry
+            return code, str(error) if with_detail else None
+    return "internal_error", None
 
 
 def install_error_handlers(app: FastAPI) -> None:

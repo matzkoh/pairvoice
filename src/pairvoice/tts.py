@@ -38,7 +38,7 @@ import dataclasses
 import shutil
 import uuid
 from collections import OrderedDict
-from collections.abc import Iterator, Mapping, Sequence
+from collections.abc import Callable, Iterator, Mapping, Sequence
 from contextlib import contextmanager, nullcontext
 from dataclasses import dataclass
 from pathlib import Path
@@ -258,23 +258,44 @@ class MlxAudioBackend:
 
     def _speaker_state(self, path: Path) -> mx.array:
         """参照音声の話者の表現 (1, T, 768)。同じファイルは測り直さない。"""
+        return self._cached_state(
+            path, lambda: self._encode_speaker(self._require_loaded()._load_ref_waveform(str(path)))
+        )
+
+    def _tokens_state(self, path: Path) -> mx.array:
+        """畳み込んだ声の話者の表現 (1, T, 768)。.npy から読む。"""
+        return self._cached_state(path, lambda: mx.array(np.load(path)[None]))
+
+    def _cached_state(self, path: Path, make: Callable[[], mx.array]) -> mx.array:
         key = (path, path.stat().st_mtime_ns)
         cached = self._speaker_states.get(key)
         if cached is not None:
             self._speaker_states.move_to_end(key)
             return cached
-        from mlx_audio.tts.models.irodori_tts.model import patch_sequence_with_mask
-
-        model = self._require_loaded()
-        latent, mask = model._encode_ref_audios([model._load_ref_waveform(str(path))])
-        dit = model.model
-        latent_p, mask_p = patch_sequence_with_mask(latent, mask, dit.cfg.speaker_patch_size)
-        state = dit.speaker_norm(dit.speaker_encoder(latent_p, mask_p))
+        state = make()
         mx.eval(state)
         self._speaker_states[key] = state
         while len(self._speaker_states) > SPEAKER_STATE_CACHE_SIZE:
             self._speaker_states.popitem(last=False)
         return state
+
+    def _encode_speaker(self, waveform: mx.array) -> mx.array:
+        from mlx_audio.tts.models.irodori_tts.model import patch_sequence_with_mask
+
+        model = self._require_loaded()
+        latent, mask = model._encode_ref_audios([waveform])
+        dit = model.model
+        latent_p, mask_p = patch_sequence_with_mask(latent, mask, dit.cfg.speaker_patch_size)
+        return dit.speaker_norm(dit.speaker_encoder(latent_p, mask_p))
+
+    def speaker_tokens(self, samples: np.ndarray) -> np.ndarray:
+        """48kHz モノラルの音の話者の表現 (T, 768)。素材を畳み込むときに使い、取っておかない
+        （何十本も通すと、プロファイルの声の表現が取っておく枠から押し出される）。"""
+        model = self._require_loaded()
+        # ファイルから読むときと同じ (1, samples) の形にそろえる
+        waveform = model._load_ref_waveform(mx.array(np.asarray(samples, np.float32)))
+        state = self._encode_speaker(waveform)
+        return np.asarray(state[0], dtype=np.float32)
 
     def resolve_audio(self, relative: str) -> Path:
         return resolve_data_audio(self._data_dir, relative)
@@ -392,11 +413,13 @@ class MlxAudioBackend:
         profile = None if design else self._profile_for(profile_id)
         ref_audio = profile.reference if profile is not None else None
         resolved_caption, _ = self._resolve_caption(caption, profile)
-        speaker = (
-            self._speaker_state(ref_audio)
-            if ref_audio is not None and self._speaker_injection_ready
-            else None
-        )
+        tokens = profile.tokens_for(str(self.model)) if profile is not None else None
+        speaker = None
+        if self._speaker_injection_ready:
+            if tokens is not None:
+                speaker = self._tokens_state(tokens)
+            elif ref_audio is not None:
+                speaker = self._speaker_state(ref_audio)
         return _Voice(ref_audio, resolved_caption, self.resolve_sampler(sampler), speaker)
 
     def save(self, samples: np.ndarray, sample_rate: int) -> SpeechResult:

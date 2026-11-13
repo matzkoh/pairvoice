@@ -5,7 +5,7 @@ import numpy as np
 import pytest
 
 from pairvoice.config import ProfileConfig, SamplerConfig, TTSConfig
-from pairvoice.profiles import ProfileNotFound, ProfileStore
+from pairvoice.profiles import ProfileNotFound, ProfileStore, SpeakerTokens
 from pairvoice.tts import (
     ANCHOR_TEXT,
     LEAD_TEXT,
@@ -875,3 +875,59 @@ def test_speak_resynthesizes_without_lead_when_no_gap_follows_it(config, tmp_pat
         ("テスト", True),
         ("テスト", False),
     ]
+
+
+@pytest.mark.parametrize(("made_with", "uses_tokens"), [("fake/tts", True), ("other/tts", False)])
+def test_speak_uses_folded_tokens_only_from_the_same_model(
+    no_ref_config, tmp_path, monkeypatch, made_with, uses_tokens
+):
+    import mlx.core as mx
+
+    model = MixModel(FakeResult(np.zeros(480, dtype=np.float32)))
+    backend = make_backend(no_ref_config, model, tmp_path, monkeypatch)
+    tokens = np.arange(6, dtype=np.float32).reshape(3, 2)
+    profile = ProfileStore(tmp_path / "profiles").create(
+        name="畳み込み",
+        caption="",
+        source="curate",
+        write_reference=lambda path: path.write_bytes(b"RIFF"),
+        speaker=SpeakerTokens(lambda path: np.save(path, tokens), made_with),
+    )
+    measured = []
+
+    def speaker_state(path):
+        measured.append(path.name)
+        return mx.zeros((1, 1, 2))
+
+    monkeypatch.setattr(backend, "_speaker_state", speaker_state)
+
+    backend.speak("テスト", profile_id=profile.id)
+
+    # 表現は作ったモデルの空間のものなので、別のモデルなら参照音声で読む
+    injected = np.asarray(model.seen[0][1][2])
+    if uses_tokens:
+        assert measured == []
+        np.testing.assert_allclose(injected, tokens[None])
+    else:
+        assert measured == ["reference.wav"]
+        assert injected.shape == (1, 1, 2)
+
+
+def test_speaker_tokens_encodes_samples_as_one_batch(no_ref_config, tmp_path, monkeypatch):
+    import mlx.core as mx
+
+    model = MixModel(FakeResult(np.zeros(480, dtype=np.float32)))
+    model._load_ref_waveform = lambda audio: audio[None] if audio.ndim == 1 else audio
+    backend = make_backend(no_ref_config, model, tmp_path, monkeypatch)
+    seen = []
+    monkeypatch.setattr(
+        backend,
+        "_encode_speaker",
+        lambda waveform: seen.append(waveform.shape) or mx.ones((1, 4, 2)),
+    )
+
+    tokens = backend.speaker_tokens(np.zeros(4800, np.float32))
+
+    # ファイルから読むときと同じ (1, samples) の形で符号化し、(T, 次元) で返す
+    assert seen == [(1, 4800)]
+    assert tokens.shape == (4, 2)

@@ -267,7 +267,6 @@ def test_curate_job_lists_candidates_and_builds_from_a_selection(client, tmp_pat
     assert job["envelope"]["levels"]
     assert job["limits"]["max_seconds"] == 28.0
     # 利用者に選んでもらうときは、studio の「素材から作る」をこの解析で開く
-    assert job["studio_url"] == f"http://127.0.0.1:17495/profiles?id=new&curate={job['job_id']}"
     again = client.get(f"/curate/{job['job_id']}")
     assert again.json() == job
 
@@ -385,6 +384,7 @@ def test_patch_updates_name_and_snapshots_caption(client):
         "tone": "",
         "members": [],
         "order": "random",
+        "folded": False,
     }
     (version,) = client.get(f"/profiles/{profile_id}/caption/history").json()["items"]
     assert version["name"].startswith("caption-")
@@ -686,3 +686,46 @@ def test_render_builds_a_reference_and_profile_reuses_it(tmp_path):
     assert curate.enhance_calls == enhanced
     profile_id = created.json()["profile"]["id"]
     assert client.get(f"/profiles/{profile_id}/audio").content == reference.read_bytes()
+
+
+@needs_ffmpeg
+def test_fold_builds_a_profile_from_all_speech_in_the_background(tmp_path):
+    import time
+
+    import numpy as np
+
+    _, client = build(data_root=tmp_path)
+    body = speech_wav(tmp_path, [(1, 20, 0.5, 220), (21, 40, 0.5, 220)])
+    with client:
+        started = client.post(
+            "/profiles/fold",
+            params={"name": "畳んだ声"},
+            files=[("files", ("配信.wav", body, "application/octet-stream"))],
+        )
+        assert started.status_code == 202
+        job_id = started.json()["job_id"]
+        for _ in range(200):
+            job = client.get(f"/profiles/fold/{job_id}").json()
+            if job["status"] != "running":
+                break
+            time.sleep(0.05)
+
+    assert job["status"] == "done", job
+    report = job["report"]
+    # 本人の声を全部使い（約 41 秒）、26 秒ずつ表現にして、180 トークンまでに要約する
+    assert report["speech_seconds"] == pytest.approx(41.5, abs=1.0)
+    assert report["blocks"] == 2
+    assert report["tokens"] <= 180 < report["pooled_tokens"] + 180
+    profile = job["profile"]
+    assert profile["source"] == "curate"
+    directory = tmp_path / "profiles" / profile["id"]
+    tokens = np.load(directory / "speaker.npy")
+    assert tokens.shape[1] == 2
+    assert client.get(f"/profiles/{profile['id']}/audio").status_code == 200
+
+
+def test_fold_job_not_found(client):
+    response = client.get("/profiles/fold/missing")
+
+    assert response.status_code == 404
+    assert response.json()["error"] == "fold_job_not_found"
