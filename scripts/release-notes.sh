@@ -17,5 +17,5 @@ section() {
   fi
 }
 
-section feat 新しいこと
-section fix 直したこと
+section feat 新機能
+section fix 修正
