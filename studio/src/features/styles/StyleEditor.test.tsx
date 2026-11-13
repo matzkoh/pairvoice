@@ -43,6 +43,7 @@ const BASE: Props = {
         tone: '',
         members: [],
         order: 'random',
+        folded: false,
       },
       {
         id: 'p-b',
@@ -53,6 +54,7 @@ const BASE: Props = {
         tone: '',
         members: [],
         order: 'random',
+        folded: false,
       },
     ],
   },

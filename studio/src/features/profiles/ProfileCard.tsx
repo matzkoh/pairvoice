@@ -139,7 +139,7 @@ export function ProfileCard({ item, voices, isActive, onPlay, onStatus, onDelete
       ) : (
         <dl className="grid grid-cols-[5rem_minmax(0,1fr)] items-baseline gap-x-4 gap-y-2 px-4 py-3">
           <dt className="text-xs text-muted-foreground">参照音声</dt>
-          <dd>
+          <dd className="space-y-1">
             <Button
               variant="outline"
               size="xs"
@@ -149,6 +149,13 @@ export function ProfileCard({ item, voices, isActive, onPlay, onStatus, onDelete
               <Play />
               再生
             </Button>
+            {item.folded && (
+              <p className="text-xs text-muted-foreground">
+                この音は読み上げに使いません。素材を畳み込んだ声は、素材全体から要約した声で読みます。ここで鳴るのは素材の中心に近い
+                26
+                秒の見本で、つなぎ目で言葉が途切れます。声そのものは下の試聴で確かめてください（合成モデルを替えたときだけ、この音を参照音声にして読みます）。
+              </p>
+            )}
           </dd>
           <dt className="text-xs text-muted-foreground">caption</dt>
           <dd className="text-sm whitespace-pre-wrap">

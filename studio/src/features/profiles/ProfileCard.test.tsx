@@ -27,6 +27,7 @@ const ITEM: ProfileItem = {
   tone: '',
   members: [],
   order: 'random',
+  folded: false,
 }
 
 const VOICES: ProfileItem[] = [
@@ -43,6 +44,7 @@ const RANDOM: ProfileItem = {
   source: 'random',
   members: ['p-a', 'p-b'],
   order: 'random',
+  folded: false,
 }
 
 function renderCard(isActive = false, item: ProfileItem = ITEM) {
@@ -106,6 +108,18 @@ it('参照音声を再生できる', () => {
   const { onPlay } = renderCard()
   fireEvent.click(screen.getByRole('button', { name: '別の声 の参照音声を再生' }))
   expect(onPlay).toHaveBeenCalledWith('/api/profiles/p-b/audio')
+})
+
+it('畳み込んだ声には、参照音声を読み上げに使わないと書く', () => {
+  renderCard(false, { ...ITEM, folded: true })
+
+  expect(screen.getByText(/この音は読み上げに使いません/)).toBeTruthy()
+})
+
+it('ふつうの声には書かない', () => {
+  renderCard()
+
+  expect(screen.queryByText(/この音は読み上げに使いません/)).toBeNull()
 })
 
 it('名前をクリックすると変更でき、Enter で保存する', async () => {

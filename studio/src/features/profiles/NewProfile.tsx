@@ -3,26 +3,19 @@ import type { ComponentProps } from 'react'
 import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs'
 import type { ProfileItem } from '@/lib/api-types'
 
-import { CurateProfile } from './CurateProfile'
 import { DesignProfile } from './DesignProfile'
+import { FoldProfile } from './FoldProfile'
 import { PickProfile } from './PickProfile'
 import { RandomProfile } from './RandomProfile'
 import { UploadProfile } from './UploadProfile'
 
 type Props = ComponentProps<typeof DesignProfile> & {
   voices: readonly ProfileItem[]
-  curateJob: string | undefined
-  onCurateJob: (job: string | undefined) => void
+  foldJob: string | undefined
+  onFoldJob: (job: string | undefined) => void
 }
 
-export function NewProfile({
-  voices,
-  onStatus,
-  onCreated,
-  curateJob,
-  onCurateJob,
-  ...design
-}: Props) {
+export function NewProfile({ voices, onStatus, onCreated, foldJob, onFoldJob, ...design }: Props) {
   return (
     <section aria-labelledby="new-profile-heading" className="rounded-xl border bg-muted/40 p-5">
       <h2 id="new-profile-heading" className="text-base font-semibold">
@@ -33,8 +26,8 @@ export function NewProfile({
         Code の読み上げでは、同じセッションの間は同じ声のままです）。
       </p>
       {/* 切り替えても作りかけの候補や入力を失わないよう、両方を載せたまま隠す */}
-      {/* 解析の URL で来たら、その解析を開いた「素材から作る」から始める */}
-      <Tabs defaultValue={curateJob ? 'curate' : 'design'} className="mt-4 gap-5">
+      {/* 畳み込みの仕事を追っている URL で来たら、「素材から作る」から始める */}
+      <Tabs defaultValue={foldJob ? 'curate' : 'design'} className="mt-4 gap-5">
         <TabsList>
           <TabsTrigger value="design">caption から声を作る</TabsTrigger>
           <TabsTrigger value="pick">2択で絞り込む</TabsTrigger>
@@ -58,9 +51,9 @@ export function NewProfile({
           <UploadProfile onStatus={onStatus} onCreated={onCreated} />
         </TabsContent>
         <TabsContent value="curate" keepMounted>
-          <CurateProfile
-            jobId={curateJob}
-            onJobChange={onCurateJob}
+          <FoldProfile
+            jobId={foldJob}
+            onJobChange={onFoldJob}
             onStatus={onStatus}
             onCreated={onCreated}
           />

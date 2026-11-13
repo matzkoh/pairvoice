@@ -81,7 +81,7 @@ export type HistoryItem = { name: string; ts: string }
 export type HistoryResponse = { items: HistoryItem[] }
 
 // 声のプロファイル（参照音声 + caption）。design = caption や合成した声から作った、
-// upload = 手持ちの wav を取り込んだ、curate = 雑多な音声ファイルから選り分けた、
+// upload = 手持ちの wav を取り込んだ、curate = 雑多な音声ファイルから作った、
 // auto / import = pairvoice が初回に作った
 // random は参照音声を持たず、読み上げのたびに members から1つを選ぶ
 export type ProfileSource = 'design' | 'upload' | 'curate' | 'auto' | 'import' | 'random'
@@ -99,49 +99,29 @@ export type ProfileItem = {
   members: string[]
   // random の声の選び方。ほかの声は random
   order: ProfileOrder
+  // 素材を畳み込んだ声。要約した話者の表現で読み、参照音声はその中心に近い 26 秒の素材
+  folded: boolean
 }
 export type ProfilesResponse = { items: ProfileItem[]; active: string | null }
 
-// POST /profiles/curate の応答。report はどの区間を参照音声に使ったか
-export type CurateReport = {
-  files: { name: string; seconds: number }[]
-  // 長すぎるので後ろを使わなかった
-  truncated: boolean
-  // 話す長さの多い順。chosen がいちばん多く話す人
-  speakers: { speaker: number; seconds: number; chosen: boolean }[]
-  candidates: number
-  seconds: number
-  // index は CurateAnalysis の candidates の番号
-  pieces: { index: number; file: string; start: number; end: number; snr_db: number }[]
-}
-export type CurateResponse = { profile: ProfileItem; report: CurateReport }
-
-// POST /curate の候補。時刻はファイルを無音を挟んでつないだ流れの秒、file は files の番号
-export type CurateCandidate = {
-  index: number
-  file: number
-  start: number
-  end: number
-  snr_db: number
-  loudness_db: number | null
-  pitch_hz: number | null
-  brightness_hz: number | null
-  // ふだんの声からの離れ。null は S/N が低すぎて自動では使わない区間
-  deviation: number | null
-}
-
-// POST /curate の応答。job_id で区間を聴き、選んで声を作る
-export type CurateAnalysis = {
+// POST /profiles/fold・GET /profiles/fold/{job_id} の応答。後ろで走る畳み込みの仕事
+export type FoldStage = 'upload' | 'decode' | 'clean' | 'diarize' | 'encode' | 'summarize' | 'save'
+export type FoldJob = {
   job_id: string
-  files: { name: string; offset: number; seconds: number }[]
-  truncated: boolean
-  speakers: { speaker: number; seconds: number; chosen: boolean }[]
-  segments: { start: number; end: number; speaker: number }[]
-  candidates: CurateCandidate[]
-  preselected: number[]
-  // levels は step 秒ごとの音の大きさ（0〜100）
-  envelope: { step: number; levels: number[] }
-  limits: { min_seconds: number; target_seconds: number; max_seconds: number }
+  status: 'running' | 'done' | 'failed'
+  stage: FoldStage
+  // その段階の進み具合（0〜1）
+  progress: number
+  profile: ProfileItem | null
+  report: {
+    speech_seconds: number
+    pieces: number
+    blocks: number
+    pooled_tokens: number
+    tokens: number
+  } | null
+  error: string | null
+  detail: string | null
 }
 
 // /synthesize が wav を作れたときの応答。鳴らさないのでミュートでは断られない

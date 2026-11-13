@@ -33,6 +33,7 @@ const item: ProfileItem = {
   tone: '元気な口調',
   members: [],
   order: 'random',
+  folded: false,
 }
 
 async function renderTone(onStatus = vi.fn()) {
