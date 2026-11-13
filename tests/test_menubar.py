@@ -168,12 +168,10 @@ def test_menu_offers_an_update_only_when_pypi_is_ahead():
 def test_perform_update_upgrades_then_restarts(monkeypatch):
     calls = []
     monkeypatch.setattr(menubar.updates, "upgrade", lambda: calls.append("upgrade") or [])
-    monkeypatch.setattr(menubar, "notify", lambda message: calls.append(message))
+    monkeypatch.setattr(menubar, "alert", lambda message, *args, **kwargs: calls.append(message))
     monkeypatch.setattr(menubar.launchd, "restart", lambda: calls.append("restart") or 0)
     menubar.perform("update", "http://127.0.0.1:17495")
-    assert calls[0] == "upgrade"
-    assert calls[1].startswith("pairvoice を更新した")
-    assert calls[2] == "restart"
+    assert calls == ["upgrade", "pairvoice を更新した", "restart"]
 
 
 def test_perform_update_does_not_restart_when_the_upgrade_fails(monkeypatch):
@@ -182,10 +180,12 @@ def test_perform_update_does_not_restart_when_the_upgrade_fails(monkeypatch):
 
     calls = []
     monkeypatch.setattr(menubar.updates, "upgrade", fail)
-    monkeypatch.setattr(menubar, "notify", lambda message: calls.append(message))
+    monkeypatch.setattr(
+        menubar, "alert", lambda message, detail="", **kwargs: calls.append((message, detail))
+    )
     monkeypatch.setattr(menubar.launchd, "restart", lambda: calls.append("restart") or 0)
     menubar.perform("update", "http://127.0.0.1:17495")
-    assert calls == ["更新できなかった: uv が見つからない"]
+    assert calls == [("更新できなかった", "uv が見つからない")]
 
 
 def test_perform_release_notes_opens_the_releases_of_the_repository(monkeypatch):
@@ -198,25 +198,37 @@ def test_perform_release_notes_opens_the_releases_of_the_repository(monkeypatch)
 
 
 def test_check_update_tells_the_result(monkeypatch):
-    notes = []
-    monkeypatch.setattr(menubar, "notify", notes.append)
-    for state in (
-        {"latest": "0.21.0", "available": True},
-        {"latest": "0.20.0", "available": False},
-    ):
-        monkeypatch.setattr(menubar.client, "call", lambda *args, state=state, **kwargs: state)
-        menubar.perform("check_update", "http://127.0.0.1:17495")
+    shown = []
+    monkeypatch.setattr(
+        menubar, "alert", lambda message, *args, **kwargs: shown.append(message) or "OK"
+    )
+    monkeypatch.setattr(
+        menubar.client, "call", lambda *args, **kwargs: {"latest": "0.20.0", "available": False}
+    )
+    menubar.perform("check_update", "http://127.0.0.1:17495")
 
     def offline(*args, **kwargs):
         raise OSError("offline")
 
     monkeypatch.setattr(menubar.client, "call", offline)
     menubar.perform("check_update", "http://127.0.0.1:17495")
-    assert notes == [
-        "新しい版 0.21.0 が出ている。メニューから更新できる",
-        "pairvoice は最新（0.20.0）",
-        "新しい版を確かめられなかった（PyPI に届かない）",
-    ]
+    assert shown == ["pairvoice は最新（0.20.0）", "新しい版を確かめられなかった"]
+
+
+@pytest.mark.parametrize(
+    ("choice", "expected"),
+    [("更新する", ["update"]), ("変更点を見る", ["notes"]), ("あとで", [])],
+)
+def test_check_update_acts_on_the_button_pressed(monkeypatch, choice, expected):
+    done = []
+    monkeypatch.setattr(
+        menubar.client, "call", lambda *args, **kwargs: {"latest": "0.21.0", "available": True}
+    )
+    monkeypatch.setattr(menubar, "alert", lambda *args, **kwargs: choice)
+    monkeypatch.setattr(menubar, "update", lambda: done.append("update"))
+    monkeypatch.setattr(menubar, "open_release_notes", lambda: done.append("notes"))
+    menubar.perform("check_update", "http://127.0.0.1:17495")
+    assert done == expected
 
 
 def test_menu_lists_mute_presets():

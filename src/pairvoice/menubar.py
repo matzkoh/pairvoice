@@ -280,7 +280,7 @@ def perform(action: str, base: str, config_path: str | None = None) -> None:
         elif action == "update":
             update()
         elif action == "release_notes":
-            subprocess.Popen(["open", updates.releases_url()], stdin=subprocess.DEVNULL)
+            open_release_notes()
         elif action == "check_update":
             check_update(base)
     except Exception as failed:
@@ -310,27 +310,61 @@ def _badged(appkit, base):
     return appkit.NSImage.imageWithSize_flipped_drawingHandler_((canvas, height), False, draw)
 
 
-def notify(message: str) -> None:
-    """通知センターに出す。メニューバーにはほかに結果を伝える場所が無い。
+def alert(message: str, detail: str = "", buttons: tuple[str, ...] = ("OK",)) -> str:
+    """ダイアログを出し、押されたボタンの名前を返す。ワーカーのスレッドから呼ぶ。
 
-    出し終わるまで待つ。直後の再起動は、このメニューバーの子プロセスごと落とす。
+    通知センターは使わない。クリックした先を決めるにはバンドル ID を持つアプリが要り、
+    osascript で出すと、クリックでスクリプトエディタが開く。
     """
-    script = 'on run argv\ndisplay notification (item 1 of argv) with title "pairvoice"\nend run'
-    subprocess.run(["osascript", "-e", script, message], check=False, timeout=10)
+    appkit: Any = importlib.import_module("AppKit")
+    app_helper: Any = importlib.import_module("PyObjCTools.AppHelper")
+    pressed: list[str] = []
+    done = threading.Event()
+
+    def show():
+        try:
+            # Dock に出ないアプリなので、前に出さないとほかのウィンドウの裏に隠れる
+            appkit.NSApp().activateIgnoringOtherApps_(True)
+            panel = appkit.NSAlert.alloc().init()
+            panel.setMessageText_(message)
+            panel.setInformativeText_(detail)
+            for button in buttons:
+                panel.addButtonWithTitle_(button)
+            index = panel.runModal() - appkit.NSAlertFirstButtonReturn
+            # 閉じられた（中断された）ときは、最後のボタン（取りやめ）を押したことにする
+            pressed.append(buttons[index] if 0 <= index < len(buttons) else buttons[-1])
+        finally:
+            done.set()
+
+    # AppKit の画面はメインスレッドでしか触れない
+    app_helper.callAfter(show)
+    done.wait()
+    return pressed[0]
+
+
+def open_release_notes() -> None:
+    subprocess.Popen(["open", updates.releases_url()], stdin=subprocess.DEVNULL)
 
 
 def check_update(base: str) -> None:
-    """いま確かめて、結果を知らせる。新しい版があれば、メニューに更新する項目が出る。"""
+    """いま確かめて、結果をダイアログで伝える。新しい版があれば、その場で更新もできる。"""
     try:
         state = client.call(base, "/update/check", timeout=20)
     except Exception as failed:
         _log.warning("新しい版を確かめられなかった: %s", failed)
-        notify("新しい版を確かめられなかった（PyPI に届かない）")
+        alert("新しい版を確かめられなかった", "PyPI に届かない。ネットワークを確かめる")
         return
-    if state["available"]:
-        notify(f"新しい版 {state['latest']} が出ている。メニューから更新できる")
-    else:
-        notify(f"pairvoice は最新（{state['latest']}）")
+    if not state["available"]:
+        alert(f"pairvoice は最新（{state['latest']}）")
+        return
+    choice = alert(
+        f"新しい版 {state['latest']} が出ている",
+        buttons=("更新する", "変更点を見る", "あとで"),
+    )
+    if choice == "更新する":
+        update()
+    elif choice == "変更点を見る":
+        open_release_notes()
 
 
 def update() -> None:
@@ -339,12 +373,10 @@ def update() -> None:
         notes = updates.upgrade()
     except updates.UpgradeError as failed:
         _log.warning("更新に失敗した: %s", failed)
-        notify(f"更新できなかった: {failed}")
+        alert("更新できなかった", str(failed))
         return
-    notify(
-        "pairvoice を更新した。"
-        + (" ".join(notes) or "Claude Code を起動し直すと、プラグインの更新も効く")
-    )
+    detail = " ".join(notes) or "Claude Code を起動し直すと、プラグインの更新も効く。"
+    alert("pairvoice を更新した", f"{detail}\nOK で pairvoice を再起動する。")
     launchd.restart()
 
 
