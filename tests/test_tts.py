@@ -627,7 +627,7 @@ def test_speak_injects_the_profile_speaker_state_measured_once(config, tmp_path,
         measured.append(path)
         return mx.ones((1, 3, 2))
 
-    monkeypatch.setattr(backend, "_speaker_state", speaker_state)
+    monkeypatch.setattr(backend, "_reference_state", speaker_state)
 
     list(backend.speak_sentences("一つ目。二つ目。"))
 
@@ -902,7 +902,7 @@ def test_speak_uses_folded_tokens_only_from_the_same_model(
         measured.append(path.name)
         return mx.zeros((1, 1, 2))
 
-    monkeypatch.setattr(backend, "_speaker_state", speaker_state)
+    monkeypatch.setattr(backend, "_reference_state", speaker_state)
 
     backend.speak("テスト", profile_id=profile.id)
 
@@ -933,3 +933,34 @@ def test_speaker_tokens_encodes_samples_as_one_batch(no_ref_config, tmp_path, mo
     # ファイルから読むときと同じ (1, samples) の形で符号化し、(T, 次元) で返す
     assert seen == [(1, 4800)]
     assert tokens.shape == (4, 2)
+
+
+def test_reference_state_is_kept_next_to_the_reference_across_reloads(
+    no_ref_config, tmp_path, monkeypatch
+):
+    import mlx.core as mx
+
+    model = MixModel(FakeResult(np.zeros(480, dtype=np.float32)))
+    model._load_ref_waveform = lambda audio: audio
+    backend = make_backend(no_ref_config, model, tmp_path, monkeypatch)
+    profile = _profile(tmp_path, "声", "")
+    assert profile.reference is not None
+    encoded = []
+
+    def encode(waveform):
+        encoded.append(waveform)
+        return mx.full((1, 3, 2), 0.5, dtype=mx.float16)
+
+    monkeypatch.setattr(backend, "_encode_speaker", encode)
+    first = backend._reference_state(profile.reference)
+    # モデルを降ろして読み直しても（メモリの控えが消えても）、参照音声から作り直さない
+    backend.unload()
+    backend.load()
+    second = backend._reference_state(profile.reference)
+
+    assert encoded == [str(profile.reference)]
+    assert second.dtype == mx.float16
+    np.testing.assert_array_equal(np.asarray(second), np.asarray(first))
+    saved = list(profile.reference.parent.glob("*.speaker.npy"))
+    assert len(saved) == 1
+    assert "fake--tts" in saved[0].name

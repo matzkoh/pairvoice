@@ -35,18 +35,20 @@ SamplerConfig の既定 → モデル既定の順で決まる。None は「モ�
 from __future__ import annotations
 
 import dataclasses
+import importlib.metadata
+import logging
 import shutil
 import uuid
 from collections import OrderedDict
 from collections.abc import Callable, Iterator, Mapping, Sequence
-from contextlib import contextmanager, nullcontext
+from contextlib import contextmanager, nullcontext, suppress
 from dataclasses import dataclass
 from pathlib import Path
 
 import mlx.core as mx
 import numpy as np
 
-from . import hub
+from . import hub, speedups
 from .checker import split_sentences
 from .config import TTSConfig
 from .postprocess import cut_lead, normalize, trim
@@ -74,6 +76,15 @@ NON_FINAL_DURATION_SCALE = 0.9
 # よく崩す（ノーション → 山さん、コグニート → アブミート）。前置きの後の間から本文を
 # 始めさせると崩れない（文頭の語が合った率: 前置きなし 15/30、「ええ。」30/30、「はい。」27/30）
 LEAD_TEXT = "ええ。"
+# 話者の表現の控え（_reference_state）を読み書きするときに握りつぶす失敗。控えが無くても作り直せる
+_CACHE_ERRORS = (OSError, ValueError, RuntimeError)
+try:
+    _MLX_AUDIO_VERSION = importlib.metadata.version("mlx-audio")
+except importlib.metadata.PackageNotFoundError:
+    _MLX_AUDIO_VERSION = "unknown"
+
+
+_log = logging.getLogger(__name__)
 
 
 class AudioNotFound(Exception):
@@ -200,6 +211,11 @@ class MlxAudioBackend:
     def load(self) -> None:
         self._config.output_dir.mkdir(parents=True, exist_ok=True)
         self._loaded = self._load_model()
+        # 話者の表現の差し込みより先に入れる（差し込みが、まとめた encode_conditions_full を包む）
+        if not speedups.install(self._loaded):
+            _log.warning(
+                "合成を速める差し替えを入れられませんでした（mlx-audio の中身が想定と違う）"
+            )
         self._install_speaker_injection()
 
     def unload(self) -> None:
@@ -258,9 +274,39 @@ class MlxAudioBackend:
 
     def _speaker_state(self, path: Path) -> mx.array:
         """参照音声の話者の表現 (1, T, 768)。同じファイルは測り直さない。"""
-        return self._cached_state(
-            path, lambda: self._encode_speaker(self._require_loaded()._load_ref_waveform(str(path)))
-        )
+        return self._cached_state(path, lambda: self._encode_file(path))
+
+    def _encode_file(self, path: Path) -> mx.array:
+        return self._encode_speaker(self._require_loaded()._load_ref_waveform(str(path)))
+
+    def _reference_state(self, path: Path) -> mx.array:
+        """プロファイルの参照音声の話者の表現。ディスクにも取っておく。
+
+        参照音声から作ると1人 0.5〜0.6 秒かかり、メモリの控えはモデルを降ろすと消える。
+        控えはプロファイルのフォルダーに置き（プロファイルを消せば一緒に消える）、モデル・
+        mlx-audio のバージョン・参照音声の更新時刻で名前を分け、古い控えは作り直すときに消す。
+        保存と読み込みで値は変わらない。混ぜる声（mix）のもとは記録の音声なので取っておかない。
+        """
+
+        def make() -> mx.array:
+            prefix = f"{path.stem}.{str(self.model).replace('/', '--')}."
+            saved = path.parent / (
+                f"{prefix}{_MLX_AUDIO_VERSION}.{path.stat().st_mtime_ns}.speaker.npy"
+            )
+            if saved.is_file():
+                with suppress(*_CACHE_ERRORS):
+                    loaded = mx.load(str(saved))
+                    if isinstance(loaded, mx.array):
+                        return loaded
+            state = self._encode_file(path)
+            mx.eval(state)
+            for stale in path.parent.glob(f"{prefix}*.speaker.npy"):
+                stale.unlink(missing_ok=True)
+            with suppress(*_CACHE_ERRORS):
+                mx.save(str(saved), state)
+            return state
+
+        return self._cached_state(path, make)
 
     def _tokens_state(self, path: Path) -> mx.array:
         """畳み込んだ声の話者の表現 (1, T, 768)。.npy から読む。"""
@@ -419,7 +465,7 @@ class MlxAudioBackend:
             if tokens is not None:
                 speaker = self._tokens_state(tokens)
             elif ref_audio is not None:
-                speaker = self._speaker_state(ref_audio)
+                speaker = self._reference_state(ref_audio)
         return _Voice(ref_audio, resolved_caption, self.resolve_sampler(sampler), speaker)
 
     def save(self, samples: np.ndarray, sample_rate: int) -> SpeechResult:
