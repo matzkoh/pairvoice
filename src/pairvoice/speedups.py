@@ -1,10 +1,11 @@
 """Irodori-TTS の合成を、出す音を変えずに速める差し替え。mlx-audio 0.6.4 の中身に合わせてある。
 
-音の中身を決める DiT（拡散モデルのサンプラー）の計算には触らない。速めるのは、同じ計算を
+音の中身を決める DiT（拡散モデルのサンプラー）の式は変えない。速めるのは、同じ計算を
 省くか、同じ式を速い形で計算し直すところだけ:
 
 - 条件の符号化（encode_conditions_full）: 1回の生成の中で、継続時間の予測とサンプラーが
   同じ入力で2回呼ぶので、2回目は1回目の結果を返す
+- サンプラーの注意: 重みが0になるテキストの詰め物のキーを、値が変わらない単位で除く
 - 無音の位置探し（_find_silence_point）: 窓ごとに GPU と同期していたのを、numpy でまとめて
   測ってから、しきい値に近い窓だけ元の式で確かめる
 - DACVAE のデコード:
@@ -49,6 +50,7 @@ def install(model) -> bool:
 
     _drop_empty_caption(dit)
     _reuse_second_call(dit)
+    _trim_text_padding(dit)
     # 同じ答えを返す関数なので、型の見た目が違うだけ
     irodori_tts._find_silence_point = find_silence_point  # ty: ignore[invalid-assignment]
     _speed_up_decoder(dac.decoder, codec)
@@ -111,6 +113,96 @@ def _reuse_second_call(dit) -> None:
         return out
 
     dit.encode_conditions_full = encode
+
+
+def _trim_text_padding(dit) -> None:
+    """サンプラーの各ステップで、テキストの詰め物のキーをブロック単位で除く。
+
+    テキストは 256 トークンまで詰め物で埋めてあり、DiT の注意は毎ステップそのキーも相手にする。
+    マスクされたキーの重みはちょうど0になるが、キーの並びの途中にある（後ろに話者のキーが続く）。
+    MLX の注意はキーを _KEY_BLOCK 個ずつのブロックで足し合わせてから全体に足すので、ブロックの
+    組み合わせが変わると値が変わる。除く数をその倍数にし、最後の本物のテキストのキーを含む
+    ブロックより後ろだけを除けば、どのブロックの中身も重み0のキーの所しか変わらず、同じ値になる。
+    これは MLX のカーネルの作りに頼るので、読み込み時に同じ値になるかを確かめ、ならない MLX では
+    除かない。
+    """
+    if not hasattr(dit, "forward_with_conditions") or not _text_trim_is_exact(dit):
+        return
+    original = dit.forward_with_conditions
+
+    def forward(x_t, t, text_state, text_mask, *args, kv_text=None, **kwargs):
+        if kv_text is not None and (keep := _kept_text_keys(text_mask, x_t.shape[1])) is not None:
+            kv_text = [(k[:, :keep], v[:, :keep]) for k, v in kv_text]
+            text_state, text_mask = text_state[:, :keep], text_mask[:, :keep]
+        return original(x_t, t, text_state, text_mask, *args, kv_text=kv_text, **kwargs)
+
+    dit.forward_with_conditions = forward
+
+
+# MLX の注意（steel attention）がキーを足し合わせる単位。32 の倍数なら 16・8 単位の倍数でもある
+_KEY_BLOCK = 32
+
+
+def _kept_text_keys(text_mask: mx.array, self_keys: int) -> int | None:
+    """残すテキストのキーの数。除けなければ None。
+
+    キーは [自分 self_keys 個, テキスト, 話者...] の順に並ぶ。本物のテキストのキーを含む最後の
+    ブロックの終わりから、テキストの終わりまでのうち、_KEY_BLOCK の倍数だけ末尾から除く。
+    """
+    used = np.flatnonzero(np.asarray(text_mask).any(axis=0))
+    length = text_mask.shape[1]
+    last_used = self_keys + (int(used[-1]) + 1 if used.size else 0)
+    last_block_end = -(-last_used // _KEY_BLOCK) * _KEY_BLOCK
+    removable = max(self_keys + length - last_block_end, 0) // _KEY_BLOCK * _KEY_BLOCK
+    return length - removable if removable else None
+
+
+# 読み込み時の確かめに使う（自分のキーの数, 本物のテキストのキーの数）。最後の本物のキーと話者の
+# キーを同じブロックに入れてしまう除き方（境目を見ずに末尾から除く）では値が変わる組を含める
+_TRIM_CHECKS = [(s, u) for s in (37, 100, 179, 211) for u in (5, 21, 90)]
+
+
+def _text_trim_is_exact(dit) -> bool:
+    """この MLX で、テキストの詰め物のキーを除いても、DiT の注意がビット単位で同じ値を返すか。
+
+    本物の注意の層に乱数の入力を渡し、除く前と後を比べる（行列積・マスクの作り方も本物のまま）。
+    """
+    from mlx_audio.tts.models.irodori_tts.model import precompute_freqs_cis
+
+    attention = dit.blocks[0].attention
+    if not getattr(attention, "has_speaker_condition", False):
+        return False
+    heads, head_dim = attention.heads, attention.head_dim
+    text, speaker = 256, 178
+    rng = np.random.default_rng(0)
+
+    def normal(*shape, dtype=mx.float32):
+        return mx.array(rng.normal(size=shape).astype(np.float32)).astype(dtype)
+
+    def keys_and_values(count):
+        # 本物と同じく、テキストと話者のキーは float16 で控えてあり、自分のキーは float32 で作られる
+        shape = (3, count, heads, head_dim)
+        return normal(*shape, dtype=mx.float16), normal(*shape, dtype=mx.float16)
+
+    k, v = keys_and_values(text)
+    kv_speaker = keys_and_values(speaker)
+    speaker_mask = mx.ones((3, speaker), dtype=mx.bool_)
+    for self_keys, used in _TRIM_CHECKS:
+        mask = np.zeros((3, text), bool)
+        mask[:2, :used] = True  # 3行目はテキストを外した CFG の行
+        text_mask = mx.array(mask)
+        keep = _kept_text_keys(text_mask, self_keys)
+        if keep is None:
+            continue
+        x = normal(3, self_keys, heads * head_dim)
+        freqs = precompute_freqs_cis(head_dim, self_keys)
+        full = attention(x, text_mask, freqs, (k, v), kv_speaker, speaker_mask)
+        trimmed = attention(
+            x, text_mask[:, :keep], freqs, (k[:, :keep], v[:, :keep]), kv_speaker, speaker_mask
+        )
+        if not mx.array_equal(full, trimmed).item():
+            return False
+    return True
 
 
 def find_silence_point(

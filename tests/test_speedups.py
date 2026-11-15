@@ -170,3 +170,39 @@ def test_empty_caption_becomes_a_zero_length_sequence_of_the_same_type(installed
         assert out[5].shape == (1, 0)
     # 型を知るための最初の1回だけ caption を符号化する
     assert [call["caption_input_ids"] is None for call in dit.calls] == [False, True]
+
+
+@pytest.mark.parametrize(
+    ("self_keys", "used", "keep"),
+    # 本物のテキストのキーを含む最後のブロック（32 個ずつ）より後ろを、32 の倍数だけ除く
+    [(179, 21, 64), (37, 23, 32), (0, 32, 32), (0, 33, 64), (0, 0, 0), (37, 230, None)],
+)
+def test_text_padding_is_trimmed_after_the_last_used_key_block(self_keys, used, keep):
+    mask = np.zeros((3, 256), bool)
+    mask[0, :used] = True  # 他の行はテキストを外した CFG の行のように全部マスク
+
+    kept = speedups._kept_text_keys(mx.array(mask), self_keys)
+
+    assert kept == keep
+
+
+def _tiny_dit():
+    from mlx_audio.tts.models.irodori_tts.model import JointAttention
+
+    mx.random.seed(0)
+    attention = JointAttention(dim=128, heads=2, text_ctx_dim=8, speaker_ctx_dim=8, norm_eps=1e-6)
+    mx.eval(attention.parameters())
+    return type("DiT", (), {"blocks": [type("Block", (), {"attention": attention})()]})()
+
+
+def test_trimming_text_padding_is_checked_against_the_real_attention(monkeypatch):
+    dit = _tiny_dit()
+    assert speedups._text_trim_is_exact(dit)
+
+    # 最後の本物のキーと話者のキーを同じブロックに入れる除き方は値を変えるので、確かめが外す
+    def across_the_last_block(text_mask, self_keys):
+        used = int(np.flatnonzero(np.asarray(text_mask).any(axis=0))[-1]) + 1
+        return 256 - (256 - used) // 32 * 32
+
+    monkeypatch.setattr(speedups, "_kept_text_keys", across_the_last_block)
+    assert not speedups._text_trim_is_exact(dit)
