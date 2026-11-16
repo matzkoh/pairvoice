@@ -184,6 +184,10 @@ export function MixProfile({
           onPointerDown={() => {
             dragging.current = true
           }}
+          // 離したことが届かないと、以後キーで動かしても試聴を頼まなくなる
+          onPointerCancel={() => {
+            dragging.current = false
+          }}
           onPointerUp={(e) => {
             dragging.current = false
             move(e.currentTarget.valueAsNumber, true)
