@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# タグ（例: v0.21.0）のリリースノートを、前のタグからの feat / fix のコミットの件名で組む。
+# タグ（例: v0.21.0）のリリースノートを、前のタグからの feat / perf / fix のコミットの件名で組む。
 # release.yml が GitHub Releases に載せる。メニューバーの「変更点を見る」はその一覧を開く
 set -euo pipefail
 
@@ -18,4 +18,5 @@ section() {
 }
 
 section feat 新機能
+section perf 改善
 section fix 修正
