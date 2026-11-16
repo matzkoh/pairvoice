@@ -487,7 +487,11 @@ def test_speak_queues_the_audio():
 
     client.post("/speak", json={"text": "テスト"})
 
-    assert client.get("/health").json()["playback"] == {"playing": False, "waiting": 1}
+    assert client.get("/health").json()["playback"] == {
+        "playing": False,
+        "waiting": 1,
+        "streaming": True,
+    }
     assert client.post("/stop").json() == {"stopped": 1}
     assert engine.player.describe() == {"playing": False, "waiting": 0}
 

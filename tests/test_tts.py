@@ -1,9 +1,11 @@
 import dataclasses
+import types
 import wave
 
 import numpy as np
 import pytest
 
+from pairvoice import speedups
 from pairvoice.config import ProfileConfig, SamplerConfig, TTSConfig
 from pairvoice.profiles import (
     MixVoice,
@@ -55,9 +57,9 @@ class FakeModel:
         return iter([FakeResult(audio, sample_rate, self.result.peak_memory_usage)])
 
 
-def _tone(seconds, sample_rate):
+def _tone(seconds, sample_rate=48000, amplitude=0.3):
     t = np.arange(int(seconds * sample_rate)) / sample_rate
-    return (0.3 * np.sin(2 * np.pi * 200 * t)).astype(np.float32)
+    return (amplitude * np.sin(2 * np.pi * 200 * t)).astype(np.float32)
 
 
 # SamplerConfig が None 以外を既定に持つ項目
@@ -1028,3 +1030,199 @@ def test_mix_refuses_random_and_missing_voices(no_ref_config, tmp_path, monkeypa
         backend.mix_tokens([(MixVoice("ランダム"), 1.0)])
     with pytest.raises(ProfileNotFound):
         backend.mix_tokens([(MixVoice("無い声"), 1.0)])
+
+
+# --- 合成しながら鳴らす（speak_streaming）---
+
+# 本物のデコードが1チャンクで確定させる長さ（46 フレーム、1.84 秒）
+PIECE = 46 * 1920
+
+
+class StreamingModel(FakeModel):
+    """本物のデコードと同じく、返す波形を解けた順に聞き手（speedups.streaming）へ渡す。"""
+
+    def __init__(self, result, speaks_lead=True, raw=None):
+        super().__init__(result, speaks_lead)
+        self.dacvae = types.SimpleNamespace()
+        # 前置きの付け方を真似ず、この波形をそのまま返す
+        self.raw = raw
+        # 呼び手に渡った波形の列。generate() が返る時点で何個渡っていたかを覚える
+        self.emitted = []
+        self.emitted_before_return = []
+
+    def generate(self, text, **kwargs):
+        (result,) = super().generate(text, **kwargs)
+        if self.raw is not None:
+            result = FakeResult(self.raw)
+        audio = np.asarray(result.audio, dtype=np.float32)
+        sink = getattr(self.dacvae, speedups._SINK, None)
+        if sink is not None:
+            for start in range(0, len(audio), PIECE):
+                piece = audio[start : start + PIECE]
+                sink(piece, len(audio) - start - len(piece))
+        self.emitted_before_return.append(len(self.emitted))
+        return iter([result])
+
+
+def _saved(result):
+    with wave.open(str(result.path)) as reader:
+        pcm = np.frombuffer(reader.readframes(reader.getnframes()), dtype="<i2")
+    return pcm.astype(np.float32) / 32767
+
+
+def _streaming_backend(config, tmp_path, monkeypatch, body, **model_kwargs):
+    model = StreamingModel(FakeResult(body), **model_kwargs)
+    backend = make_backend(config, model, tmp_path, monkeypatch)
+    return backend, model
+
+
+def _speak_streaming(backend, model, text="テスト"):
+    model.emitted.clear()
+    result = backend.speak_streaming(text, None, None, None, model.emitted.append)
+    return result, list(model.emitted)
+
+
+def test_speak_streaming_waits_for_the_whole_wave_the_first_time_a_voice_speaks(
+    config, tmp_path, monkeypatch
+):
+    backend, model = _streaming_backend(config, tmp_path, monkeypatch, _tone(6.0))
+
+    result, emitted = _speak_streaming(backend, model)
+
+    # そろえる音量は全部を解き終わるまで決まらない。初めての声は wav と同じ波形を一度に渡す
+    assert model.emitted_before_return == [0]
+    assert len(emitted) == 1
+    np.testing.assert_allclose(emitted[0], _saved(result), atol=1 / 32767)
+
+
+def test_speak_streaming_hands_out_waves_while_the_rest_is_still_decoding(
+    config, tmp_path, monkeypatch
+):
+    backend, model = _streaming_backend(config, tmp_path, monkeypatch, _tone(6.0))
+    _speak_streaming(backend, model)
+
+    result, emitted = _speak_streaming(backend, model)
+
+    # 2回目からは、覚えた音量で、解けた所から渡す。generate() が返る前に全部渡っている
+    assert model.emitted_before_return[-1] == len(emitted) > 1
+    # 最初に渡るのは、前置きを切った後の本文の頭から最初のチャンクの終わりまで
+    assert len(emitted[0]) == PIECE - int(0.55 * 48000)
+    np.testing.assert_allclose(np.concatenate(emitted), _saved(result), atol=1 / 32767)
+
+
+def test_speak_streaming_saves_the_same_wav_as_speak(config, tmp_path, monkeypatch):
+    backend, model = _streaming_backend(config, tmp_path, monkeypatch, _tone(6.0))
+    whole = backend.speak("テスト")
+
+    streamed, emitted = _speak_streaming(backend, model)
+
+    assert len(emitted) > 1
+    assert streamed.path.read_bytes() == whole.path.read_bytes()
+    assert streamed.duration == whole.duration
+
+
+def test_speak_learns_the_level_so_that_the_next_reading_can_stream(config, tmp_path, monkeypatch):
+    backend, model = _streaming_backend(config, tmp_path, monkeypatch, _tone(6.0))
+    backend.speak("試聴")
+
+    _, emitted = _speak_streaming(backend, model)
+
+    assert model.emitted_before_return[-1] == len(emitted) > 1
+
+
+def test_speak_streaming_levels_with_what_the_voice_needed_before(config, tmp_path, monkeypatch):
+    backend, model = _streaming_backend(config, tmp_path, monkeypatch, _tone(6.0, amplitude=0.6))
+    loud, _ = _speak_streaming(backend, model)
+    model.result = FakeResult(_tone(6.0, amplitude=0.15))
+
+    quiet, emitted = _speak_streaming(backend, model)
+
+    # wav は発話ごとにそろえるので同じ大きさになる。渡す波形は、この声で前にそろえた倍率を
+    # そのまま掛けるので、小さく合成された発話は小さいまま（1/4）になる
+    assert np.abs(_saved(quiet)).max() == pytest.approx(np.abs(_saved(loud)).max(), rel=0.01)
+    ratio = np.abs(np.concatenate(emitted)).max() / np.abs(_saved(quiet)).max()
+    assert ratio == pytest.approx(0.25, rel=0.01)
+
+
+def test_speak_streaming_keeps_a_level_per_voice_and_caption(config, tmp_path, monkeypatch):
+    backend, model = _streaming_backend(config, tmp_path, monkeypatch, _tone(6.0))
+    _speak_streaming(backend, model)
+    model.emitted.clear()
+
+    # 同じ声でも、話し方（caption）が違えば大きさも違いうる。初めての組み合わせとして扱う
+    backend.speak_streaming("テスト", "ささやく。", None, None, model.emitted.append)
+
+    assert model.emitted_before_return[-1] == 0
+    assert len(model.emitted) == 1
+
+
+def test_speak_streaming_resynthesizes_without_lead_and_streams_that(config, tmp_path, monkeypatch):
+    backend, model = _streaming_backend(
+        config, tmp_path, monkeypatch, _tone(4.0), speaks_lead=False
+    )
+    _speak_streaming(backend, model)
+    model.calls.clear()
+
+    result, emitted = _speak_streaming(backend, model)
+
+    # 前置きの後に間が無ければ何も渡さずに作り直し、作り直した方を解けた所から渡す
+    assert [call["lead"] for call in model.calls] == [True, False]
+    assert model.emitted_before_return[-2:] == [0, len(emitted)]
+    assert len(emitted) > 1
+    np.testing.assert_allclose(np.concatenate(emitted), _saved(result), atol=1 / 32767)
+
+
+def test_speak_streaming_passes_the_whole_wave_when_the_decoder_does_not_stream(
+    config, tmp_path, monkeypatch
+):
+    # 差し替え（speedups.install）が入らないモデルでは、解けた順に受け取れない
+    model = FakeModel(FakeResult(_tone(6.0)))
+    backend = make_backend(config, model, tmp_path, monkeypatch)
+    backend.speak("試聴")
+    emitted = []
+
+    result = backend.speak_streaming("テスト", None, None, None, emitted.append)
+
+    assert len(emitted) == 1
+    np.testing.assert_allclose(emitted[0], _saved(result), atol=1 / 32767)
+
+
+def test_speak_streaming_does_not_resynthesize_once_it_has_started_playing(
+    config, tmp_path, monkeypatch
+):
+    # 小さな声の前置きと本文の後に、35dB より大きい音が来る。途中までの音では前置きを切れるが、
+    # 全体を見ると前置きも本文の頭も「無音」の扱いになり、前置きを切れない
+    quiet = 0.005
+    raw = np.concatenate(
+        [
+            _tone(0.3, amplitude=quiet),
+            np.zeros(int(0.3 * 48000), np.float32),
+            _tone(3.4, amplitude=quiet),
+            _tone(2.0, amplitude=0.9),
+        ]
+    )
+    backend, model = _streaming_backend(config, tmp_path, monkeypatch, _tone(6.0))
+    _speak_streaming(backend, model)
+    model.raw = raw
+    model.calls.clear()
+
+    result, emitted = _speak_streaming(backend, model)
+
+    # 鳴らし始めた後では作り直さない（作り直すと、鳴らした音と別の読み上げが残る）
+    assert [call["lead"] for call in model.calls] == [True]
+    assert model.emitted_before_return[-1] == len(emitted) > 1
+    assert result.duration > 0
+
+
+def test_backend_reports_the_sample_rate_of_the_loaded_model(config, tmp_path, monkeypatch):
+    class Model24k(FakeModel):
+        sample_rate = 24000
+
+    model = Model24k(FakeResult(np.zeros(480, dtype=np.float32)))
+    backend = MlxAudioBackend(config, data_dir=tmp_path)
+    assert backend.sample_rate == 48000
+
+    monkeypatch.setattr(backend, "_load_model", lambda: model)
+    backend.load()
+
+    assert backend.sample_rate == 24000

@@ -14,6 +14,11 @@
 頭の形を測ったデータ（HRTF）は使わず、遠い側の耳を遅らせ（最大 0.63ms）、小さくし、
 こもらせる（頭の陰で高い音が届かない）だけで左右を作る。近さは低音（近接効果）と
 左右の差の大きさで出す。
+
+合成しながら鳴らすとき（player.Stream）は、wav ではなく届いた波形に順に掛ける（OutsideStream）。
+全体のピークは鳴らし始める時点で分からないので、ピークをそろえる代わりに決まった倍率を掛け、
+はみ出す山だけを鳴らす側が丸める（soft_clip）。耳元で動かすのは通る道を全体の長さから
+決めるので、合成を待ってから鳴らす。
 """
 
 from __future__ import annotations
@@ -136,6 +141,61 @@ def room(rate: int) -> np.ndarray:
 def outside(samples: np.ndarray, rate: int) -> np.ndarray:
     """モノラルを、正面の少し離れたところで鳴る (frames + 響きの長さ - 1, 2) の2ch にする。"""
     return _normalize(fftconvolve(samples[:, None], room(rate), axes=0))
+
+
+# --- 合成しながら鳴らす ---
+# 響きを足した後に掛ける倍率。outside はピークを PEAK にそろえるが、そろえる前のピークは
+# 発話ごとに違う（363 本で -2.7〜+3.7dBFS）。中央値でいまの鳴らし方と同じ音量になる値にしてある
+OUTSIDE_STREAM_DB = -2.0
+# これを超える山を、1 を超えないように丸める。上の倍率で超えるのは全サンプルの 0.07% 以下
+SOFT_KNEE = 0.9
+
+
+def soft_clip(x: np.ndarray) -> np.ndarray:
+    """SOFT_KNEE までの音はそのまま、それを超える山を 1 の手前へなめらかに丸める。"""
+    over = np.abs(x) > SOFT_KNEE
+    if not over.any():
+        return x
+    loud = x[over]
+    headroom = 1.0 - SOFT_KNEE
+    rounded = x.copy()
+    rounded[over] = np.sign(loud) * (
+        SOFT_KNEE + headroom * np.tanh((np.abs(loud) - SOFT_KNEE) / headroom)
+    )
+    return rounded
+
+
+class OutsideStream:
+    """outside の響きを、届いた波形に順に掛ける。
+
+    響きは掛けた波形より後ろに伸びるので、はみ出した分を次に届く波形へ足す。全部をつなぐと、
+    全体に一度に掛けたのと同じ響きになる。
+    """
+
+    def __init__(self, rate: int) -> None:
+        self._room = room(rate) * 10 ** (OUTSIDE_STREAM_DB / 20)
+        self._tail = np.zeros((len(self._room) - 1, 2))
+
+    def push(self, samples: np.ndarray) -> np.ndarray:
+        """モノラルを、同じ長さの2ch にする。"""
+        wet = fftconvolve(np.asarray(samples, np.float64)[:, None], self._room, axes=0)
+        wet[: len(self._tail)] += self._tail
+        # 写しにして、掛けた波形の分まで次に届くときまで抱えない
+        self._tail = wet[len(samples) :].copy()
+        return wet[: len(samples)].astype(np.float32)
+
+    def flush(self) -> np.ndarray:
+        """最後の波形より後ろに伸びた響き。"""
+        tail, self._tail = self._tail, np.zeros_like(self._tail)
+        return tail.astype(np.float32)
+
+
+# 合成しながら鳴らせる鳴らし方と、届いた波形に掛ける加工（None は加工なし）。
+# ここに無い鳴らし方（orbit）は、合成を待ってから PLACEMENTS で鳴らす
+STREAM_SHAPERS: dict[str, Callable[[int], OutsideStream] | None] = {
+    "outside": OutsideStream,
+    "off": None,
+}
 
 
 def path(frames: int, rate: int, rng: np.random.Generator) -> tuple[np.ndarray, np.ndarray]:

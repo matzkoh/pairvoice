@@ -121,6 +121,68 @@ def test_decode_matches_the_original_without_silence(installed):
     np.testing.assert_allclose(after, before, atol=1e-5)
 
 
+def _streamed(model, dac, encoded):
+    pieces = []
+    with speedups.streaming(model, lambda wave, remaining: pieces.append((wave, remaining))):
+        whole = np.asarray(dac.decode(encoded, chunk_size=50))[0, :, 0]
+    return pieces, whole
+
+
+def test_streaming_hands_over_the_same_wave_chunk_by_chunk(installed):
+    model, dac = installed
+    rng = np.random.default_rng(3)
+    encoded = mx.array(rng.normal(size=(1, 6, 130)).astype(np.float32))
+    speedups.install(model)
+
+    pieces, whole = _streamed(model, dac, encoded)
+
+    # 130 フレームは 50 フレームずつ 4 フレーム重ねて 3 チャンク。最後以外は重ねる所を次まで持ち越す
+    hop = dac.hop_length
+    assert [len(wave) for wave, _ in pieces] == [46 * hop, 46 * hop, 38 * hop]
+    assert [remaining for _, remaining in pieces] == [84 * hop, 38 * hop, 0]
+    np.testing.assert_array_equal(np.concatenate([wave for wave, _ in pieces]), whole)
+
+
+def test_streaming_stops_where_generate_cuts_the_silence(installed):
+    model, dac = installed
+    latent = _latent_with_silent_tail(130, 70)
+    encoded = mx.transpose(latent[None], (0, 2, 1))
+    speedups.install(model)
+    kept = ORIGINAL_SILENCE_POINT(latent) * dac.hop_length
+
+    pieces, whole = _streamed(model, dac, encoded)
+
+    streamed = np.concatenate([wave for wave, _ in pieces])
+    assert len(streamed) == kept
+    assert pieces[-1][1] == 0
+    np.testing.assert_array_equal(streamed, whole[:kept])
+
+
+def test_streaming_a_single_chunk_hands_over_everything_at_once(installed):
+    model, dac = installed
+    rng = np.random.default_rng(4)
+    encoded = mx.array(rng.normal(size=(1, 6, 30)).astype(np.float32))
+    speedups.install(model)
+
+    pieces, whole = _streamed(model, dac, encoded)
+
+    assert [remaining for _, remaining in pieces] == [0]
+    np.testing.assert_array_equal(pieces[0][0], whole)
+
+
+def test_decode_does_not_hand_over_outside_streaming(installed):
+    model, dac = installed
+    rng = np.random.default_rng(5)
+    encoded = mx.array(rng.normal(size=(1, 6, 130)).astype(np.float32))
+    speedups.install(model)
+    pieces, _ = _streamed(model, dac, encoded)
+    seen = len(pieces)
+
+    dac.decode(encoded, chunk_size=50)
+
+    assert len(pieces) == seen
+
+
 def test_encode_conditions_full_runs_once_per_generation(installed):
     model, _ = installed
     dit = model.model

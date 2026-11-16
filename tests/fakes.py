@@ -64,6 +64,14 @@ async def gather_results(coroutines):
     return await asyncio.gather(*coroutines, return_exceptions=True)
 
 
+async def wait_until(condition, attempts=500):
+    for _ in range(attempts):
+        if condition():
+            return
+        await asyncio.sleep(0.002)
+    raise AssertionError("条件が満たされないまま時間切れになりました")
+
+
 class FakeProbe:
     """AudioProbe の代わり。属性を書き換えると次の sample() から反映される。"""
 
@@ -119,3 +127,32 @@ class FakeCurate(FakeBackend):
     def dereverb(self, chunk):
         self.dereverb_calls += 1
         return chunk * 0.999
+
+
+class InstantOutput:
+    """player.Output の代わり。積んだ波形を、鳴らし始めた瞬間に鳴らし終える（音は出さない）。"""
+
+    def __init__(self, sample_rate=48000):
+        self.sample_rate = sample_rate
+        self.scheduled = []
+        self.started = False
+        self.stopped = False
+        self.volumes = []
+
+    def schedule(self, pcm):
+        self.scheduled.append(pcm)
+
+    def play(self):
+        self.started = True
+
+    def frames_played(self):
+        return sum(len(pcm) for pcm in self.scheduled) if self.started else 0
+
+    def running(self):
+        return not self.stopped
+
+    def set_volume(self, volume):
+        self.volumes.append(volume)
+
+    def stop(self):
+        self.stopped = True

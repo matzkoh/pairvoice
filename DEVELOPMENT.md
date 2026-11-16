@@ -104,13 +104,14 @@ pairvoice eval --model mlx-community/<モデル>       # 別のモデルをこ�
 | `llm.state` / `tts.state` | `unloaded` / `downloading` / `loading` / `loaded` / `failed` / `misconfigured` |
 | `tts.profile` | 使用中の声のプロファイル（まだ一度も読み上げていなければ `null`） |
 | `mute` | ミュート中か、その理由（`manual` / `microphone` / `audio_output`）と期限 |
-| `playback` | 鳴っているか（`playing`）と、順番待ちの数（`waiting`） |
+| `playback` | 鳴っているか（`playing`）、順番待ちの数（`waiting`）、いまの設定で合成しながら鳴らすか（`streaming`） |
 | `dropped_recent` | 直近で後続に追い越されて捨てた要約の数。3件以上ならキューが詰まっている |
 | `config_stale` | 設定ファイルが変わったのに当てられていない（書き間違いで読めない、または再起動待ち。理由はログ） |
 | `version` / `plugin` | 常駐サーバーのバージョンと、最後に来たフックが名乗ったバージョン（`mismatch` なら食い違い。0.6.0 までのフックは名乗らないので、古い道筋を叩いたことで見分ける） |
 
 ログは、常駐サーバーが `~/Library/Logs/pairvoice.log`、フックが `~/Library/Logs/speak-summary.log`。
 常駐サーバーのログは `serve --log-file` が 10MB × 3世代で回しながら書き、成功した `/api/health` は書かない。
+合成しながら鳴らした読み上げは、1件ごとに「最初の波形まで」と「合成の完了まで」の秒数を書く。2つが同じなら、その読み上げは合成し終わってから鳴っている。
 メニューバーの警告は `~/Library/Logs/pairvoice-menubar.log` に同じく回しながら書く。
 logging を通らない出力（落ちたときの Traceback、ネイティブ層の出力）は、launchd が `~/Library/Logs/pairvoice.stderr.log` に書く。
 フックのログの `SKIP (...)` の理由は [plugin/README.md](plugin/README.md) にまとめてある。

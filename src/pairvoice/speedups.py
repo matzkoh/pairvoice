@@ -18,13 +18,17 @@
 
 転置畳み込みと snake は浮動小数点の足し合わせの順が変わるので、デコードした波形は 1e-6 程度
 ずれる（16bit の wav で高々 1 LSB）。それ以外の差し替えはビット単位で同じ値を返す。
+
+デコードはチャンク（2秒）ごとに進むので、解けた波形を解けた順に渡す口（streaming）も
+ここに置く。全部を解き終わる前に鳴らし始めるのに使う。渡す値は generate() が返す波形と同じ。
 """
 
 from __future__ import annotations
 
 import functools
 import types
-from collections.abc import Callable
+from collections.abc import Callable, Generator
+from contextlib import contextmanager
 
 import mlx.core as mx
 import numpy as np
@@ -389,50 +393,98 @@ def _decode_chunked(self, encoded_frames: mx.array, chunk_size: int, overlap: in
     違うのは、チャンクの間で GPU のキャッシュを捨てないことと、無音として切り捨てられる
     位置より先のチャンクを解かないこと。打ち切ったチャンクの末尾（次のチャンクと重ねる所）は
     元と値が違うが、そこは generate() が必ず切り捨てる位置より後ろにある。
+
+    つなぐのは最後にまとめてではなく、チャンクを解くたびに行う（計算は同じ）。前のチャンクと
+    重ねた所までは値が確定するので、聞き手（streaming）がいれば解けた順に渡す。
     """
     _, _, total_frames = encoded_frames.shape
-    cut = silence_upper_bound(mx.transpose(encoded_frames[0], (1, 0)))
+    latent = mx.transpose(encoded_frames[0], (1, 0))
+    cut = silence_upper_bound(latent)
     stop = total_frames if cut is None else cut
+    emit = _emitter(self, latent)
 
     encoded_frames = mx.transpose(encoded_frames, (0, 2, 1))
     overlap_samples = overlap * self.hop_length
+    fade_in = mx.linspace(0.0, 1.0, overlap_samples).reshape(1, -1, 1)
+    fade_out = mx.linspace(1.0, 0.0, overlap_samples).reshape(1, -1, 1)
 
-    chunks = []
+    parts = []
+    # 前のチャンクの末尾。次のチャンクの頭と重ねるまで値が決まらない
+    tail = None
     start = 0
-    while start < total_frames:
+    while True:
         end = min(start + chunk_size, total_frames)
         emb = self.quantizer_out_proj(encoded_frames[:, start:end, :])
         out = self.decoder(emb)
         out = self.decoder.snake_out(out)
         out = mx.tanh(self.decoder.conv_out(out))
         mx.eval(out)
-        chunks.append(out)
-        if end >= total_frames:
-            break
         start = end - overlap
-        if start >= stop:
+        last = end >= total_frames or start >= stop
+
+        settled = []
+        if tail is not None:
+            settled.append(tail + out[:, :overlap_samples, :] * fade_in)
+            out = out[:, overlap_samples:, :]
+        if last:
+            settled.append(out)
+        else:
+            keep = out.shape[1] - overlap_samples
+            settled.append(out[:, :keep, :])
+            tail = out[:, keep:, :] * fade_out
+        parts += settled
+        if emit is not None:
+            emit(settled)
+        if last:
             break
 
-    if len(chunks) == 1:
-        return chunks[0]
-    return _crossfade(chunks, overlap_samples)
+    return parts[0] if len(parts) == 1 else mx.concatenate(parts, axis=1)
 
 
-def _crossfade(chunks: list[mx.array], overlap_samples: int) -> mx.array:
-    """mlx-audio の DACVAE._decode_chunked のつなぎ方をそのまま写したもの。"""
-    fade_in = mx.linspace(0.0, 1.0, overlap_samples).reshape(1, -1, 1)
-    fade_out = mx.linspace(1.0, 0.0, overlap_samples).reshape(1, -1, 1)
-    result_parts = []
-    for i, chunk in enumerate(chunks):
-        if i == 0:
-            fade_out_start = chunk.shape[1] - overlap_samples
-            result_parts.append(chunk[:, :fade_out_start, :])
-            result_parts.append(chunk[:, fade_out_start:, :] * fade_out)
-        elif i == len(chunks) - 1:
-            result_parts[-1] = result_parts[-1] + chunk[:, :overlap_samples, :] * fade_in
-            result_parts.append(chunk[:, overlap_samples:, :])
-        else:
-            result_parts[-1] = result_parts[-1] + chunk[:, :overlap_samples, :] * fade_in
-            result_parts.append(chunk[:, overlap_samples:-overlap_samples, :])
-            result_parts.append(chunk[:, -overlap_samples:, :] * fade_out)
-    return mx.concatenate(result_parts, axis=1)
+# 解けた波形の受け取り手。(波形, このあと届くサンプル数) で、解けた順に呼ばれる
+DecodedSink = Callable[[np.ndarray, int], None]
+# 受け取り手を置く DACVAE の属性。合成の間だけ立てる
+_SINK = "_pairvoice_decoded_sink"
+
+
+@contextmanager
+def streaming(model, sink: DecodedSink) -> Generator[None]:
+    """この中の generate() は、返す波形と同じものを、解けた順に sink にも渡す。
+
+    差し替え（install）が入っていないモデルでは sink は呼ばれない。
+    """
+    dac = getattr(model, "dacvae", None)
+    if dac is None:
+        yield
+        return
+    object.__setattr__(dac, _SINK, sink)
+    try:
+        yield
+    finally:
+        object.__setattr__(dac, _SINK, None)
+
+
+def _emitter(dac, latent: mx.array) -> Callable[[list[mx.array]], None] | None:
+    """確定した波形を聞き手に渡す関数。聞き手がいなければ None。
+
+    渡すのは generate() が残す範囲（見積もった長さと、無音として切る位置の手前）だけ。
+    切る位置は潜在表現で決まるので、解く前に全体の長さが分かる。
+    """
+    sink = getattr(dac, _SINK, None)
+    if sink is None:
+        return None
+    frames = int(latent.shape[0])
+    silence = find_silence_point(latent)
+    # 先頭の窓が無音なら generate() は切り捨てずに全部を使う
+    remaining = (min(frames, silence) if silence > 0 else frames) * dac.hop_length
+
+    def emit(parts: list[mx.array]) -> None:
+        nonlocal remaining
+        if remaining <= 0:
+            return
+        wave = np.concatenate([np.asarray(part[0, :, 0], dtype=np.float32) for part in parts])
+        wave = wave[:remaining]
+        remaining -= len(wave)
+        sink(wave, remaining)
+
+    return emit

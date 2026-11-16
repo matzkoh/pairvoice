@@ -481,7 +481,8 @@ def create_app(engine: Engine) -> FastAPI:
         responses={409: {"model": MutedResponse, "description": "ミュート中"}, **_SYNTHESIS_ERRORS},
     )
     async def speak(request: Annotated[SpeakRequest, Body(openapi_examples=_SPEAK_EXAMPLES)]):
-        """再生の列に積んだら返り、鳴り終わるのは待たない。積んだあとに入ったミュートでは鳴らない。"""
+        """合成が終わったら返り、鳴り終わるのは待たない。既定では合成しながら鳴らすので、返る前に鳴り始めている。
+        鳴らす直前に入ったミュートでは鳴らず、鳴っている間に入れば止まる。"""
         profile_id = request.voice
         if request.group is not None:
             # グループの声はここで決めて名指しする（合成のスレッドまで group を持ち込まない）

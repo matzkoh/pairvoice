@@ -377,7 +377,9 @@ class Engine:
         self._restart = restart
         # 当てられなかった設定ファイルの mtime。直るまで同じ版を読み直さない
         self._rejected_mtime: float | None = None
-        self.player = player or Player(config.playback, mute, prepare=self._spatialize)
+        self.player = player or Player(
+            config.playback, mute, prepare=self._spatialize, shape=self._stream_shaper
+        )
         self._clock = clock
         self._runner = Runner(clock=clock)
         self._llm = ManagedModel(
@@ -514,6 +516,21 @@ class Engine:
         place = spatial.PLACEMENTS.get(self._config.playback.spatial)
         return spatial.spatialize(path, place) if place else None
 
+    def _stream_shaper(self, sample_rate: int):
+        """合成しながら鳴らす波形に掛ける加工（_spatialize と同じ鳴らし方）。"""
+        shaper = spatial.STREAM_SHAPERS.get(self._config.playback.spatial)
+        return shaper(sample_rate) if shaper else None
+
+    def _streams(self) -> bool:
+        """合成しながら鳴らすか。文ごとに合成する設定と、全体の長さから音の動きを決める
+        鳴らし方（orbit）では、合成を待ってから鳴らす。"""
+        playback = self._config.playback
+        return (
+            playback.streaming
+            and not self._config.tts.split_sentences
+            and playback.spatial in spatial.STREAM_SHAPERS
+        )
+
     def reload_config(self) -> None:
         """設定ファイルが変わっていれば読み直して当てる。
 
@@ -567,16 +584,21 @@ class Engine:
         wait_download: bool = True,
         style: str | None = None,
     ):
-        """合成し、できた音から Player の列に積む。全部を積んだら、つないだ1本を返す。
+        """合成して鳴らし、合成した wav を返す。鳴り終わるのは待たない。
 
-        文ごとに合成する設定なら、最初の文を鳴らしている間に次の文を合成するので、全文の
-        合成を待たずに鳴り始める。鳴り終わるのは待たない。
+        既定では合成しながら鳴らす。全文を1回で合成し、波形に解けた所から Player に渡すので、
+        全部を解き終わる前に鳴り始める。文ごとに合成する設定なら、できた文から Player の列に
+        積み、全部を積んだら、つないだ1本を返す。
         """
         # 合成を待っている間に「止める」が押されたら、出来上がっても鳴らさない
         epoch = self.player.epoch
 
         async def work():
             await self._tts.ensure_loaded(wait_download=wait_download)
+            if self._streams():
+                return await self._speak_streaming(
+                    text, caption, profile_id, style, bypass_mute=bypass_mute, epoch=epoch
+                )
             sentences = self._tts_backend.speak_sentences(text, caption, profile_id, style)
             parts = []
             # 文の間に他の合成を挟まないよう、全文を1つの仕事で合成する
@@ -592,6 +614,48 @@ class Engine:
             droppable=False,
             download=self._tts if wait_download else None,
         )
+
+    async def _speak_streaming(
+        self,
+        text: str,
+        caption: str | None,
+        profile_id: str | None,
+        style: str | None,
+        *,
+        bypass_mute: bool,
+        epoch: int,
+    ):
+        """合成しながら鳴らす。合成の側は波形を渡すだけで、鳴らす側を待たない。"""
+        stream = self.player.open_stream(
+            self._tts_backend.sample_rate, bypass_mute=bypass_mute, epoch=epoch
+        )
+        started = self._clock()
+        first_wave_at: float | None = None
+
+        def feed(samples: np.ndarray) -> None:
+            nonlocal first_wave_at
+            if first_wave_at is None:
+                first_wave_at = self._clock()
+            stream.feed(samples)
+
+        try:
+            result = await on_mlx_thread(
+                self._tts_backend.speak_streaming, text, caption, profile_id, style, feed
+            )
+        except BaseException:
+            # 合成の失敗も、待っている側の取り消しも、途中まで鳴らした音を止める
+            stream.abort()
+            raise
+        stream.close(result.path)
+        self._tts.touch()
+        # 2つが同じなら、全部を合成し終わってから鳴らしている（初めての声・短い文・切り方が決まらない）
+        finished = self._clock()
+        _log.info(
+            "合成しながら鳴らしました: 最初の波形まで %.2f 秒、合成の完了まで %.2f 秒",
+            (finished if first_wave_at is None else first_wave_at) - started,
+            finished - started,
+        )
+        return result
 
     async def _measure(self, model: ManagedModel, fn: Callable, *args):
         """音を出さずにモデルで測る仕事を1つ列に並べる。音は出さないのでミュートは効かせない。"""
@@ -748,7 +812,8 @@ class Engine:
             "curate": self._describe(self._curate),
             "mute": mute_state.describe(),
             "queue": {"running": self._runner.running, "waiting": self._runner.waiting},
-            "playback": self.player.describe(),
+            # streaming は、いまの設定で合成しながら鳴らすか
+            "playback": {**self.player.describe(), "streaming": self._streams()},
             "dropped_recent": self._runner.dropped_recent(),
             # 常駐サーバーが読んだ設定ファイル。launchd に --config で渡すと既定の場所と違う
             "config_path": str(self._config.source_path) if self._config.source_path else None,

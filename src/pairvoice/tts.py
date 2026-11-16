@@ -27,9 +27,13 @@ SamplerConfig の既定 → モデル既定の順で決まる。None は「モ�
 プロファイルの声も、参照音声から作った表現を取っておいて同じ口から差し込む（参照音声の
 符号化を合成のたびにやり直さない）。
 
-読み上げ（speak_sentences）は既定で全文を1回で合成する。設定の split_sentences を入れると
-文ごとに合成し、できた文から返す。呼び手は最初の文を鳴らしている間に次の文を合成できるので、
-全文の合成を待たずに鳴り始める。
+読み上げは全文を1回で合成する。合成しながら鳴らすとき（speak_streaming）は、波形を
+解けた順に呼び手へ渡す。モデルは全文の潜在表現を一度に作ってから、2秒ずつ波形に解くので、
+解き終わった所から鳴らせる。渡す音は一括と同じ切り方にし、音量は声ごとに覚えた倍率でそろえる
+（1件ごとの倍率は、全部を解き終わるまで決まらない）。
+
+設定の split_sentences を入れると、文ごとに合成してできた文から返す（speak_sentences）。
+鳴り始めは早くなるが、文の間の抑揚がつながらない。
 """
 
 from __future__ import annotations
@@ -39,7 +43,7 @@ import importlib.metadata
 import logging
 import shutil
 import uuid
-from collections import OrderedDict
+from collections import OrderedDict, deque
 from collections.abc import Callable, Iterator, Mapping, Sequence
 from contextlib import contextmanager, nullcontext, suppress
 from dataclasses import dataclass
@@ -51,7 +55,7 @@ import numpy as np
 from . import hub, speedups
 from .checker import split_sentences
 from .config import TTSConfig
-from .postprocess import cut_lead, normalize, trim
+from .postprocess import StreamCut, cut_lead, level_gain_db, normalize, trim
 from .profiles import (
     PROFILES_DIRNAME,
     MixVoice,
@@ -83,6 +87,10 @@ NON_FINAL_DURATION_SCALE = 0.9
 # よく崩す（ノーション → 山さん、コグニート → アブミート）。前置きの後の間から本文を
 # 始めさせると崩れない（文頭の語が合った率: 前置きなし 15/30、「ええ。」30/30、「はい。」27/30）
 LEAD_TEXT = "ええ。"
+# 声ごとに覚えておく音量の倍率の数と、覚えておく声の数。合成しながら鳴らすときは、
+# 直近の倍率の中央値でそろえる（同じ声なら発話ごとの差は ±0.7dB に収まる）
+LEVEL_MEMORY = 8
+LEVEL_VOICES = 64
 # 話者の表現の控え（_reference_state）を読み書きするときに握りつぶす失敗。控えが無くても作り直せる
 _CACHE_ERRORS = (OSError, ValueError, RuntimeError)
 try:
@@ -124,6 +132,61 @@ class _Voice:
     sampler: Mapping[str, object]
     # 差し込む話者の表現。None なら ref_audio を mlx-audio に符号化させる
     speaker: mx.array | None = None
+    # 声のプロファイル。プロファイルの声でなければ None
+    profile_id: str | None = None
+
+
+def _scrubbed(samples: np.ndarray) -> np.ndarray:
+    # NaN が1つでも混ざると trim / normalize の計算が NaN になって素通しになる
+    return np.nan_to_num(samples, nan=0.0, posinf=0.0, neginf=0.0)
+
+
+class _Live:
+    """合成しながら鳴らす1回ぶんの合成。解けた波形から鳴らせる分を切り出し、emit に渡す。"""
+
+    def __init__(
+        self, emit: Callable[[np.ndarray], None], gain: float, sample_rate: int, *, lead: bool
+    ) -> None:
+        self._emit = emit
+        self._gain = np.float32(gain)
+        self._cutter = StreamCut(sample_rate, lead=lead)
+
+    def __call__(self, wave: np.ndarray, remaining: int) -> None:
+        piece = self._cutter.push(_scrubbed(wave), remaining)
+        if piece is not None:
+            self._emit(piece * self._gain)
+
+    @property
+    def cut(self) -> int | None:
+        """前置きを切った位置。全部を解き終わる前に鳴らし始めていなければ None。"""
+        return self._cutter.cut
+
+
+class _Levels:
+    """声ごとに、音量をそろえた倍率を覚えておく。
+
+    合成しながら鳴らすときは、その発話をそろえる倍率が全部を解き終わるまで分からないので、
+    同じ声と話し方（プロファイルと caption）で前にそろえた倍率の中央値を使う。
+    """
+
+    def __init__(self) -> None:
+        self._gains_db: OrderedDict[tuple[str, str], deque[float]] = OrderedDict()
+
+    def remember(self, voice: _Voice, gain_db: float) -> None:
+        if voice.profile_id is None:
+            return
+        key = (voice.profile_id, voice.caption)
+        self._gains_db.setdefault(key, deque(maxlen=LEVEL_MEMORY)).append(gain_db)
+        self._gains_db.move_to_end(key)
+        if len(self._gains_db) > LEVEL_VOICES:
+            self._gains_db.popitem(last=False)
+
+    def gain(self, voice: _Voice) -> float | None:
+        """この声でこれまでにそろえた倍率。まだ読んでいない声なら None。"""
+        if voice.profile_id is None:
+            return None
+        gains_db = self._gains_db.get((voice.profile_id, voice.caption))
+        return float(10 ** (np.median(gains_db) / 20)) if gains_db else None
 
 
 class MlxAudioBackend:
@@ -142,6 +205,8 @@ class MlxAudioBackend:
         self._injected_speaker = None
         self._speaker_injection_ready = False
         self._speaker_states: OrderedDict[tuple[Path, int], mx.array] = OrderedDict()
+        # モデルを降ろしても声の音量は変わらないので、unload では消さない
+        self._levels = _Levels()
 
     def configure(self, config: TTSConfig) -> None:
         """読み直した設定を当てる。モデル名と置き場所は変わらない（変わるなら再起動する）。"""
@@ -202,6 +267,11 @@ class MlxAudioBackend:
         if not ref_audio.is_file() or ref_audio.stat().st_size == 0:
             return "profile_missing"
         return None
+
+    @property
+    def sample_rate(self) -> int:
+        """合成する波形のサンプルレート。鳴らす側が、波形が届く前に出力を用意するのに使う。"""
+        return int(getattr(self._loaded, "sample_rate", DEFAULT_SAMPLE_RATE))
 
     def is_downloaded(self) -> bool:
         return hub.is_downloaded(self.model)
@@ -434,6 +504,23 @@ class MlxAudioBackend:
         voice = self._voice(caption, sampler, design, profile_id, mix, style)
         return self._save(*self._generate(self._read(text), voice))
 
+    def speak_streaming(
+        self,
+        text: str,
+        caption: str | None,
+        profile_id: str | None,
+        style: str | None,
+        emit: Callable[[np.ndarray], None],
+    ) -> SpeechResult:
+        """合成しながら、鳴らせる波形を解けた順に emit へ渡す。引数は speak() と同じ意味。
+
+        保存する wav は speak() と同じ。emit に渡す波形は、頭と末尾を同じ所で切り、音量を
+        この声で覚えた倍率でそろえたもの。初めての声と、切り方が全部を解くまで決まらなかった
+        ときは、解き終わってから wav と同じ波形を一度に渡す。
+        """
+        voice = self._voice(caption=caption, profile_id=profile_id, style=style)
+        return self._save(*self._generate(self._read(text), voice, emit))
+
     def speak_sentences(
         self,
         text: str,
@@ -510,7 +597,10 @@ class MlxAudioBackend:
         speaker = None
         if self._speaker_injection_ready and profile is not None:
             speaker = self._profile_state(profile)
-        return _Voice(ref_audio, resolved_caption, self.resolve_sampler(sampler), speaker)
+        profile_id = profile.id if profile is not None else None
+        return _Voice(
+            ref_audio, resolved_caption, self.resolve_sampler(sampler), speaker, profile_id
+        )
 
     def save(self, samples: np.ndarray, sample_rate: int) -> SpeechResult:
         """合成していない音（素材から組んだ参照音声など）を、合成した wav と同じ所に置く。"""
@@ -542,20 +632,55 @@ class MlxAudioBackend:
             raise RuntimeError("tts backend is not loaded")
         return self._loaded
 
-    def _generate(self, text: str, voice: _Voice) -> tuple[np.ndarray, int, float | None]:
-        samples, sample_rate, peak = self._generate_raw(LEAD_TEXT + text, voice)
+    def _generate(
+        self, text: str, voice: _Voice, emit: Callable[[np.ndarray], None] | None = None
+    ) -> tuple[np.ndarray, int, float | None]:
+        """emit があれば、鳴らせる波形を解けた順に渡す。返す音は emit の有無で変わらない。
+
+        解けた順に渡せるのは、その声でそろえた音量を覚えていて、頭の切り方が全部を解く前に
+        決まったとき。そうでなければ、解き終わってから、返す音と同じ波形を一度に渡す。
+        """
+        gain = None if emit is None else self._levels.gain(voice)
+
+        def listener(*, lead: bool) -> _Live | None:
+            if emit is None or gain is None:
+                return None
+            return _Live(emit, gain, self.sample_rate, lead=lead)
+
+        live = listener(lead=True)
+        samples, sample_rate, peak = self._generate_raw(LEAD_TEXT + text, voice, live)
         body = cut_lead(samples, sample_rate)
+        if body is None and live is not None and live.cut is not None:
+            # 鳴らし始めた後で、全体を見ると前置きを切れなかった（後からずっと大きい音が来た）。
+            # 作り直すと鳴らした音と別の読み上げが残るので、鳴らし始めに切った位置から後ろを使う
+            body = samples[live.cut :]
         if body is None:
             # 前置きの後に間が無いと、前置きを残さずには切れない
-            samples, sample_rate, peak = self._generate_raw(text, voice)
+            live = listener(lead=False)
+            samples, sample_rate, peak = self._generate_raw(text, voice, live)
             body = samples
-        return normalize(trim(body, sample_rate), sample_rate), sample_rate, peak
+        final = self._leveled(voice, trim(body, sample_rate), sample_rate)
+        if emit is not None and (live is None or live.cut is None):
+            emit(final)
+        return final, sample_rate, peak
 
-    def _generate_raw(self, text: str, voice: _Voice) -> tuple[np.ndarray, int, float | None]:
+    def _leveled(self, voice: _Voice, trimmed: np.ndarray, sample_rate: int) -> np.ndarray:
+        """音量をそろえる。そろえた倍率は声ごとに覚えておく。"""
+        gain_db = level_gain_db(trimmed, sample_rate)
+        if gain_db is not None:
+            self._levels.remember(voice, gain_db)
+        return normalize(trimmed, sample_rate)
+
+    def _generate_raw(
+        self, text: str, voice: _Voice, sink: speedups.DecodedSink | None = None
+    ) -> tuple[np.ndarray, int, float | None]:
+        """sink があれば、返す波形と同じものを、解けた順に sink にも渡す。"""
+        model = self._require_loaded()
         speaking = nullcontext() if voice.speaker is None else self._speaking_as(voice.speaker)
-        with speaking:
+        listening = nullcontext() if sink is None else speedups.streaming(model, sink)
+        with speaking, listening:
             results = list(
-                self._require_loaded().generate(
+                model.generate(
                     text,
                     ref_audio=str(voice.ref_audio) if voice.ref_audio is not None else None,
                     caption=voice.caption,
@@ -569,9 +694,7 @@ class MlxAudioBackend:
 
         result = results[0]
         sample_rate = int(getattr(result, "sample_rate", DEFAULT_SAMPLE_RATE))
-        samples = np.asarray(result.audio, dtype=np.float32).reshape(-1)
-        # NaN が1つでも混ざると trim / normalize の計算が NaN になって素通しになる
-        samples = np.nan_to_num(samples, nan=0.0, posinf=0.0, neginf=0.0)
+        samples = _scrubbed(np.asarray(result.audio, dtype=np.float32).reshape(-1))
         return samples, sample_rate, getattr(result, "peak_memory_usage", None)
 
     def _bootstrap(self) -> Profile:

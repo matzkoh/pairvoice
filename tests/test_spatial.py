@@ -93,3 +93,52 @@ def test_every_configurable_mode_has_a_placement():
     from pairvoice.config import Spatial
 
     assert set(spatial.PLACEMENTS) | {"off"} == set(typing.get_args(Spatial))
+
+
+# --- 合成しながら鳴らす ---
+
+
+def test_outside_stream_adds_the_same_room_as_the_whole_at_once():
+    from scipy.signal import fftconvolve
+
+    rate = 24000
+    rng = np.random.default_rng(0)
+    # 山が丸められない大きさにして、響きだけを比べる
+    samples = (0.05 * rng.standard_normal(rate)).astype(np.float32)
+    whole = fftconvolve(samples.astype(np.float64)[:, None], spatial.room(rate), axes=0)
+    whole *= 10 ** (spatial.OUTSIDE_STREAM_DB / 20)
+
+    stream = spatial.OutsideStream(rate)
+    # 響きの長さ（0.118 秒）より短い波形も混ぜる
+    pieces = [stream.push(piece) for piece in np.split(samples, [100, 1300, 1400, 9000])]
+    pieces.append(stream.flush())
+
+    assert [len(piece) for piece in pieces[:-1]] == [100, 1200, 100, 7600, rate - 9000]
+    assert all(piece.shape[1] == 2 and piece.dtype == np.float32 for piece in pieces)
+    np.testing.assert_allclose(np.concatenate(pieces), whole, atol=1e-6)
+
+
+def test_soft_clip_leaves_everything_below_the_knee_untouched():
+    x = np.linspace(-2.0, 2.0, 801)
+
+    y = spatial.soft_clip(x)
+
+    quiet = np.abs(x) <= spatial.SOFT_KNEE
+    np.testing.assert_array_equal(y[quiet], x[quiet])
+    assert np.all(np.abs(y) < 1.0)
+    # 大きさの順は変えない（丸めるだけで、折り返さない）
+    assert np.all(np.diff(y) > 0)
+
+
+def test_soft_clip_returns_quiet_audio_as_it_is():
+    x = np.linspace(-0.5, 0.5, 11, dtype=np.float32)
+
+    assert spatial.soft_clip(x) is x
+
+
+def test_only_placements_that_work_on_arriving_audio_can_stream():
+    # 耳元で動かすのは、通る道を全体の長さから決めるので、合成を待ってから鳴らす
+    assert set(spatial.STREAM_SHAPERS) == {"outside", "off"}
+    assert spatial.STREAM_SHAPERS["outside"] is spatial.OutsideStream
+    # そのまま鳴らすときは、何も掛けない
+    assert spatial.STREAM_SHAPERS["off"] is None

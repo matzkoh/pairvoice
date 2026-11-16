@@ -1,6 +1,6 @@
 import numpy as np
 
-from pairvoice.postprocess import cut_lead, normalize, trim
+from pairvoice.postprocess import StreamCut, cut_lead, normalize, trim
 
 SR = 1000
 
@@ -144,3 +144,131 @@ def test_cut_lead_does_not_cut_at_a_pause_inside_the_body():
     samples = _signal((1.6, 0.5), (0.3, 0.0), (1.0, 0.5))
 
     assert cut_lead(samples, SR) is None
+
+
+# --- 合成しながら鳴らす（StreamCut）---
+
+
+def _stream(samples, piece_seconds, *, lead):
+    """samples を piece_seconds ずつ StreamCut に足し、(切り出し役, 出てきた波形の列) を返す。"""
+    cutter = StreamCut(SR, lead=lead)
+    size = int(piece_seconds * SR)
+    released = []
+    for start in range(0, len(samples), size):
+        piece = samples[start : start + size]
+        released.append(cutter.push(piece, max(0, len(samples) - start - size)))
+    return cutter, released
+
+
+def _joined(released):
+    return np.concatenate([piece for piece in released if piece is not None])
+
+
+def _whole(samples):
+    """全体を見て、前置きを切り、頭と末尾のゴミを落とした波形。"""
+    body = cut_lead(samples, SR)
+    assert body is not None
+    return trim(body, SR)
+
+
+def test_stream_cut_hands_out_the_body_before_everything_arrives():
+    # 前置き、間、本文、間、末尾のゴミ
+    samples = _signal((0.3, 0.5), (0.3, 0.0), (4.0, 0.5), (0.3, 0.0), (0.2, 0.4))
+
+    cutter, released = _stream(samples, 1.0, lead=True)
+
+    # 最初の1秒で前置きの切り方が決まり、本文の頭から出し始める
+    assert cutter.cut == int(0.55 * SR)
+    assert len(released[0]) == int(0.45 * SR)
+    # 出した音をつなぐと、全体を見て切ったのと同じになる（末尾のゴミも落ちている）
+    np.testing.assert_array_equal(_joined(released), _whole(samples))
+
+
+def test_stream_cut_holds_the_tail_until_everything_arrives():
+    samples = _signal((0.3, 0.5), (0.3, 0.0), (4.0, 0.5), (0.3, 0.0), (0.2, 0.4))
+
+    _, released = _stream(samples, 1.0, lead=True)
+
+    # 末尾のゴミかどうかは全部届くまで分からないので、終わりの 1.5 秒は最後まで出さない
+    before_end = sum(len(piece) for piece in released[:-1] if piece is not None)
+    assert int(0.55 * SR) + before_end == len(samples) - int(1.5 * SR)
+    assert released[4] is None
+    assert released[-1] is not None
+
+
+def test_stream_cut_waits_while_the_cut_depends_on_how_loud_the_rest_gets():
+    # 前置きの後の小さな音は、いまの最大音量に比べれば「音がある」が、この先にもっと大きい音が
+    # 来れば無音の扱いになり、切る位置が変わる。どちらにも転びうるうちは出さない
+    quiet = 0.5 * 10 ** (-32 / 20)
+    samples = _signal((0.3, 0.5), (0.3, 0.0), (0.2, quiet), (0.2, 0.0), (4.0, 0.5))
+
+    cutter, released = _stream(samples, 1.0, lead=True)
+
+    assert cutter.cut is None
+    assert all(piece is None for piece in released)
+
+
+def test_stream_cut_decides_once_the_loud_part_has_arrived():
+    # 同じ小さな音でも、大きい本文がもう届いていれば、無音の扱いで決まる
+    quiet = 1.0 * 10 ** (-45 / 20)
+    samples = _signal((0.3, 0.5), (0.3, 0.0), (0.2, quiet), (0.2, 0.0), (4.0, 1.0))
+
+    cutter, released = _stream(samples, 1.5, lead=True)
+
+    assert cutter.cut == int(0.95 * SR)
+    np.testing.assert_array_equal(_joined(released), _whole(samples))
+
+
+def test_stream_cut_without_a_lead_drops_the_head_click_like_trim():
+    # 頭のプツッという音を落としたときは、trim と同じくフェードインする
+    samples = _signal((0.05, 0.3), (0.3, 0.0), (4.0, 0.5))
+
+    cutter, released = _stream(samples, 1.0, lead=False)
+
+    assert cutter.cut == 0
+    np.testing.assert_array_equal(_joined(released), trim(samples, SR))
+
+
+def test_stream_cut_continues_the_fade_in_across_pieces():
+    # 終わりの 1.5 秒を出さないので、短い音では最初に出せる分がフェードインより短くなる
+    samples = _signal((0.05, 0.3), (0.3, 0.0), (1.47, 0.5))
+    assert int(0.3 * SR) < len(samples) - int(1.5 * SR) < int(0.33 * SR)
+
+    _, released = _stream(samples, 0.6, lead=False)
+
+    first = next(piece for piece in released if piece is not None)
+    assert len(first) < int(0.03 * SR)
+    np.testing.assert_array_equal(_joined(released), trim(samples, SR))
+
+
+def test_stream_cut_hands_out_nothing_when_the_cut_is_never_decided_early():
+    samples = _signal((0.3, 0.5), (0.3, 0.0), (1.0, 0.5))
+
+    cutter, released = _stream(samples, 5.0, lead=True)
+
+    # 全部が一度に届いた。呼び手が全体を見て切る
+    assert cutter.cut is None
+    assert released == [None]
+
+
+def test_stream_cut_does_not_decide_a_lead_cut_before_the_body_starts():
+    samples = _signal((0.3, 0.5), (0.3, 0.0), (4.0, 0.5))
+
+    _, released = _stream(samples, 0.5, lead=True)
+
+    # 最初の 0.5 秒は前置きと間だけで、本文がまだ見えていない
+    assert released[0] is None
+    assert released[1] is not None
+
+
+def test_stream_cut_starts_at_the_earliest_onset_it_might_need():
+    # 本文の語頭の弱い 10ms は、この先にもっと大きい音が来れば「無音」の扱いになる。
+    # どちらでも 10ms しか変わらないので待たずに決め、語頭を削らない方（手前）から出す
+    soft = 0.5 * 10 ** (-33 / 20)
+    samples = _signal((0.3, 0.5), (0.3, 0.0), (0.01, soft), (4.0, 0.5))
+
+    cutter, released = _stream(samples, 1.0, lead=True)
+
+    assert cutter.cut == int(0.55 * SR)
+    assert released[0] is not None
+    np.testing.assert_array_equal(_joined(released), _whole(samples))

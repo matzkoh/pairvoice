@@ -96,6 +96,15 @@ def test_playback_reads_from_toml(tmp_path):
     assert (playback.volume, playback.duck_volume, playback.max_wait_seconds) == (0.6, 0.1, 60.0)
 
 
+def test_speech_streams_unless_turned_off(tmp_path):
+    path = tmp_path / "config.toml"
+    assert load_config(path).playback.streaming is True
+
+    path.write_text("[playback]\nstreaming = false\n", encoding="utf-8")
+
+    assert load_config(path).playback.streaming is False
+
+
 def test_eval_style_reads_from_toml(tmp_path):
     path = tmp_path / "config.toml"
     path.write_text('[eval]\nstyle = "casual"\n', encoding="utf-8")

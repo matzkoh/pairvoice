@@ -9,12 +9,20 @@ import numpy as np
 import pytest
 
 import pairvoice.lifecycle as lifecycle_module
-from pairvoice.config import Config, LLMConfig, MuteConfig, TTSConfig
+from pairvoice import player as player_module
+from pairvoice.config import Config, LLMConfig, MuteConfig, PlaybackConfig, TTSConfig
 from pairvoice.curate import DEREVERB_CHUNK, DEREVERB_RATE, EDGE_PAD_SECONDS
 from pairvoice.lifecycle import Engine, ModelUnavailable, MutedError, Superseded
 from pairvoice.mute import MuteController
 from pairvoice.wav import write_mono
-from tests.fakes import FakeBackend, FakeCurate, FakeProbe, gather_results
+from tests.fakes import (
+    FakeBackend,
+    FakeCurate,
+    FakeProbe,
+    InstantOutput,
+    gather_results,
+    wait_until,
+)
 from tests.test_curate import needs_ffmpeg, synth
 
 
@@ -48,6 +56,10 @@ class FakeTTS(FakeBackend):
         self._sampler = {"cfg_scale_speaker": 3.0} if sampler is None else sampler
         self.profile = None
         self.anchor_text = "候補に読ませる文です。"
+        self.sample_rate = 48000
+        # 合成しながら渡す波形と、合成しながら渡した回数
+        self.waves = [np.full(4800, 0.1, np.float32)]
+        self.streamed = 0
 
     def resolve_caption(self, override=None):
         if override is not None and override.strip():
@@ -117,6 +129,13 @@ class FakeTTS(FakeBackend):
         # 文に分けるのは本物の役目。偽物は全文を1文として返す
         yield self.speak(text, caption, None, False, profile_id, None, style)
 
+    def speak_streaming(self, text, caption, profile_id, style, emit):
+        self.streamed += 1
+        result = self.speak(text, caption, None, False, profile_id, None, style)
+        for wave in self.waves:
+            emit(wave)
+        return result
+
     def join(self, parts):
         return parts[0]
 
@@ -127,11 +146,27 @@ def isolated_data_root(tmp_path, monkeypatch):
     monkeypatch.setenv("PAIRVOICE_DATA_ROOT", str(tmp_path))
 
 
-def make_engine(*, probe=None, mute_config=None, llm=None, tts=None, stt=None, curate=None):
+def make_engine(
+    *,
+    probe=None,
+    mute_config=None,
+    llm=None,
+    tts=None,
+    stt=None,
+    curate=None,
+    split_sentences=False,
+    playback=None,
+):
     config = Config(
         llm=LLMConfig(model="fake/llm", idle_unload_seconds=60, load_timeout_seconds=1),
-        tts=TTSConfig(model="fake/tts", idle_unload_seconds=60, load_timeout_seconds=1),
+        tts=TTSConfig(
+            model="fake/tts",
+            idle_unload_seconds=60,
+            load_timeout_seconds=1,
+            split_sentences=split_sentences,
+        ),
         mute=mute_config or MuteConfig(auto_microphone=True),
+        playback=playback or PlaybackConfig(),
     )
     return Engine(
         config=config,
@@ -656,6 +691,7 @@ async def test_mlx_work_runs_on_one_dedicated_thread():
     await asyncio.gather(*(asyncio.to_thread(time.sleep, 0.01) for _ in range(8)))
     await engine.summarize(system="s", prompt="p")
     await engine.synthesize("テスト")
+    await engine.speak("合成しながら鳴らす")
     await engine.summarize(system="s", prompt="p2")
     engine._llm._idle_unload_seconds = -1
     assert await engine._llm.unload_if_idle()
@@ -700,7 +736,7 @@ class SentenceTTS(FakeTTS):
 
 def make_sentence_engine(stop_at=None):
     tts = SentenceTTS(stop_at=stop_at)
-    tts.engine = make_engine(tts=tts)
+    tts.engine = make_engine(tts=tts, split_sentences=True)
     return tts.engine, tts
 
 
@@ -722,6 +758,136 @@ async def test_speak_stopped_midway_queues_no_later_sentences():
     await engine.speak("一つ目。二つ目。")
 
     assert engine.player.describe()["waiting"] == 0
+
+
+@pytest.fixture
+def outputs(monkeypatch):
+    """合成しながら鳴らすときに開いた出力（音は出さない）。"""
+    opened = []
+
+    class Recording(InstantOutput):
+        def __init__(self, sample_rate):
+            super().__init__(sample_rate)
+            opened.append(self)
+
+    monkeypatch.setattr(player_module, "_EngineOutput", Recording)
+    return opened
+
+
+async def test_speak_plays_the_waves_while_synthesizing(outputs, caplog):
+    tts = FakeTTS()
+    tts.waves = [np.full(24000, 0.1, np.float32), np.full(24000, 0.2, np.float32)]
+    engine = make_engine(tts=tts, playback=PlaybackConfig(spatial="off", volume=0.5))
+    playing = asyncio.create_task(engine.player.run())
+    try:
+        with caplog.at_level(logging.INFO, logger="pairvoice.lifecycle"):
+            result = await engine.speak("テスト")
+        await wait_until(lambda: outputs and outputs[0].stopped)
+    finally:
+        playing.cancel()
+
+    assert result.relative_path == "generations/x.wav"
+    assert tts.streamed == 1
+    (output,) = outputs
+    assert output.sample_rate == 48000
+    assert output.volumes[0] == 0.5
+    # 渡した波形が、渡した順に2ch で積まれる（最後は末尾の無音）
+    assert [pcm.shape for pcm in output.scheduled[:2]] == [(24000, 2), (24000, 2)]
+    assert [float(pcm[0, 1]) for pcm in output.scheduled[:2]] == [
+        np.float32(0.1),
+        np.float32(0.2),
+    ]
+    assert "合成しながら鳴らしました" in caplog.text
+
+
+async def test_speak_adds_the_room_to_the_waves_as_they_come(outputs):
+    tts = FakeTTS()
+    engine = make_engine(tts=tts)
+    playing = asyncio.create_task(engine.player.run())
+    try:
+        await engine.speak("テスト")
+        await wait_until(lambda: outputs and outputs[0].stopped)
+    finally:
+        playing.cancel()
+
+    # 頭の外で鳴らす（既定）: 左右で違う音になり、波形の後ろに響きが続く
+    first, tail = outputs[0].scheduled[:2]
+    assert first.shape == (4800, 2)
+    assert not np.array_equal(first[:, 0], first[:, 1])
+    assert len(tail) > 0
+    assert np.abs(tail).max() > 0
+
+
+async def test_speak_stops_what_it_played_when_synthesis_fails(outputs):
+    started = threading.Event()
+
+    class FailingTTS(FakeTTS):
+        def speak_streaming(self, text, caption, profile_id, style, emit):
+            emit(np.full(48000, 0.1, np.float32))
+            # 鳴らし始めるのを待ってから失敗する
+            started.wait(2)
+            raise RuntimeError("generation failed")
+
+    engine = make_engine(tts=FailingTTS(), playback=PlaybackConfig(spatial="off"))
+    playing = asyncio.create_task(engine.player.run())
+    try:
+        speaking = asyncio.create_task(engine.speak("テスト"))
+        await wait_until(lambda: outputs and outputs[0].scheduled)
+        started.set()
+        with pytest.raises(RuntimeError, match="generation failed"):
+            await speaking
+        await wait_until(lambda: outputs[0].stopped)
+    finally:
+        started.set()
+        playing.cancel()
+
+    assert engine.player.describe() == {"playing": False, "waiting": 0}
+
+
+async def test_speak_stopped_during_synthesis_plays_nothing(outputs):
+    class StoppedTTS(FakeTTS):
+        engine: Engine | None = None
+
+        def speak_streaming(self, text, caption, profile_id, style, emit):
+            assert self.engine is not None
+            self.engine.player.stop()
+            return super().speak_streaming(text, caption, profile_id, style, emit)
+
+    tts = StoppedTTS()
+    engine = tts.engine = make_engine(tts=tts)
+
+    result = await engine.speak("テスト")
+
+    # 合成は終わらせて wav を返すが、鳴らさない
+    assert result.relative_path == "generations/x.wav"
+    assert engine.player.describe()["waiting"] == 0
+
+
+@pytest.mark.parametrize(
+    ("playback", "split_sentences"),
+    [
+        (PlaybackConfig(streaming=False), False),
+        # 耳元で動かすのは、通る道を全体の長さから決める
+        (PlaybackConfig(spatial="orbit"), False),
+        # 文ごとに合成する設定は、できた文から鳴らす
+        (PlaybackConfig(), True),
+    ],
+)
+async def test_speak_waits_for_synthesis_when_it_cannot_stream(playback, split_sentences):
+    tts = FakeTTS()
+    engine = make_engine(tts=tts, playback=playback, split_sentences=split_sentences)
+
+    await engine.speak("テスト")
+
+    assert tts.streamed == 0
+    assert engine.player.describe()["waiting"] == 1
+    assert engine.health()["playback"]["streaming"] is False
+
+
+async def test_health_reports_whether_speech_streams():
+    engine = make_engine()
+
+    assert engine.health()["playback"] == {"playing": False, "waiting": 0, "streaming": True}
 
 
 async def test_transcribe_loads_once_and_ignores_mute(tmp_path):

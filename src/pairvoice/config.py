@@ -165,6 +165,9 @@ class PlaybackConfig:
     # 鳴らし方（spatial.py）。outside は頭の外で鳴らす（ヘッドホン向け）、off はそのまま鳴らす。
     # orbit（耳元で動かす）は隠し機能
     spatial: Spatial = "outside"
+    # 合成しながら鳴らす。全部を合成し終わる前に、波形に解けた所から鳴らし始める。
+    # false にすると、合成し終わってから鳴らす
+    streaming: bool = True
 
 
 @dataclass(frozen=True)

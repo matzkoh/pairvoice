@@ -139,7 +139,7 @@ def test_missing_prompt(tmp_path):
 
 def test_records_the_summary_even_when_it_cannot_be_spoken(data_root):
     class MissingVoiceTTS(FakeTTS):
-        def speak_sentences(self, *args, **kwargs):
+        def speak(self, *args, **kwargs):
             raise ProfileNotFound("x")
 
     _, client = build(tts=MissingVoiceTTS(), data_root=data_root)

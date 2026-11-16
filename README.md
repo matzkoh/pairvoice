@@ -202,6 +202,24 @@ studio は常駐サーバーが根（`/`）で配っている。メニューの�
 スピーカーで聴くなら、メニューバーの「頭の外で鳴らす」を外す（`config.toml` の `[playback] spatial = "off"` と同じ）。
 保存する wav はモノラルのままなので、studio・聞き取り・記録は影響を受けない。
 
+## 合成しながら鳴らす
+
+既定で入っている。読み上げは、全部を合成し終わる前に鳴り始める。
+音声合成のモデルは、全文の音のもと（潜在表現）を一度に作ってから、2秒ずつ波形に解いていく。
+音のもとができるまでは待ち、そこから先は、波形に解けた所から鳴らす。
+文を分けて別々に合成するのではないので、文の間の抑揚はつながったままになる。
+頼んでから音が出るまでは、30〜40字の読み上げで 0.2〜0.3 秒（2〜3割）短くなる（M4 Pro、本体のスピーカーでの実測）。
+音を出す用意も合成している間に済ませるので、用意に時間がかかる出力先（Bluetooth のヘッドホンなど）では、その分も短くなる。
+
+次のときは、合成し終わってから鳴らす。
+
+- その声で初めて読むとき。音量をそろえる倍率を1回目の合成で測り、2回目からはそれを使う（常駐サーバーを起動し直すと測り直す）
+- 1〜2秒の短い読み上げと、頭の切り方が合成し終わるまで決まらなかったとき
+- 「耳元で動かす」を選んでいるときと、`[tts] split_sentences = true` のとき
+
+合成し終わってから鳴らす動きに戻すなら、`config.toml` に `[playback] streaming = false` と書く。
+保存する wav は、どちらでも同じになる。
+
 ## 設定
 
 `~/.config/pairvoice/config.toml`。
@@ -220,7 +238,7 @@ Claude Code からはプラグインの `config` スキルで頼める。
 | `[curate]` | `diarize_model`（`/api/profiles/curate` の話者分離のモデル）、`enhance_model`（雑音除去のモデル）、`dereverb_model`（残響除去のモデル。空にすると響きを除かない） |
 | `[tts.sampler]` | 音声合成の細かい調整。studio の「声」画面で試して、表示される設定を写す |
 | `[mute]` | `auto_microphone`（既定 true）、`auto_audio_output`（既定 true）、`audio_output_wait_seconds`（既定 5）、`microphone_ignore_processes` / `audio_output_ignore_processes`（自動ミュートで見ないプロセス名。マイクを切ったまま入っている通話など。名前は `GET /api/mute` の `processes` で分かる） |
-| `[playback]` | `volume`（既定 1.0）、`duck_volume`（ほかのアプリの音が鳴っている間の音量。既定 0.3）、`max_wait_seconds`（順番待ちがこれを超えたら捨てる。既定 60）、`spatial`（`"outside"` で頭の外で鳴らす、`"off"` でそのまま鳴らす。既定 `"outside"`） |
+| `[playback]` | `volume`（既定 1.0）、`duck_volume`（ほかのアプリの音が鳴っている間の音量。既定 0.3）、`max_wait_seconds`（順番待ちがこれを超えたら捨てる。既定 60）、`spatial`（`"outside"` で頭の外で鳴らす、`"off"` でそのまま鳴らす。既定 `"outside"`）、`streaming`（合成しながら鳴らす。`false` で合成し終わってから鳴らす。既定 true） |
 | `[eval]` | `style = "casual"` で、`pairvoice eval` がです/ます調を違反にする（タメ口に育てるとき） |
 
 メモリが少ない機種では、要約のモデルを小さくすると要約側のピークが約 8GB から約 4.7GB に下がる。
