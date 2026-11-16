@@ -76,6 +76,10 @@ class FakeTTS(FakeBackend):
         self.calls.append({"speaker_vector": path})
         return [0.5, -0.5]
 
+    def mix_tokens(self, mix):
+        self.calls.append({"mix_tokens": mix})
+        return np.full((3, 2), 0.5, np.float32)
+
     def speaker_tokens(self, samples):
         """1秒に6トークン、大きさと何本目かの2次元。"""
         self.calls.append({"speaker_tokens": len(samples)})

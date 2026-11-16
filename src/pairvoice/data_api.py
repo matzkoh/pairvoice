@@ -33,7 +33,7 @@ from .api_errors import error_doc as _error
 from .api_errors import fail as _fail
 from .curate import Analysis, InvalidAudio, InvalidSelection, Outcome
 from .curate_jobs import CurateJobs
-from .profiles import SpeakerTokens, TakeRejected
+from .profiles import MIX_SOURCE, MixVoice, ProfileNotFound, SpeakerTokens, TakeRejected
 from .prompt import SummaryPrompt
 from .styles import STYLES_FILENAME, StyleStore
 from .tts import ANCHOR_TEXT, AudioNotFound, SpeechResult, resolve_data_audio
@@ -137,8 +137,14 @@ class Synthesize(Protocol):
         design: bool = False,
         profile_id: str | None = None,
         *,
-        mix: list[tuple[str, float]] | None = None,
+        mix: list[tuple[str | MixVoice, float]] | None = None,
     ) -> SpeechResult: ...
+
+
+class MixTokens(Protocol):
+    """Engine.mix_tokens。混ぜた話者の表現と、それを作った合成モデルの名前。"""
+
+    async def __call__(self, mix: list[tuple[str | MixVoice, float]]) -> tuple[np.ndarray, str]: ...
 
 
 _VERSION_ERRORS: dict[int | str, dict] = {
@@ -309,13 +315,19 @@ Order = Literal["random", "shuffle"]
 _ORDER_DESCRIPTION = "選び方。`random` は毎回ばらばらに選ぶ。`shuffle` は混ぜた順に、全員を一巡するまで同じ声を選ばない"
 
 
+class MixRecipePart(BaseModel):
+    id: str = Field(description="もとの声の ID（消えていることもある）")
+    weight: float = Field(description="重み（足して1）")
+
+
 class ProfileItem(BaseModel):
     id: str = Field(description="ID。`voice` に渡せる")
     name: str = Field(description="名前。`voice` に渡せる")
     caption: str = Field(description="話し方の指示。合成のたびに読む")
-    source: Literal["design", "upload", "curate", "auto", "import", "random"] = Field(
+    source: Literal["design", "upload", "curate", "auto", "import", "random", "mix"] = Field(
         description="作り方。`curate` は雑多な音声ファイルから選り分けた。"
-        "`random` は参照音声を持たず、要約・合成のたびに `members` から1つを選んで読む"
+        "`random` は参照音声を持たず、要約・合成のたびに `members` から1つを選んで読む。"
+        "`mix` はほかの声を混ぜた（`POST /profiles/mix`）"
     )
     created_at: str = Field(description="作った日時（ISO 8601）")
     tone: str = Field(description="要約の口調。空なら既定の口調（`GET /tone`）で読む")
@@ -324,6 +336,9 @@ class ProfileItem(BaseModel):
     folded: bool = Field(
         description="素材を畳み込んだ声（`POST /profiles/fold`）。素材全体から要約した話者の表現で読み、"
         "参照音声（`GET /profiles/{id}/audio`）はその中心に近い 26 秒の素材で、鳴る声とは少し違う"
+    )
+    mix: list[MixRecipePart] = Field(
+        description="`mix` の声の作り方（もとの声と重み）。もとの声を消しても読める。ほかの声は空"
     )
 
 
@@ -574,6 +589,30 @@ class DesignProfileBody(BaseModel):
     )
 
 
+class MixVoicePart(BaseModel):
+    voice: str = Field(description="混ぜる声の名前か ID。ランダムの声は混ぜられない")
+    weight: float = Field(ge=0, le=1, description="重み。足して1に直して混ぜる")
+
+
+class MixProfileBody(BaseModel):
+    name: ProfileName = Field(description="声の名前")
+    caption: Caption = Field(
+        default="",
+        description="話し方の指示。試聴した caption と同じにすると、聞いた声のままになる",
+    )
+    voices: list[MixVoicePart] = Field(min_length=2, max_length=8, description="混ぜる声")
+    rng_seed: int | None = Field(
+        default=None,
+        description="参照音声を読ませるときの乱数の種。省くと config.toml の値",
+    )
+
+    @model_validator(mode="after")
+    def _weights_sum_positive(self):
+        if sum(part.weight for part in self.voices) <= 0:
+            raise ValueError("weights must sum to a positive value")
+        return self
+
+
 class RandomProfileBody(BaseModel):
     name: ProfileName = Field(description="声の名前")
     members: list[str] = Field(
@@ -617,6 +656,7 @@ def data_router(
     transcribe: Transcribe,
     save_audio: SaveAudio,
     fold_material: FoldMaterial,
+    mix_tokens: MixTokens,
 ) -> APIRouter:
     router = APIRouter()
     curate_jobs = CurateJobs()
@@ -773,7 +813,11 @@ def data_router(
 
     async def extend(relatives: list[str], caption: str, sampler: dict) -> list[bytes]:
         """テイクを等分に混ぜた声で REFERENCE_TEXTS を読ませる。"""
-        mix = [(relative, 1.0) for relative in relatives]
+        return await read_references([(relative, 1.0) for relative in relatives], caption, sampler)
+
+    async def read_references(
+        mix: list[tuple[str | MixVoice, float]], caption: str, sampler: dict
+    ) -> list[bytes]:
         made = []
         # 1文ずつ頼む（まとめると Runner を塞ぎ、フックの読み上げが待たされる）
         for text in REFERENCE_TEXTS:
@@ -781,14 +825,18 @@ def data_router(
             made.append(await asyncio.to_thread(result.path.read_bytes))
         return made
 
-    async def save_design(name: str, caption: str, takes: list[bytes]) -> ProfileItem:
+    async def save_design(
+        name: str, caption: str, takes: list[bytes], source: str = "design", **extra
+    ) -> ProfileItem:
+        """テイクをつないだ参照音声で声を作る。extra は profiles.create の speaker と mix。"""
         joined = concat_wavs(takes, TAKE_GAP_SECONDS)
         created = await asyncio.to_thread(
             profiles.create,
             name=name,
             caption=caption,
-            source="design",
+            source=source,
             write_reference=lambda path: path.write_bytes(joined),
+            **extra,
         )
         return ProfileItem.model_validate(created.describe())
 
@@ -833,6 +881,45 @@ def data_router(
         takes = [await asyncio.to_thread(first.path.read_bytes)]
         takes += await extend([first.relative_path], body.caption, sampler)
         return await save_design(body.name, body.caption, takes)
+
+    @router.post(
+        "/profiles/mix",
+        status_code=201,
+        response_model=ProfileItem,
+        summary="ほかの声を混ぜて声を作る",
+        tags=["声"],
+        responses={
+            400: _error("`invalid_profile`（ランダムの声を混ぜようとした）"),
+            404: _error("`profile_not_found`"),
+            503: _error("`model_load_failed` など（モデルを使えない）"),
+        },
+    )
+    async def mix_profile(body: MixProfileBody):
+        """声たちの話者の表現を重みで混ぜ、そのまま声の表現として保存する。
+
+        `/synthesize` の `mix` に同じ声・重みを `voice` で渡して試聴した声と同じ声で読む。
+        合成モデルを替えたときのために、混ぜた声で決まった文を3つ読ませて参照音声にもする
+        （合成を3回するので 30 秒ほどかかる）。使用中の声がまだ無ければ、作った声を使用中にする。
+        """
+        # 名前は後から変わりうるので、作り方には ID を残す
+        parts = []
+        for part in body.voices:
+            found = profiles.find(part.voice)
+            if found is None:
+                raise ProfileNotFound(part.voice)
+            parts.append((found.id, part.weight))
+        mix: list[tuple[str | MixVoice, float]] = [(MixVoice(i), w) for i, w in parts]
+        tokens, model = await mix_tokens(mix)
+        takes = await read_references(mix, body.caption, master_sampler(body.rng_seed))
+        total = sum(w for _, w in parts)
+        return await save_design(
+            body.name,
+            body.caption,
+            takes,
+            source=MIX_SOURCE,
+            speaker=SpeakerTokens(lambda path: np.save(path, tokens), model),
+            mix=[(i, w / total) for i, w in parts],
+        )
 
     @router.post(
         "/profiles/upload",

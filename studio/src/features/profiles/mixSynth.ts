@@ -1,8 +1,6 @@
 import { queryOptions } from '@tanstack/react-query'
 
-import { speakOnce } from '@/lib/speak'
-
-import type { MixPart } from './voiceRegion'
+import { type MixSource, speakOnce } from '@/lib/speak'
 
 // 保存する声の合成の段数（読み上げの既定は 10）。増やすほど丁寧で遅い
 export const MASTER_STEPS = 80
@@ -14,7 +12,7 @@ export async function synth(
   text: string,
   caption: string,
   seed: number,
-  mix: readonly MixPart[],
+  mix: readonly MixSource[],
   numSteps?: number,
 ) {
   const sampler =
@@ -29,7 +27,7 @@ export function mixQueryOptions(
   text: string,
   caption: string,
   seed: number,
-  mix: readonly MixPart[],
+  mix: readonly MixSource[],
 ) {
   return queryOptions({
     queryKey: ['pick-mix', text, caption, seed, mix] as const,

@@ -5,6 +5,7 @@ import type { ProfileItem } from '@/lib/api-types'
 
 import { DesignProfile } from './DesignProfile'
 import { FoldProfile } from './FoldProfile'
+import { MixProfile } from './MixProfile'
 import { PickProfile } from './PickProfile'
 import { RandomProfile } from './RandomProfile'
 import { UploadProfile } from './UploadProfile'
@@ -31,6 +32,7 @@ export function NewProfile({ voices, onStatus, onCreated, foldJob, onFoldJob, ..
         <TabsList>
           <TabsTrigger value="design">caption から声を作る</TabsTrigger>
           <TabsTrigger value="pick">2択で絞り込む</TabsTrigger>
+          <TabsTrigger value="mix">2つの声を混ぜる</TabsTrigger>
           <TabsTrigger value="upload">wav を取り込む</TabsTrigger>
           <TabsTrigger value="curate">素材から作る</TabsTrigger>
           <TabsTrigger value="random">ランダムに選ぶ</TabsTrigger>
@@ -40,6 +42,16 @@ export function NewProfile({ voices, onStatus, onCreated, foldJob, onFoldJob, ..
         </TabsContent>
         <TabsContent value="pick" keepMounted>
           <PickProfile
+            anchorText={design.anchorText}
+            pairvoiceDown={design.pairvoiceDown}
+            onPlay={design.onPlay}
+            onStatus={onStatus}
+            onCreated={onCreated}
+          />
+        </TabsContent>
+        <TabsContent value="mix" keepMounted>
+          <MixProfile
+            voices={voices}
             anchorText={design.anchorText}
             pairvoiceDown={design.pairvoiceDown}
             onPlay={design.onPlay}

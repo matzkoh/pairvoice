@@ -19,6 +19,7 @@ const ITEMS: ProfileItem[] = [
     members: [],
     order: 'random',
     folded: false,
+    mix: [],
   },
   {
     id: 'p-b',
@@ -30,6 +31,7 @@ const ITEMS: ProfileItem[] = [
     members: [],
     order: 'random',
     folded: false,
+    mix: [],
   },
 ]
 
@@ -81,6 +83,7 @@ it('ランダムの声は選び方とメンバーの名前を並べる', () => {
           members: ['p-a', 'p-b'],
           order: 'shuffle',
           folded: false,
+          mix: [],
         },
       ]}
       active="p-r"

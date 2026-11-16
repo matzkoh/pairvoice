@@ -549,6 +549,38 @@ def test_speak_forwards_mix_as_resolved_paths_and_weights():
     ]
 
 
+def test_speak_forwards_mix_voices_by_name():
+    from pairvoice.profiles import MixVoice
+
+    tts = FakeTTS()
+    _, client = build(tts=tts)
+
+    response = client.post(
+        "/synthesize",
+        json={
+            "text": "テスト",
+            "mix": [
+                {"voice": "女性A", "weight": 0.4},
+                {"audio": "generations/b.wav", "weight": 0.6},
+            ],
+        },
+    )
+
+    assert response.status_code == 200
+    assert tts.calls[0]["mix"] == [(MixVoice("女性A"), 0.4), (Path("/data/generations/b.wav"), 0.6)]
+
+
+@pytest.mark.parametrize(
+    "part", [{"weight": 1}, {"audio": "generations/a.wav", "voice": "女性A", "weight": 1}]
+)
+def test_speak_requires_exactly_one_mix_source(part):
+    _, client = build()
+
+    response = client.post("/synthesize", json={"text": "テスト", "mix": [part]})
+
+    assert response.status_code == 422
+
+
 def test_speak_reports_mix_outside_data_root_as_404():
     _, client = build()
 

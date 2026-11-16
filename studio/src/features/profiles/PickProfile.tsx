@@ -42,7 +42,7 @@ type Props = {
   onCreated: (id: string) => void
 }
 
-function randomSeed() {
+export function randomSeed() {
   return seedsFor(null, 1)[0]!
 }
 

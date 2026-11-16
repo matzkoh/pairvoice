@@ -385,6 +385,7 @@ def test_patch_updates_name_and_snapshots_caption(client):
         "members": [],
         "order": "random",
         "folded": False,
+        "mix": [],
     }
     (version,) = client.get(f"/profiles/{profile_id}/caption/history").json()["items"]
     assert version["name"].startswith("caption-")
@@ -729,3 +730,60 @@ def test_fold_job_not_found(client):
 
     assert response.status_code == 404
     assert response.json()["error"] == "fold_job_not_found"
+
+
+def test_mix_saves_mixed_tokens_and_reads_references_in_that_voice(tmp_path):
+    import numpy as np
+
+    from pairvoice.profiles import MixVoice
+
+    tts = TakeWritingTTS(tmp_path)
+    _, client = build(tts=tts, data_root=tmp_path)
+    (tmp_path / "generations").mkdir()
+    a = upload(client, "声A").json()["id"]
+    b = upload(client, "声B").json()["id"]
+
+    response = client.post(
+        "/profiles/mix",
+        json={
+            "name": "混ぜた声",
+            "caption": "低め",
+            "voices": [{"voice": "声A", "weight": 0.3}, {"voice": b, "weight": 0.9}],
+            "rng_seed": 5,
+        },
+    )
+
+    assert response.status_code == 201
+    created = response.json()
+    assert (created["source"], created["caption"], created["folded"]) == ("mix", "低め", False)
+    # 作り方は名前ではなく ID で、重みは足して1に直して残す
+    assert created["mix"] == [{"id": a, "weight": 0.25}, {"id": b, "weight": 0.75}]
+    mix = [(MixVoice(a), 0.3), (MixVoice(b), 0.9)]
+    first, *reads = tts.calls
+    assert first == {"mix_tokens": mix}
+    # 参照音声は、試聴と同じ caption の混ぜた声で決まった文を読ませて作る
+    assert [call["text"] for call in reads] == list(REFERENCE_TEXTS)
+    assert all(call["mix"] == mix for call in reads)
+    assert {(c["caption"], c["sampler"]["rng_seed"], c["sampler"]["num_steps"]) for c in reads} == {
+        ("低め", 5, MASTER_STEPS)
+    }
+    directory = tmp_path / "profiles" / created["id"]
+    np.testing.assert_allclose(np.load(directory / "speaker.npy"), np.full((3, 2), 0.5))
+    assert '"speaker_model": "fake/tts"' in (directory / "profile.json").read_text()
+
+
+def test_mix_reports_unknown_voice_before_synthesizing(tmp_path):
+    tts = TakeWritingTTS(tmp_path)
+    _, client = build(tts=tts, data_root=tmp_path)
+    upload(client, "声A")
+
+    response = client.post(
+        "/profiles/mix",
+        json={
+            "name": "x",
+            "voices": [{"voice": "声A", "weight": 1}, {"voice": "無い", "weight": 1}],
+        },
+    )
+
+    assert response.status_code == 404
+    assert tts.calls == []

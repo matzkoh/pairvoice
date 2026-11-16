@@ -21,8 +21,8 @@ SamplerConfig の既定 → モデル既定の順で決まる。None は「モ�
 試聴のどこから来ても同じ読みになる。
 
 声の個体は、参照音声から作る話者の表現（speaker_state、約6トークン/秒 × 768次元）で
-決まる。studio の「2択で絞り込む」は、いくつかのもとの声の表現を重みで混ぜた声を合成し
-（mix）、もとの声どうしの位置関係を話者ベクトル（表現の時間平均）で測る。表現を差し込む
+決まる。studio の「2択で絞り込む」と「混ぜる」は、いくつかのもとの声の表現を重みで混ぜた声を
+合成し（mix）、もとの声どうしの位置関係を話者ベクトル（表現の時間平均）で測る。表現を差し込む
 公開の口は mlx-audio に無いので、encode_conditions_full を包んで差し替える。
 プロファイルの声も、参照音声から作った表現を取っておいて同じ口から差し込む（参照音声の
 符号化を合成のたびにやり直さない）。
@@ -52,7 +52,14 @@ from . import hub, speedups
 from .checker import split_sentences
 from .config import TTSConfig
 from .postprocess import cut_lead, normalize, trim
-from .profiles import PROFILES_DIRNAME, Profile, ProfileStore
+from .profiles import (
+    PROFILES_DIRNAME,
+    MixVoice,
+    Profile,
+    ProfileNotFound,
+    ProfileRejected,
+    ProfileStore,
+)
 from .reading import DICT_FILENAME, apply_dict, load_dict
 from .styles import STYLES_FILENAME, StyleStore
 from .wav import concat_wavs, write_mono
@@ -285,7 +292,7 @@ class MlxAudioBackend:
         参照音声から作ると1人 0.5〜0.6 秒かかり、メモリの控えはモデルを降ろすと消える。
         控えはプロファイルのフォルダーに置き（プロファイルを消せば一緒に消える）、モデル・
         mlx-audio のバージョン・参照音声の更新時刻で名前を分け、古い控えは作り直すときに消す。
-        保存と読み込みで値は変わらない。混ぜる声（mix）のもとは記録の音声なので取っておかない。
+        保存と読み込みで値は変わらない。記録の音声（mix の audio）はプロファイルではないので取っておかない。
         """
 
         def make() -> mx.array:
@@ -352,11 +359,50 @@ class MlxAudioBackend:
         state = self._speaker_state(path)
         return np.asarray(mx.mean(state, axis=1), dtype=np.float32).reshape(-1).tolist()
 
-    def _mixed_speaker_state(self, mix: Sequence[tuple[Path, float]]) -> mx.array:
+    def mix_tokens(self, mix: Sequence[tuple[Path | MixVoice, float]]) -> np.ndarray:
+        """混ぜた話者の表現 (T, 768)。畳み込んだ声と同じ形で、プロファイルに保存できる。"""
+        self._require_loaded()
+        return np.asarray(self._mixed_speaker_state(self._mix_parts(mix))[0], dtype=np.float32)
+
+    def _mix_parts(
+        self, mix: Sequence[tuple[Path | MixVoice, float]]
+    ) -> list[tuple[Path | Profile, float]]:
+        """混ぜる声をプロファイルに引く（1回の合成で1回だけ）。"""
+        return [
+            (source if isinstance(source, Path) else self._mix_profile(source.key), weight)
+            for source, weight in mix
+        ]
+
+    def _mix_profile(self, key: str) -> Profile:
+        # resolve はランダムの声からメンバーを1つ選んでしまうので、find で引いて断る
+        profile = self._profiles.find(key)
+        if profile is None:
+            raise ProfileNotFound(key)
+        if profile.is_random:
+            raise ProfileRejected("ランダムの声は混ぜられません")
+        return profile
+
+    def _profile_state(self, profile: Profile) -> mx.array | None:
+        """読み上げでその声に差し込む表現。畳み込んだ表現が今のモデルのものなら、それを使う。"""
+        tokens = profile.tokens_for(str(self.model))
+        if tokens is not None:
+            return self._tokens_state(tokens)
+        if profile.reference is not None:
+            return self._reference_state(profile.reference)
+        return None
+
+    def _part_state(self, part: Path | Profile) -> mx.array:
+        state = self._speaker_state(part) if isinstance(part, Path) else self._profile_state(part)
+        if state is None:
+            raise ProfileRejected(f"{part.name} は混ぜられません")
+        return state
+
+    def _mixed_speaker_state(self, mix: Sequence[tuple[Path | Profile, float]]) -> mx.array:
+        # 声は読み上げと同じ表現で混ぜる（両端が読み上げの声と一致する）。
         # 表現は時間方向の列で長さがもとの声ごとに違うので、短い方にそろえてから重みで足す。
         # 重みは足して1に直す（倍率を変えると声ではなく話者の効き具合が変わる）。負の重みは
         # 外挿で、その声から遠ざかる向きへ伸ばす（studio の2択が片側に使う）
-        states = [self._speaker_state(path) for path, _ in mix]
+        states = [self._part_state(part) for part, _ in mix]
         length = min(int(s.shape[1]) for s in states)
         total = sum(weight for _, weight in mix)
         if length == 0 or total <= 0:
@@ -373,7 +419,7 @@ class MlxAudioBackend:
         sampler: Mapping[str, object] | None = None,
         design: bool = False,
         profile_id: str | None = None,
-        mix: Sequence[tuple[Path, float]] | None = None,
+        mix: Sequence[tuple[Path | MixVoice, float]] | None = None,
         style: str | None = None,
     ) -> SpeechResult:
         """合成する。design=True はプロファイルを使わず caption だけで声を作る（候補づくり用）。
@@ -381,8 +427,8 @@ class MlxAudioBackend:
         profile_id は使用中でないプロファイルの声で鳴らす。ID のほか名前でも引ける。
         style はスタイルの名前で、caption と sampler の既定をそのスタイルに替える。
         引数の caption と sampler はスタイルより優先する。
-        mix は (参照音声, 重み) の組で、その声たちの話者の表現を重みで混ぜた声で鳴らす
-        （2択で絞り込む）。プロファイルは使わない。
+        mix は (参照音声か声, 重み) の組で、その声たちの話者の表現を重みで混ぜた声で鳴らす
+        （2択で絞り込む・混ぜる）。profile_id は使わない。
         text は読み辞書で読みに開いてから読む。
         """
         voice = self._voice(caption, sampler, design, profile_id, mix, style)
@@ -436,7 +482,7 @@ class MlxAudioBackend:
         sampler: Mapping[str, object] | None = None,
         design: bool = False,
         profile_id: str | None = None,
-        mix: Sequence[tuple[Path, float]] | None = None,
+        mix: Sequence[tuple[Path | MixVoice, float]] | None = None,
         style: str | None = None,
     ) -> _Voice:
         self._require_loaded()
@@ -448,24 +494,22 @@ class MlxAudioBackend:
 
         if mix:
             # 参照音声は合成を参照つきの経路に入れるためだけに渡す。表現は差し込んだ方が使われる
+            parts = self._mix_parts(mix)
+            first = parts[0][0]
             return _Voice(
-                mix[0][0],
+                first if isinstance(first, Path) else first.reference,
                 (caption or "").strip(),
                 self.resolve_sampler(sampler),
-                self._mixed_speaker_state(mix),
+                self._mixed_speaker_state(parts),
             )
 
         # 参照音声と caption は同じ1回の読みから取る。間で studio が切り替えても混ざらない
         profile = None if design else self._profile_for(profile_id)
         ref_audio = profile.reference if profile is not None else None
         resolved_caption, _ = self._resolve_caption(caption, profile)
-        tokens = profile.tokens_for(str(self.model)) if profile is not None else None
         speaker = None
-        if self._speaker_injection_ready:
-            if tokens is not None:
-                speaker = self._tokens_state(tokens)
-            elif ref_audio is not None:
-                speaker = self._reference_state(ref_audio)
+        if self._speaker_injection_ready and profile is not None:
+            speaker = self._profile_state(profile)
         return _Voice(ref_audio, resolved_caption, self.resolve_sampler(sampler), speaker)
 
     def save(self, samples: np.ndarray, sample_rate: int) -> SpeechResult:

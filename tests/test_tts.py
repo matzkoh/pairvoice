@@ -5,7 +5,13 @@ import numpy as np
 import pytest
 
 from pairvoice.config import ProfileConfig, SamplerConfig, TTSConfig
-from pairvoice.profiles import ProfileNotFound, ProfileStore, SpeakerTokens
+from pairvoice.profiles import (
+    MixVoice,
+    ProfileNotFound,
+    ProfileRejected,
+    ProfileStore,
+    SpeakerTokens,
+)
 from pairvoice.tts import (
     ANCHOR_TEXT,
     LEAD_TEXT,
@@ -964,3 +970,61 @@ def test_reference_state_is_kept_next_to_the_reference_across_reloads(
     saved = list(profile.reference.parent.glob("*.speaker.npy"))
     assert len(saved) == 1
     assert "fake--tts" in saved[0].name
+
+
+def _mix_material(tmp_path, name, *, tokens=None, made_with="fake/tts"):
+    return ProfileStore(tmp_path / "profiles").create(
+        name=name,
+        caption="",
+        source="curate" if tokens is not None else "upload",
+        write_reference=lambda path: path.write_bytes(b"RIFF"),
+        speaker=None
+        if tokens is None
+        else SpeakerTokens(lambda path: np.save(path, tokens), made_with),
+    )
+
+
+def test_speak_mixes_voices_with_the_states_they_are_read_with(
+    no_ref_config, tmp_path, monkeypatch
+):
+    import mlx.core as mx
+
+    model = MixModel(FakeResult(np.zeros(480, dtype=np.float32)))
+    backend = make_backend(no_ref_config, model, tmp_path, monkeypatch)
+    folded = _mix_material(tmp_path, "畳み込み", tokens=np.full((4, 2), 3.0, np.float32))
+    plain = _mix_material(tmp_path, "取り込み")
+    monkeypatch.setattr(backend, "_reference_state", lambda path: mx.ones((1, 5, 2)))
+
+    backend.speak("テスト", mix=[(MixVoice("取り込み"), 1.0), (MixVoice(folded.id), 3.0)])
+
+    # 畳み込んだ声は畳み込んだ表現、ほかの声は参照音声の表現で混ぜる（読み上げと同じ）
+    # 長さは短い方にそろえる: 0.25 * 1 + 0.75 * 3
+    np.testing.assert_allclose(np.asarray(model.seen[0][1][2]), np.full((1, 4, 2), 2.5))
+    assert model.calls[0]["ref_audio"] == str(plain.reference)
+
+
+def test_mix_tokens_returns_the_mixed_state_as_saved_tokens(no_ref_config, tmp_path, monkeypatch):
+    import mlx.core as mx
+
+    backend = make_backend(no_ref_config, MixModel(None), tmp_path, monkeypatch)
+    _mix_material(tmp_path, "a")
+    _mix_material(tmp_path, "b")
+    states = iter([mx.zeros((1, 3, 2)), mx.full((1, 3, 2), 4.0)])
+    monkeypatch.setattr(backend, "_reference_state", lambda path: next(states))
+
+    tokens = backend.mix_tokens([(MixVoice("a"), 0.5), (MixVoice("b"), 0.5)])
+
+    # 畳み込んだ声の speaker.npy と同じ (T, 768) の形
+    np.testing.assert_allclose(tokens, np.full((3, 2), 2.0))
+
+
+def test_mix_refuses_random_and_missing_voices(no_ref_config, tmp_path, monkeypatch):
+    backend = make_backend(no_ref_config, MixModel(None), tmp_path, monkeypatch)
+    a, b = _mix_material(tmp_path, "a"), _mix_material(tmp_path, "b")
+    ProfileStore(tmp_path / "profiles").create_random(name="ランダム", members=[a.id, b.id])
+
+    # ランダムの声はメンバーを1つ選んでしまい、混ぜた声が試すたびに変わる
+    with pytest.raises(ProfileRejected):
+        backend.mix_tokens([(MixVoice("ランダム"), 1.0)])
+    with pytest.raises(ProfileNotFound):
+        backend.mix_tokens([(MixVoice("無い声"), 1.0)])

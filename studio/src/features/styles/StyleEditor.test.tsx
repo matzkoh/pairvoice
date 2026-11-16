@@ -44,6 +44,7 @@ const BASE: Props = {
         members: [],
         order: 'random',
         folded: false,
+        mix: [],
       },
       {
         id: 'p-b',
@@ -55,6 +56,7 @@ const BASE: Props = {
         members: [],
         order: 'random',
         folded: false,
+        mix: [],
       },
     ],
   },

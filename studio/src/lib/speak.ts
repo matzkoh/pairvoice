@@ -14,9 +14,10 @@ export type SpeakBody = {
   sampler?: SamplerOverrides
   design?: boolean
   voice?: string
-  // 2択で絞り込むときの、もとの声（試聴で作った wav）を重みで混ぜた声
-  mix?: { audio: string; weight: number }[]
+  // もとの声を重みで混ぜた声。2択で絞り込むときは試聴で作った wav、混ぜるときは声（プロファイル）
+  mix?: MixSource[]
 }
+export type MixSource = { audio: string; weight: number } | { voice: string; weight: number }
 // 合成した音声（データの置き場所からの相対パス）を鳴らす URL
 export function audioFileUrl(relativePath: string) {
   return apiUrl(`/audio?path=${encodeURIComponent(relativePath)}`)

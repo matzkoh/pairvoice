@@ -157,6 +157,20 @@ export function ProfileCard({ item, voices, isActive, onPlay, onStatus, onDelete
               </p>
             )}
           </dd>
+          {item.mix.length > 0 && (
+            <>
+              <dt className="text-xs text-muted-foreground">もとの声</dt>
+              <dd className="text-sm tabular-nums">
+                {/* 混ぜた表現は保存してあるので、もとの声を消しても読める */}
+                {item.mix
+                  .map(
+                    (part) =>
+                      `${voices.find((voice) => voice.id === part.id)?.name ?? '（削除した声）'} ${Math.round(part.weight * 100)}%`,
+                  )
+                  .join(' / ')}
+              </dd>
+            </>
+          )}
           <dt className="text-xs text-muted-foreground">caption</dt>
           <dd className="text-sm whitespace-pre-wrap">
             {item.caption || <span className="text-muted-foreground">（なし）</span>}

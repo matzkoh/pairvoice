@@ -83,8 +83,8 @@ export type HistoryResponse = { items: HistoryItem[] }
 // 声のプロファイル（参照音声 + caption）。design = caption や合成した声から作った、
 // upload = 手持ちの wav を取り込んだ、curate = 雑多な音声ファイルから作った、
 // auto / import = pairvoice が初回に作った
-// random は参照音声を持たず、読み上げのたびに members から1つを選ぶ
-export type ProfileSource = 'design' | 'upload' | 'curate' | 'auto' | 'import' | 'random'
+// random は参照音声を持たず、読み上げのたびに members から1つを選ぶ。mix はほかの声を混ぜた
+export type ProfileSource = 'design' | 'upload' | 'curate' | 'auto' | 'import' | 'random' | 'mix'
 // random の声の選び方。shuffle は混ぜた順に、全員を一巡するまで同じ声を選ばない
 export type ProfileOrder = 'random' | 'shuffle'
 export type ProfileItem = {
@@ -101,6 +101,8 @@ export type ProfileItem = {
   order: ProfileOrder
   // 素材を畳み込んだ声。要約した話者の表現で読み、参照音声はその中心に近い 26 秒の素材
   folded: boolean
+  // mix の声の作り方（もとの声の ID と、足して1の重み）。ほかの声は空
+  mix: { id: string; weight: number }[]
 }
 export type ProfilesResponse = { items: ProfileItem[]; active: string | null }
 

@@ -26,6 +26,7 @@ from .curate import Analysis, Outcome
 from .player import Player
 
 if TYPE_CHECKING:
+    from .profiles import MixVoice
     from .tts import SpeechResult
 
 _log = logging.getLogger(__name__)
@@ -479,7 +480,7 @@ class Engine:
         design: bool = False,
         profile_id: str | None = None,
         wait_download: bool = True,
-        mix: list[tuple[str, float]] | None = None,
+        mix: list[tuple[str | MixVoice, float]] | None = None,
         style: str | None = None,
         *,
         check_mute: bool = False,
@@ -488,11 +489,7 @@ class Engine:
 
         async def work():
             await self._tts.ensure_loaded(wait_download=wait_download)
-            resolved_mix = (
-                [(self._tts_backend.resolve_audio(audio), weight) for audio, weight in mix]
-                if mix
-                else None
-            )
+            resolved_mix = self._resolve_mix(mix) if mix else None
             result = await on_mlx_thread(
                 self._tts_backend.speak,
                 text,
@@ -611,6 +608,22 @@ class Engine:
         """データの置き場所の wav の話者ベクトル。2択でもとの声どうしの位置を測る。"""
         path = self._tts_backend.resolve_audio(audio)
         return await self._measure(self._tts, self._tts_backend.speaker_vector, path)
+
+    def _resolve_mix(
+        self, mix: list[tuple[str | MixVoice, float]]
+    ) -> list[tuple[Path | MixVoice, float]]:
+        """mix の audio（データの置き場所からの相対パス）を wav に解決する。声はそのまま渡す。"""
+        return [
+            (self._tts_backend.resolve_audio(source) if isinstance(source, str) else source, weight)
+            for source, weight in mix
+        ]
+
+    async def mix_tokens(self, mix: list[tuple[str | MixVoice, float]]) -> tuple[np.ndarray, str]:
+        """混ぜた話者の表現と、それを作った合成モデルの名前。混ぜた声をプロファイルにするのに使う。"""
+        tokens = await self._measure(
+            self._tts, self._tts_backend.mix_tokens, self._resolve_mix(mix)
+        )
+        return tokens, str(self._tts_backend.model)
 
     async def save_audio(self, samples: np.ndarray, sample_rate: int) -> SpeechResult:
         """合成した wav と同じ所に置く（日が経つと消える）。モデルは使わない。"""

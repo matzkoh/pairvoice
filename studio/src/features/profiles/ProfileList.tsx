@@ -18,12 +18,14 @@ export const SOURCE_LABELS: Record<ProfileSource, string> = {
   auto: '自動で作成',
   import: '設定から移行',
   random: 'ランダム',
+  mix: '混ぜた声',
 }
 
 // 一覧の見出しの順。ランダムの声はほかの声を束ねるものなので先頭に置く
 const SOURCE_ORDER: readonly ProfileSource[] = [
   'random',
   'design',
+  'mix',
   'curate',
   'upload',
   'auto',

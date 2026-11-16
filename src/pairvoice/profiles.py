@@ -19,7 +19,7 @@ import re
 import secrets
 import shutil
 import threading
-from collections.abc import Callable
+from collections.abc import Callable, Sequence
 from dataclasses import dataclass
 from datetime import UTC, datetime, timedelta
 from pathlib import Path
@@ -46,9 +46,10 @@ TONE_FILENAME = "tone.txt"
 _ID_PATTERN = re.compile(r"p-[0-9A-Za-z-]+")
 # design = caption や合成した声から作った、upload = 手持ちの wav を取り込んだ、
 # curate = 雑多な音声ファイルから選り分けた、auto / import = 初回に常駐サーバーが作った、
-# random = ほかの声から毎回1つを選ぶ
+# random = ほかの声から毎回1つを選ぶ、mix = ほかの声の話者の表現を重みで混ぜた
 RANDOM_SOURCE = "random"
-SOURCES = ("design", "upload", "curate", "auto", "import", RANDOM_SOURCE)
+MIX_SOURCE = "mix"
+SOURCES = ("design", "upload", "curate", "auto", "import", RANDOM_SOURCE, MIX_SOURCE)
 # 1つだけでは選ぶ意味が無い
 MIN_MEMBERS = 2
 # ランダムの声の選び方。random = 毎回ばらばらに選ぶ、shuffle = 混ぜた順に一巡ずつ選ぶ
@@ -65,6 +66,13 @@ _shuffle_rounds: dict[Path, tuple[list[str], str | None]] = {}
 _shuffle_lock = threading.Lock()
 # groups.json を読んで書き戻す間を1本にする（重なると、片方が選んだ声が消える）
 _groups_lock = threading.Lock()
+
+
+@dataclass(frozen=True)
+class MixVoice:
+    """混ぜる材料にする声（プロファイルの名前か ID）。読み上げと同じ表現で混ぜる。"""
+
+    key: str
 
 
 @dataclass(frozen=True)
@@ -93,6 +101,9 @@ class Profile:
     # そのモデルの空間のものなので、モデルが違えば使わず参照音声で読む
     speaker: Path | None = None
     speaker_model: str = ""
+    # 混ぜた声の作り方（もとの声の ID と重み）。表現は speaker に写して持つので、もとの声を
+    # 消しても読める。作り直すときの控え
+    mix: tuple[tuple[str, float], ...] = ()
 
     def tokens_for(self, model: str) -> Path | None:
         """model で読むときに差し込む話者の表現。別のモデルで作った表現は使わない（空間が違う）。"""
@@ -113,8 +124,20 @@ class Profile:
             "tone": self.tone,
             "members": list(self.members),
             "order": self.order,
-            "folded": self.speaker is not None,
+            # 混ぜた声も表現を持つが、素材から畳み込んだ声ではない
+            "folded": self.speaker is not None and not self.mix,
+            "mix": [{"id": voice, "weight": weight} for voice, weight in self.mix],
         }
+
+
+def _read_mix(raw: object) -> tuple[tuple[str, float], ...]:
+    if not isinstance(raw, list):
+        return ()
+    return tuple(
+        (str(part["id"]), float(part["weight"]))
+        for part in raw
+        if isinstance(part, dict) and isinstance(part.get("weight"), int | float) and "id" in part
+    )
 
 
 def _read_groups(path: Path) -> dict[str, dict[str, str]]:
@@ -189,6 +212,7 @@ class ProfileStore:
             order=order if order in ORDERS else "random",
             speaker=speaker if speaker.is_file() else None,
             speaker_model=str(meta.get("speaker_model", "")),
+            mix=_read_mix(meta.get("mix")),
         )
 
     def require(self, profile_id: str) -> Profile:
@@ -307,8 +331,10 @@ class ProfileStore:
         source: str,
         write_reference: Callable[[Path], object],
         speaker: SpeakerTokens | None = None,
+        mix: Sequence[tuple[str, float]] = (),
     ) -> Profile:
-        """プロファイルを作る。参照音声は write_reference が書く。speaker は畳み込んだ声の表現。
+        """プロファイルを作る。参照音声は write_reference が書く。speaker は畳み込んだ・混ぜた声の
+        表現で、mix は混ぜた声の作り方。
 
         使用中のプロファイルがまだ無ければ、作ったものを使用中にする。放っておくと次の
         読み上げで既定の声が自動で作られ、作った声が使われない
@@ -331,6 +357,8 @@ class ProfileStore:
         }
         if speaker is not None:
             meta["speaker_model"] = speaker.model
+        if mix:
+            meta["mix"] = [{"id": voice, "weight": weight} for voice, weight in mix]
         _write_meta(directory, meta)
         with _write_lock:
             if self.active() is None:
@@ -344,6 +372,7 @@ class ProfileStore:
             created_at=meta["created_at"],
             speaker=None if speaker is None else directory / SPEAKER_FILENAME,
             speaker_model="" if speaker is None else speaker.model,
+            mix=tuple(mix),
         )
 
     def create_random(self, *, name: str, members: list[str], order: str = "random") -> Profile:

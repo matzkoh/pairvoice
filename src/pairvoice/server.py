@@ -30,6 +30,7 @@ from .lifecycle import Engine, ModelUnavailable, MutedError, limit_mlx_cache
 from .llm import MlxLmBackend
 from .mute import MAX_MINUTES, MIN_MINUTES, InvalidMinutes, MuteController
 from .narration import NarrateResponse, narrate
+from .profiles import MixVoice
 from .prompt import SummaryPrompt
 from .stt import MlxSttBackend
 from .studio_web import mount_studio, open_studio
@@ -227,12 +228,27 @@ class SamplerOverrides(BaseModel):
 
 
 class MixPart(BaseModel):
-    audio: DataAudioPath
+    audio: DataAudioPath | None = Field(
+        default=None, description="混ぜる音声（データの置き場所からの相対パスの wav）"
+    )
+    voice: str | None = Field(
+        default=None,
+        description="混ぜる声（プロファイル）の名前か ID。読み上げと同じ表現で混ぜる。ランダムの声は混ぜられない",
+    )
     # 伸ばしすぎると声が崩れるので、2択が使う幅（負の重みの合計 0.5 まで）に余裕を
     # 持たせた範囲に絞る
     weight: float = Field(
         ge=-1, le=2, description="重み。負の値はその声から遠ざかる向きへ伸ばす（外挿）"
     )
+
+    @model_validator(mode="after")
+    def _one_source(self):
+        if (self.audio is None) == (self.voice is None):
+            raise ValueError("exactly one of audio or voice is required")
+        return self
+
+    def source(self) -> str | MixVoice:
+        return self.audio if self.audio is not None else MixVoice(self.voice or "")
 
 
 class SynthesisRequest(BaseModel):
@@ -273,7 +289,8 @@ class SynthesizeRequest(SynthesisRequest):
     mix: list[MixPart] | None = Field(
         default=None,
         min_length=1,
-        description="studio の「2択で絞り込む」用。いくつかの声の話者の表現を重みで混ぜた声で読む",
+        description="studio の「2択で絞り込む」と「混ぜる」用。いくつかの音声か声の話者の表現を重みで混ぜた声で読む。"
+        "`voice` は使わない",
     )
 
     @model_validator(mode="after")
@@ -524,7 +541,10 @@ def create_app(engine: Engine) -> FastAPI:
         response_model=SynthesisResponse,
         responses={
             **_SYNTHESIS_ERRORS,
-            404: _error(f"{_VOICE_NOT_FOUND}、`audio_not_found`（`mix` の wav が無い）"),
+            404: _error(
+                f"{_VOICE_NOT_FOUND}（`mix` の `voice` も）、`audio_not_found`（`mix` の wav が無い）"
+            ),
+            400: _error("`invalid_profile`（`mix` にランダムの声）"),
         },
     )
     async def synthesize(
@@ -543,7 +563,7 @@ def create_app(engine: Engine) -> FastAPI:
             profile_id=request.voice,
             wait_download=request.wait_download,
             mix=(
-                [(part.audio, part.weight) for part in request.mix]
+                [(part.source(), part.weight) for part in request.mix]
                 if request.mix is not None
                 else None
             ),
@@ -720,6 +740,7 @@ def create_app(engine: Engine) -> FastAPI:
             engine.transcribe,
             engine.save_audio,
             engine.fold_material,
+            engine.mix_tokens,
         )
     )
     api.include_router(corpus_router(data_root))

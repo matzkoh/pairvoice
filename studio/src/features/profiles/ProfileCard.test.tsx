@@ -28,6 +28,7 @@ const ITEM: ProfileItem = {
   members: [],
   order: 'random',
   folded: false,
+  mix: [],
 }
 
 const VOICES: ProfileItem[] = [
@@ -45,6 +46,7 @@ const RANDOM: ProfileItem = {
   members: ['p-a', 'p-b'],
   order: 'random',
   folded: false,
+  mix: [],
 }
 
 function renderCard(isActive = false, item: ProfileItem = ITEM) {
@@ -195,4 +197,17 @@ it('ランダムの声は選び方だけを変えても保存できる', async (
     members: ['p-a', 'p-b'],
     order: 'shuffle',
   })
+})
+
+it('混ぜた声は、もとの声と割合を見せる（消した声も残す）', () => {
+  renderCard(false, {
+    ...ITEM,
+    id: 'p-m',
+    source: 'mix',
+    mix: [
+      { id: 'p-a', weight: 0.25 },
+      { id: 'p-gone', weight: 0.75 },
+    ],
+  })
+  expect(screen.getByText('一つ目 25% / （削除した声） 75%')).toBeTruthy()
 })

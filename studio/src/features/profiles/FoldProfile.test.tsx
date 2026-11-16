@@ -51,6 +51,7 @@ const DONE = job({
     members: [],
     order: 'random',
     folded: false,
+    mix: [],
   },
   report: { speech_seconds: 1422, pieces: 319, blocks: 55, pooled_tokens: 8863, tokens: 180 },
 })
