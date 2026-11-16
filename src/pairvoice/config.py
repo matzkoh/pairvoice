@@ -45,6 +45,9 @@ class SamplerConfig:
     - num_steps / t_schedule_mode / sway_coeff: モデル既定の 40 段 linear に対し、
       10 段の Sway Sampling で読み上げが約2倍速い。聴き比べで、10 段 linear はうっすら
       音質が落ち、8 段 sway はたまに崩れ、6 段は使えなかった
+    - cfg_min_t: モデル既定の 0.5 では 10 段のうち 7 段で CFG を掛け、その段は3倍の量を
+      計算する。0.75 で最初の 5 段に絞ると読み上げが約1.2倍速い。聴き比べで、5 段は許容、
+      4 段は迷う所、最初の 3 段だけや中ほど 4 段（最初の 3 段を外す）は短い文が崩れた
 
     ここで既定を変えたら、studio の KNOBS（samplerKnobs.ts）の init もそろえる。
     「TOML でコピー」はその init との差分を書き出す。
@@ -68,7 +71,7 @@ class SamplerConfig:
     duration_scale: float | None = None
     seconds: float | None = None
     rng_seed: int | None = None
-    cfg_min_t: float | None = None
+    cfg_min_t: float | None = 0.75
     cfg_max_t: float | None = None
     context_kv_cache: bool | None = None
     speaker_kv_scale: float | None = None

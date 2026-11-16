@@ -24,8 +24,9 @@ export type Knob =
   | (Common & { kind: 'optionalNumber'; placeholder: string })
 
 // 既定値は pairvoice が config.toml なしで渡す値に従う。ほとんどはモデルの config.json の
-// 値（mlx-audio の SamplerConfig のクラス既定と一致）で、Num Steps と Time Schedule だけは
-// pairvoice の SamplerConfig が速さのために外した値（10 段の Sway Sampling）にしてある。
+// 値（mlx-audio の SamplerConfig のクラス既定と一致）で、Num Steps・Time Schedule・CFG Min t
+// だけは pairvoice の SamplerConfig が速さのために外した値（10 段の Sway Sampling、CFG は最初の
+// 5 段）にしてある。
 // デモの UI は cfg_scale_caption を 4.0 で始めるが、ここは 3.0 にしてある。初期状態を
 // 「いまこのモデルとこの設定で鳴っている音」に合わせるほうが、差分として結果を読める。
 export const KNOBS: readonly Knob[] = [
@@ -138,7 +139,7 @@ export const KNOBS: readonly Knob[] = [
     min: 0,
     max: 1,
     step: 0.01,
-    init: 0.5,
+    init: 0.75,
   },
   {
     key: 'cfg_max_t',

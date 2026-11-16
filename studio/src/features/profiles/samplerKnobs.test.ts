@@ -73,7 +73,7 @@ it('空欄でない項目は常に送る（触っていないから既定に落�
   expect(sampler.num_steps).toBe(10)
   expect(sampler.cfg_guidance_mode).toBe('independent')
   expect(sampler.context_kv_cache).toBe(true)
-  expect(sampler.cfg_min_t).toBe(0.5)
+  expect(sampler.cfg_min_t).toBe(0.75)
 })
 
 it('optionalNumber は数として読めれば載る', () => {

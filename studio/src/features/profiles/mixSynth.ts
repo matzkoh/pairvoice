@@ -6,6 +6,8 @@ import type { MixPart } from './voiceRegion'
 
 // 保存する声の合成の段数（読み上げの既定は 10）。増やすほど丁寧で遅い
 export const MASTER_STEPS = 80
+// 保存する声は CFG もモデルの既定どおり広く掛ける（読み上げの既定は速さのために狭めてある）
+const MASTER_CFG_MIN_T = 0.5
 
 // 混ぜた声を合成する。試聴は速さ優先で読み上げと同じ段数、保存する声は numSteps を増やす
 export async function synth(
@@ -16,7 +18,9 @@ export async function synth(
   numSteps?: number,
 ) {
   const sampler =
-    numSteps === undefined ? { rng_seed: seed } : { rng_seed: seed, num_steps: numSteps }
+    numSteps === undefined
+      ? { rng_seed: seed }
+      : { rng_seed: seed, num_steps: numSteps, cfg_min_t: MASTER_CFG_MIN_T }
   return (await speakOnce({ text, caption, sampler, mix: [...mix] })).relative_path
 }
 

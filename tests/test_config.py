@@ -157,7 +157,7 @@ def test_sampler_defaults_to_none_except_sway_sampling():
     config = load_config(Path("/nonexistent/config.toml"))
 
     # None は「モデル既定に任せる」。モデル既定の値を pairvoice 側に写すと二重管理になる。
-    # 速さのために意図して外した Sway Sampling の3項目だけが値を持つ
+    # 速さのために意図して外した Sway Sampling の3項目と CFG の範囲だけが値を持つ
     assert dataclasses.asdict(config.tts.sampler) == {
         "num_steps": 10,
         "cfg_guidance_mode": None,
@@ -169,7 +169,7 @@ def test_sampler_defaults_to_none_except_sway_sampling():
         "duration_scale": None,
         "seconds": None,
         "rng_seed": None,
-        "cfg_min_t": None,
+        "cfg_min_t": 0.75,
         "cfg_max_t": None,
         "context_kv_cache": None,
         "speaker_kv_scale": None,
