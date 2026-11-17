@@ -84,3 +84,30 @@ async def test_speech_blocks_level_the_voice_like_a_reference():
 
     assert len(blocks) == 1
     assert voiced_rms_db(blocks[0], RATE) == pytest.approx(TARGET_RMS_DB, abs=1.0)
+
+
+async def test_stopping_while_saving_lets_the_save_finish():
+    import asyncio
+
+    jobs = fold.FoldJobs()
+    saving, release, saved = asyncio.Event(), asyncio.Event(), []
+
+    async def work(progress):
+        progress("save", 0.0)
+        saving.set()
+        await release.wait()
+        saved.append(True)
+        return {"id": "p"}, {}
+
+    job = jobs.start(work, lambda error: ("internal_error", None))
+    await saving.wait()
+    stopping = asyncio.create_task(jobs.stop(job.job_id))
+    await asyncio.sleep(0)
+    release.set()
+    await stopping
+
+    # 保存は打ち切らず終えさせ、記録だけ消す
+    assert saved == [True]
+    assert job.status == "done"
+    with pytest.raises(fold.FoldJobNotFound):
+        jobs.get(job.job_id)
