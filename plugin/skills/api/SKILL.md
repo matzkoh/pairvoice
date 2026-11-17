@@ -21,3 +21,12 @@ curl -sf "$(pairvoice url)/openapi.json" | jq '.paths["/api/speak"], .components
 ## 素材から声を作る
 
 `POST /profiles/fold` で素材を畳み込む。素材全体の平均の声になり、区間を選ばないので候補を作って聴き比べる必要がない。素材は長いほど声がぶれない。受け付けたらすぐ返るので、`GET /profiles/fold/{job_id}` を間を空けて問い合わせる（素材 30 分につき 20 分ほど）。
+声の名前 `name` は multipart の本文ではなくクエリに付ける（無いと 422）。途中でやめるなら `DELETE /profiles/fold/{job_id}` で止める（返った時点で列が空き、作業用の素材も消える）。常駐サーバーごと再起動して止めない。
+
+```bash
+base="$(pairvoice url)/api"
+job=$(curl -sf -X POST "$base/profiles/fold?name=$(jq -rn --arg v '配信の声' '$v|@uri')" \
+  -F files=@配信1.m4a -F files=@配信2.m4a | jq -r .job_id)
+curl -sf "$base/profiles/fold/$job" | jq '{status, stage, progress}'
+curl -sf -X DELETE "$base/profiles/fold/$job"
+```

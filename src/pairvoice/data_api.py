@@ -384,7 +384,9 @@ class FoldReport(BaseModel):
 
 
 class FoldJobResponse(BaseModel):
-    job_id: str = Field(description="`GET /profiles/fold/{job_id}` で問い合わせる ID")
+    job_id: str = Field(
+        description="`GET /profiles/fold/{job_id}` で問い合わせ、`DELETE` で止める ID"
+    )
     status: Literal["running", "done", "failed"] = Field(description="走っている・できた・失敗した")
     stage: Literal["upload", "decode", "clean", "diarize", "encode", "summarize", "save"] = Field(
         description="いまの段階。clean（雑音と響きを除く）がいちばん長い"
@@ -1021,13 +1023,17 @@ def data_router(
     ):
         """`files` に音声・動画のファイルをいくつでも送る。区間を選ばず、素材全体の平均の声を作る。
 
+        声の名前 `name` は本文ではなくクエリに付ける（`POST /profiles/fold?name=...`）。
         素材を丸ごと雑音と響きを除いてから話者を分け、いちばん多く話す人の声を全部、話者の
         表現にして 180 トークンに要約する。素材が長いほど選び方で声がぶれない（数十分〜数時間が目安）。
         受け付けたらすぐ返すので、`GET /profiles/fold/{job_id}` で終わるまで問い合わせる。
-        素材 30 分につき 20 分ほどかかり、その間も読み上げは合間に割り込む。
+        途中でやめるなら `DELETE /profiles/fold/{job_id}`。素材 30 分につき 20 分ほどかかり、その間も読み上げは合間に割り込む。
         使用中の声がまだ無ければ、作った声を使用中にする。
         """
-        directory = tempfile.TemporaryDirectory(prefix="pairvoice-fold-")
+        # 止めたときは、まだ書いているデコードと並んで消すので、消し損ねで止め方を失敗にしない
+        directory = tempfile.TemporaryDirectory(
+            prefix="pairvoice-fold-", ignore_cleanup_errors=True
+        )
         try:
             files = await _receive_files(request, Path(directory.name))
         except BaseException:
@@ -1057,10 +1063,28 @@ def data_router(
         response_model=FoldJobResponse,
         summary="畳み込みの進み具合",
         tags=["声"],
-        responses={404: _error("`fold_job_not_found`（ID の取り違え・常駐サーバーを再起動した）")},
+        responses={
+            404: _error("`fold_job_not_found`（ID の取り違え・止めた・常駐サーバーを再起動した）")
+        },
     )
     def get_fold(job_id: str):
         return dataclasses.asdict(fold_jobs.get(job_id))
+
+    @router.delete(
+        "/profiles/fold/{job_id}",
+        summary="畳み込みを止める",
+        tags=["声"],
+        responses={404: _error("`fold_job_not_found`（ID の取り違え・常駐サーバーを再起動した）")},
+    )
+    async def delete_fold(job_id: str) -> Ok:
+        """走っていれば止め、止まるまで待って返す。終わった仕事は記録を消すだけで、作った声は残る
+        （保存まで進んでいたら、保存を終えさせてから消す）。
+
+        返った時点で列は空いている。MLX が手を付けていた小分けの1つ（数秒）と、decode の段の
+        ffmpeg は最後まで走る。
+        """
+        await fold_jobs.stop(job_id)
+        return Ok()
 
     @router.post(
         "/curate",

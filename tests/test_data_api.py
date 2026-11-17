@@ -1,5 +1,8 @@
 import io
 import struct
+import tempfile
+import threading
+import time
 import wave
 from pathlib import Path
 
@@ -689,27 +692,33 @@ def test_render_builds_a_reference_and_profile_reuses_it(tmp_path):
     assert client.get(f"/profiles/{profile_id}/audio").content == reference.read_bytes()
 
 
+def start_fold(client, body: bytes, name: str) -> str:
+    started = client.post(
+        "/profiles/fold",
+        params={"name": name},
+        files=[("files", ("配信.wav", body, "application/octet-stream"))],
+    )
+    assert started.status_code == 202
+    return started.json()["job_id"]
+
+
+def wait_fold(client, job_id: str) -> dict:
+    for _ in range(200):
+        job = client.get(f"/profiles/fold/{job_id}").json()
+        if job["status"] != "running":
+            return job
+        time.sleep(0.05)
+    raise AssertionError(job)
+
+
 @needs_ffmpeg
 def test_fold_builds_a_profile_from_all_speech_in_the_background(tmp_path):
-    import time
-
     import numpy as np
 
     _, client = build(data_root=tmp_path)
     body = speech_wav(tmp_path, [(1, 20, 0.5, 220), (21, 40, 0.5, 220)])
     with client:
-        started = client.post(
-            "/profiles/fold",
-            params={"name": "畳んだ声"},
-            files=[("files", ("配信.wav", body, "application/octet-stream"))],
-        )
-        assert started.status_code == 202
-        job_id = started.json()["job_id"]
-        for _ in range(200):
-            job = client.get(f"/profiles/fold/{job_id}").json()
-            if job["status"] != "running":
-                break
-            time.sleep(0.05)
+        job = wait_fold(client, start_fold(client, body, "畳んだ声"))
 
     assert job["status"] == "done", job
     report = job["report"]
@@ -723,6 +732,67 @@ def test_fold_builds_a_profile_from_all_speech_in_the_background(tmp_path):
     tokens = np.load(directory / "speaker.npy")
     assert tokens.shape[1] == 2
     assert client.get(f"/profiles/{profile['id']}/audio").status_code == 200
+
+
+@needs_ffmpeg
+def test_stopping_a_fold_cancels_queued_work_and_frees_the_queue(tmp_path, monkeypatch):
+    scratch = tmp_path / "tmp"
+    scratch.mkdir()
+    monkeypatch.setattr(tempfile, "tempdir", str(scratch))
+
+    class BlockingCurate(FakeCurate):
+        """1回目の雑音除去で、テストが放すまで MLX のスレッドを塞ぐ。"""
+
+        def __init__(self):
+            super().__init__()
+            self.entered = threading.Event()
+            self.release = threading.Event()
+
+        def enhance(self, samples):
+            self.entered.set()
+            self.release.wait(5)
+            return super().enhance(samples)
+
+    curate = BlockingCurate()
+    _, client = build(data_root=tmp_path, curate=curate)
+    body = speech_wav(tmp_path, [(1, 60, 0.5, 220)])
+    with client:
+        job_id = start_fold(client, body, "止める声")
+        assert curate.entered.wait(5)
+        assert client.get(f"/profiles/fold/{job_id}").json()["stage"] == "clean"
+
+        stopped = client.delete(f"/profiles/fold/{job_id}")
+
+        assert stopped.json() == {"ok": True}
+        assert client.get("/health").json()["queue"] == {"running": 0, "waiting": 0}
+        assert client.get(f"/profiles/fold/{job_id}").status_code == 404
+        # 手を付けていた1つは走り切るが、残りの小分けは列に並ばない
+        curate.release.set()
+        time.sleep(0.3)
+        assert curate.enhance_calls == 1
+        assert client.get("/profiles").json()["items"] == []
+        # 素材を置いた作業場所も消える
+        assert list(scratch.glob("pairvoice-fold-*")) == []
+
+
+@needs_ffmpeg
+def test_stopping_a_finished_fold_forgets_the_job_and_keeps_the_voice(tmp_path):
+    _, client = build(data_root=tmp_path)
+    body = speech_wav(tmp_path, [(1, 30, 0.5, 220)])
+    with client:
+        job_id = start_fold(client, body, "残す声")
+        assert wait_fold(client, job_id)["status"] == "done"
+
+        assert client.delete(f"/profiles/fold/{job_id}").status_code == 200
+        assert client.get(f"/profiles/fold/{job_id}").status_code == 404
+        assert [p["name"] for p in client.get("/profiles").json()["items"]] == ["残す声"]
+
+
+def test_stopping_a_missing_fold_is_not_found(client):
+    response = client.delete("/profiles/fold/missing")
+
+    assert response.status_code == 404
+    assert response.json()["error"] == "fold_job_not_found"
 
 
 def test_fold_job_not_found(client):
