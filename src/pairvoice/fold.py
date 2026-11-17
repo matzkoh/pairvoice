@@ -50,7 +50,7 @@ KMEANS_ITERATIONS = 30
 
 
 class FoldJobNotFound(Exception):
-    """畳み込みの仕事が無い（ID の取り違え・常駐サーバーを再起動した）。"""
+    """畳み込みの仕事が無い（ID の取り違え・止めた・常駐サーバーを再起動した）。"""
 
 
 EncodeSpeaker = Callable[[np.ndarray], Awaitable[np.ndarray]]
@@ -98,6 +98,8 @@ async def clean(
     """
     span, context = int(SPAN_SECONDS * RATE), int(SPAN_CONTEXT_SECONDS * RATE)
     total = sum(s.seconds for s in material.sources)
+    # 最初の SPAN_SECONDS を除き終えるまで、前の段のままに見えないように
+    progress("clean", 0.0)
     done = 0.0
     cleaned = []
     for source in material.sources:
@@ -263,8 +265,8 @@ class FoldJobs:
 
     def __init__(self) -> None:
         self._jobs: dict[str, FoldJob] = {}
-        # 走らせている task を握っておく（捨てると GC で止まる）
-        self._tasks: set[asyncio.Task] = set()
+        # 走らせている task を握っておく（捨てると GC で止まる）。止めるときにも使う
+        self._tasks: dict[str, asyncio.Task] = {}
 
     def start(
         self,
@@ -288,8 +290,8 @@ class FoldJobs:
                 job.status = "failed"
 
         task = asyncio.create_task(run())
-        self._tasks.add(task)
-        task.add_done_callback(self._tasks.discard)
+        self._tasks[job.job_id] = task
+        task.add_done_callback(lambda _: self._tasks.pop(job.job_id, None))
         return job
 
     def get(self, job_id: str) -> FoldJob:
@@ -297,3 +299,18 @@ class FoldJobs:
         if job is None:
             raise FoldJobNotFound(job_id)
         return job
+
+    async def stop(self, job_id: str) -> None:
+        """走っていれば止めて、終わるまで待ってから仕事を消す。終わった仕事は記録だけを消す。
+
+        保存まで進んでいたら止めずに保存を終えさせる（消えた仕事の声が途中までできるのを避ける）。
+        列に並べた処理は待たずに抜けるが、MLX のスレッドが手を付けた1つ（数秒）と、
+        別のスレッドで走っているデコードは最後まで走る。
+        """
+        job = self.get(job_id)
+        task = self._tasks.get(job_id)
+        if task is not None:
+            if job.stage != "save":
+                task.cancel()
+            await asyncio.wait({task})
+        self._jobs.pop(job_id, None)

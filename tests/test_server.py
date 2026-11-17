@@ -715,6 +715,15 @@ def test_openapi_documents_version_and_every_field():
     assert list(body("/api/profiles/curate")) == ["multipart/form-data"]
     assert list(body("/api/curate")) == ["multipart/form-data"]
 
+    # 本文を手で書いても、クエリの引数は消えない（名前は本文ではなくクエリで渡す）
+    def query(path):
+        parameters = spec["paths"][path]["post"]["parameters"]
+        return {p["name"]: p["required"] for p in parameters if p["in"] == "query"}
+
+    for path in ("/api/profiles/upload", "/api/profiles/curate", "/api/profiles/fold"):
+        assert query(path) == {"name": True, "caption": False}, path
+    assert "delete" in spec["paths"]["/api/profiles/fold/{job_id}"]
+
 
 def test_restart_answers_before_asking_launchd(monkeypatch):
     calls = []
