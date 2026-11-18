@@ -19,12 +19,18 @@ const PAIRVOICE_ORIGIN = process.env.PAIRVOICE_URL
 // dev と preview に同じ proxy を渡す。片方だけ直すと、ビルド確認のときだけ
 // 挙動が違うという厄介な差が生まれる
 const proxy = { '/api': { target: PAIRVOICE_ORIGIN, changeOrigin: true } }
+// 外部のページに iframe で埋めさせない。埋められた画面の操作は 17493 の Origin で proxy を通り、
+// pairvoice の判定を抜ける（pairvoice が送る値と揃える。server.py の FRAME_GUARD_HEADERS）
+const headers = {
+  'Content-Security-Policy': "frame-ancestors 'self'",
+  'X-Frame-Options': 'SAMEORIGIN',
+}
 
 export default defineConfig({
   plugins: [react(), tailwindcss()],
   resolve: { alias: { '@': path.resolve(import.meta.dirname, 'src') } },
-  server: { host: DEV_HOST, port: DEV_PORT, strictPort: true, proxy },
-  preview: { host: DEV_HOST, port: DEV_PORT, strictPort: true, proxy },
+  server: { host: DEV_HOST, port: DEV_PORT, strictPort: true, proxy, headers },
+  preview: { host: DEV_HOST, port: DEV_PORT, strictPort: true, proxy, headers },
   // どちらも Vite の既定と同値だが、pairvoice（studio_web.py）が dist を静的配信する
   // 契約なので明示しておく（既定に頼ると出力先が動いたときに気づけない）。
   build: { outDir: 'dist', emptyOutDir: true },

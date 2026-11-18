@@ -77,3 +77,19 @@ def test_studio_is_refused_to_foreign_pages():
     response = client.get("http://127.0.0.1:17495/", headers={"host": "evil.example"})
 
     assert response.status_code == 403
+
+
+def test_foreign_pages_cannot_frame_the_studio_docs_or_api():
+    _, client = build()
+    root = "http://127.0.0.1:17495"
+
+    # 画面を開くナビゲーションには Origin が付かず判定を通るので、埋め込みはヘッダーで断る
+    for response in (
+        client.get(f"{root}/"),
+        client.get(f"{root}/review"),
+        client.get(f"{root}/docs"),
+        client.get(f"{root}/api/health"),
+        client.get(f"{root}/", headers={"host": "evil.example"}),
+    ):
+        assert response.headers["content-security-policy"] == "frame-ancestors 'self'"
+        assert response.headers["x-frame-options"] == "SAMEORIGIN"

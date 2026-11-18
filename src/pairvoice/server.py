@@ -59,6 +59,13 @@ def is_local_request(host: str | None, origin: str | None) -> bool:
     return origin is None or _hostname(urlsplit(origin).netloc) in LOCAL_HOSTNAMES
 
 
+# 外部のページに iframe で埋めさせない（studio/vite.config.ts の dev / preview も同じ値を送る）
+FRAME_GUARD_HEADERS = {
+    "Content-Security-Policy": "frame-ancestors 'self'",
+    "X-Frame-Options": "SAMEORIGIN",
+}
+
+
 MAX_TOKENS_LIMIT = 1024
 
 API_DESCRIPTION = """\
@@ -399,8 +406,13 @@ def create_app(engine: Engine) -> FastAPI:
     @app.middleware("http")
     async def reject_foreign_pages(request: Request, call_next):
         if not is_local_request(request.headers.get("host"), request.headers.get("origin")):
-            return JSONResponse(status_code=403, content={"error": "forbidden_origin"})
-        return await call_next(request)
+            response = JSONResponse(status_code=403, content={"error": "forbidden_origin"})
+        else:
+            response = await call_next(request)
+        # 画面を開くナビゲーションには Origin が付かないので、外部のページは studio や /docs を
+        # iframe に埋めて利用者に押させられる（押した要求は 127.0.0.1 から出るので上の判定を通る）
+        response.headers.update(FRAME_GUARD_HEADERS)
+        return response
 
     def note_plugin_version(
         x_pairvoice_plugin: Annotated[str | None, Header(include_in_schema=False)] = None,
