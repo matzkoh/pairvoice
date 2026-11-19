@@ -1100,9 +1100,22 @@ class MlxCurateBackend:
     def enhance(self, samples: np.ndarray) -> np.ndarray:
         if self._enhancer is None:
             raise RuntimeError("curate model is not loaded")
-        out = np.asarray(self._enhancer.enhance(samples), dtype=np.float32).reshape(-1)
-        # 窓の端数の分だけ短く返る
-        return _fit(out, len(samples))
+        model = self._enhancer
+        config = model.config
+        length = len(samples)
+        chunked = length >= config.auto_chunk_threshold * config.sample_rate
+        if not chunked and length > config.one_time_decode_length * config.sample_rate:
+            window = int(config.decode_window * config.sample_rate)
+            stride = int(window * 0.75)
+            if (length - window) % stride:
+                # mlx-audio 0.6.4 は窓の端数にさらに1窓分を足し、元の音の外まで推論する。
+                # 2窓目以降は左端を半重複分捨てる。採用範囲が元の音にかかる最後の窓で止める。
+                discard = (window - stride) // 2
+                last_start = ((length - 1 - discard) // stride) * stride
+                samples = np.pad(samples, (0, last_start + window - length))
+        # 詰め物が境界を越えても、モードは元の長さで選ぶ。
+        out = np.asarray(model.enhance(samples, chunked=chunked), dtype=np.float32).reshape(-1)
+        return _fit(out, length)
 
     def dereverb(self, chunk: np.ndarray) -> np.ndarray:
         """44.1kHz モノラルの1チャンクの響きを除く。左右に同じ音を入れ、出た左右を混ぜる。"""

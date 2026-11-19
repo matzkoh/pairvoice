@@ -511,3 +511,38 @@ def test_score_deviation_skips_pieces_with_hardly_any_voice():
     curate.score_deviation(pieces, material)
 
     assert [p.deviation is None for p in pieces] == [False] * 4 + [True]
+
+
+@pytest.mark.parametrize(
+    ("length", "padded", "chunked"),
+    [
+        (2000, 2000, False),
+        (2200, 2200, False),
+        (2400, 2500, False),
+        (2451, 2800, False),
+        (5990, 6100, False),
+        (6000, 6000, True),
+    ],
+)
+def test_mossformer_keeps_only_contributing_windows(length, padded, chunked, monkeypatch):
+    from types import SimpleNamespace
+
+    from pairvoice.config import CurateConfig
+
+    samples = np.linspace(-1, 1, length, dtype=np.float32)
+
+    def enhance(audio, **kwargs):
+        assert len(audio) == padded
+        assert kwargs["chunked"] is chunked
+        assert not audio[length:].any()
+        return audio
+
+    backend = curate.MlxCurateBackend(CurateConfig())
+    enhancer = SimpleNamespace(
+        enhance=enhance,
+        config=SimpleNamespace(
+            sample_rate=100, decode_window=4, one_time_decode_length=20, auto_chunk_threshold=60
+        ),
+    )
+    monkeypatch.setattr(backend, "_enhancer", enhancer)
+    np.testing.assert_array_equal(backend.enhance(samples), samples)
