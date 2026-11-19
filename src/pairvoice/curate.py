@@ -290,7 +290,7 @@ def decode(files: list[tuple[str, Path]], directory: Path) -> Material:
         raise FfmpegMissing("ffmpeg が要ります（brew install ffmpeg）")
     rates = (DIARIZE_RATE, OUTPUT_RATE)
     channels = {DIARIZE_RATE: 1, OUTPUT_RATE: OUTPUT_CHANNELS}
-    streams = {rate: (directory / f"audio{rate}.f32").open("wb") for rate in rates}
+    streams = {rate: (directory / f"audio{rate}.f32").open("wb", buffering=0) for rate in rates}
     sources: list[Source] = []
     offset, truncated = 0.0, False
     try:
@@ -301,18 +301,19 @@ def decode(files: list[tuple[str, Path]], directory: Path) -> Material:
                 break
             # 1回のデコードから2つの rate に書き分ける。動画は音声だけを、複数の音声トラックは
             # 最初のものを読む
-            parts = {rate: directory / f"part{rate}.f32" for rate in rates}
+            starts = {rate: stream.tell() for rate, stream in streams.items()}
             outputs = [
                 arg
-                for rate, part in parts.items()
+                for rate, stream in streams.items()
                 for arg in (
                     *("-map", "0:a:0", "-t", f"{left:.3f}", "-ac", str(channels[rate])),
                     *("-ar", str(rate)),
-                    *("-f", "f32le", "-y", str(part)),
+                    *("-f", "f32le", f"pipe:{stream.fileno()}"),
                 )
             ]
             done = subprocess.run(
                 [ffmpeg, "-nostdin", "-v", "error", "-i", str(path), *outputs],
+                pass_fds=tuple(stream.fileno() for stream in streams.values()),
                 stderr=subprocess.PIPE,
                 check=False,
             )
@@ -320,7 +321,8 @@ def decode(files: list[tuple[str, Path]], directory: Path) -> Material:
                 detail = done.stderr.decode(errors="replace").strip().splitlines()
                 raise InvalidAudio(f"{name}: {detail[-1] if detail else '読めません'}")
             seconds = min(
-                part.stat().st_size // (4 * channels[rate]) / rate for rate, part in parts.items()
+                (stream.tell() - starts[rate]) // (4 * channels[rate]) / rate
+                for rate, stream in streams.items()
             )
             if seconds <= 0:
                 raise InvalidAudio(f"{name}: 音声がありません")
@@ -328,11 +330,11 @@ def decode(files: list[tuple[str, Path]], directory: Path) -> Material:
             truncated = truncated or seconds >= left - 0.01
             sources.append(Source(name=name, offset=offset, seconds=seconds))
             # 2つの rate の長さを揃えて足し、次のファイルとの間に無音を挟む
-            for rate, part in parts.items():
-                with part.open("rb") as source:
-                    _copy(source, streams[rate], round(seconds * rate) * 4 * channels[rate])
-                streams[rate].write(bytes(round(FILE_GAP_SECONDS * rate) * 4 * channels[rate]))
-                part.unlink()
+            for rate, stream in streams.items():
+                end = starts[rate] + round(seconds * rate) * 4 * channels[rate]
+                stream.seek(end)
+                stream.truncate()
+                stream.write(bytes(round(FILE_GAP_SECONDS * rate) * 4 * channels[rate]))
             offset += seconds + FILE_GAP_SECONDS
     finally:
         for stream in streams.values():
@@ -342,12 +344,6 @@ def decode(files: list[tuple[str, Path]], directory: Path) -> Material:
     }
     audio48 = audio[OUTPUT_RATE].reshape(-1, OUTPUT_CHANNELS)
     return Material(audio[DIARIZE_RATE], audio48, sources, truncated)
-
-
-def _copy(source, sink, size: int) -> None:
-    while size > 0 and (block := source.read(min(size, 1 << 20))):
-        sink.write(block)
-        size -= len(block)
 
 
 def merge_segments(segments: list[Segment]) -> list[Segment]:
