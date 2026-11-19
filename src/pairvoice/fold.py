@@ -169,12 +169,8 @@ def _distances(doubled: np.ndarray, squared: np.ndarray, centers: np.ndarray) ->
     return distances
 
 
-def medoids(x: np.ndarray, k: int, seed: int = 0) -> np.ndarray:
-    """k-means（k-means++ で始める）の各塊に、いちばん近い実在の点の番号。"""
-    if len(x) <= k:
-        return np.arange(len(x))
-    from scipy.sparse import csr_matrix
-
+def _seed_centers(x: np.ndarray, k: int, seed: int) -> np.ndarray:
+    """k-means++ で初期中心を選ぶ。"""
     rng = np.random.default_rng(seed)
     centers = [x[rng.integers(len(x))]]
     nearest = None
@@ -185,31 +181,50 @@ def medoids(x: np.ndarray, k: int, seed: int = 0) -> np.ndarray:
         else:
             np.minimum(nearest, distances, out=nearest)
         centers.append(x[rng.choice(len(x), p=nearest / nearest.sum())])
-    c = np.stack(centers)
+    return np.stack(centers)
+
+
+def _update_centers(
+    x: np.ndarray, centers: np.ndarray, label: np.ndarray, rows: np.ndarray
+) -> np.ndarray:
+    from scipy.sparse import csr_matrix
+
+    k = len(centers)
+    # (塊, 点) の疎行列で、各塊の全次元をまとめて足す。列は元の点の順に並ぶ。
+    if centers.dtype in (np.float32, np.float64):
+        membership = csr_matrix(
+            (np.ones(len(x), dtype=centers.dtype), (label, rows)), shape=(k, len(x))
+        )
+        sums = membership @ x
+    else:
+        sums = np.zeros_like(centers)
+        np.add.at(sums, label, x)
+    counts = np.bincount(label, minlength=k)[:, None]
+    # 点が来なかった塊は、中心をそのまま残す
+    return np.where(counts > 0, sums / np.maximum(counts, 1), centers)
+
+
+def medoids(x: np.ndarray, k: int, seed: int = 0) -> np.ndarray:
+    """k-means の各塊に、いちばん近い実在の点の番号。"""
+    if len(x) <= k:
+        return np.arange(len(x))
+    centers = _seed_centers(x, k, seed)
     squared = (x**2).sum(1)
     doubled = 2 * x
     rows = np.arange(len(x))
     previous = None
     for _ in range(KMEANS_ITERATIONS):
-        distances = _distances(doubled, squared, c)
+        distances = _distances(doubled, squared, centers)
         label = distances.argmin(1)
         if previous is not None and np.array_equal(label, previous):
-            return np.unique(distances.argmin(0))
+            break
         del distances
+        centers = _update_centers(x, centers, label, rows)
         previous = label
-        # (塊, 点) の疎行列で、各塊の全次元をまとめて足す。列は元の点の順に並ぶ。
-        if c.dtype in (np.float32, np.float64):
-            membership = csr_matrix(
-                (np.ones(len(x), dtype=c.dtype), (label, rows)), shape=(k, len(x))
-            )
-            sums = membership @ x
-        else:
-            sums = np.zeros_like(c)
-            np.add.at(sums, label, x)
-        counts = np.bincount(label, minlength=k)[:, None]
-        # 点が来なかった塊は、中心をそのまま残す
-        c = np.where(counts > 0, sums / np.maximum(counts, 1), c)
-    return np.unique(_distances(doubled, squared, c).argmin(0))
+    else:
+        # 反復上限に達したときは、最後に更新した中心から距離を取り直す。
+        distances = _distances(doubled, squared, centers)
+    return np.unique(distances.argmin(0))
 
 
 def summarize(states: list[np.ndarray]) -> tuple[np.ndarray, int]:
