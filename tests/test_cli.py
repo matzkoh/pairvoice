@@ -4,6 +4,7 @@ import json
 import signal
 import socket
 from email.message import Message
+from pathlib import Path
 from urllib.error import HTTPError
 
 import pytest
@@ -264,17 +265,22 @@ def test_menubar_subcommand_runs_the_menubar(monkeypatch, config_path):
 
     seen = []
     monkeypatch.setattr(
-        menubar, "run", lambda base, parent_pid: seen.append((base, parent_pid)) or 0
+        menubar,
+        "run",
+        lambda base, parent_pid, config_path: seen.append((base, parent_pid, config_path)) or 0,
     )
     assert cli.main(["--config", str(config_path), "menubar"]) == 0
-    assert seen == [("http://127.0.0.1:17495", None)]
+    # 設定の書き込み先は自分で読んだ設定ファイル（/health の応答からは取らない）
+    assert seen == [("http://127.0.0.1:17495", None, Path(config_path).absolute())]
 
 
 def test_menubar_subcommand_takes_the_parent_pid(monkeypatch, config_path):
     from pairvoice import menubar
 
     seen = []
-    monkeypatch.setattr(menubar, "run", lambda base, parent_pid: seen.append(parent_pid) or 0)
+    monkeypatch.setattr(
+        menubar, "run", lambda base, parent_pid, config_path: seen.append(parent_pid) or 0
+    )
     assert cli.main(["--config", str(config_path), "menubar", "--parent-pid", "4321"]) == 0
     assert seen == [4321]
 
@@ -373,7 +379,7 @@ def test_menubar_subcommand_logs_to_the_given_file(monkeypatch, config_path, tmp
 
     configured = []
     monkeypatch.setattr(cli.logs, "configure_file", configured.append)
-    monkeypatch.setattr(menubar, "run", lambda base, parent_pid: 0)
+    monkeypatch.setattr(menubar, "run", lambda base, parent_pid, config_path: 0)
     log_file = tmp_path / "pairvoice-menubar.log"
     assert cli.main(["--config", str(config_path), "menubar", "--log-file", str(log_file)]) == 0
     assert configured == [log_file]

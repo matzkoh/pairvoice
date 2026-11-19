@@ -256,7 +256,8 @@ def main(argv: list[str] | None = None) -> int:
 
         if args.log_file is not None:
             logs.configure_file(args.log_file)
-        return menubar.run(base, parent_pid=args.parent_pid)
+        # 書き込み先は自分で読んだ設定ファイル。serve は同じ --config で起こすので、常駐サーバーと一致する
+        return menubar.run(base, parent_pid=args.parent_pid, config_path=config.source_path)
 
     if args.command == "eval":
         return _eval(config, base, args)

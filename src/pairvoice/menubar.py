@@ -255,17 +255,19 @@ def request_shutdown(parent_pid: int | None) -> None:
         _log.warning("親プロセス %s に終了を伝えられなかった: %s", parent_pid, failed)
 
 
-def perform(action: str, base: str, config_path: str | None = None) -> None:
+def perform(action: str, base: str, config_path: Path | None = None) -> None:
     """メニューの動作を実行する。失敗しても常駐は続ける。
 
-    config_path は常駐サーバーが読んだ設定ファイル（/health の config_path）。
+    config_path はメニューバー自身が起動時に読んだ設定ファイル。/health の config_path は
+    使わない。ポートに応えた側に書き込み先を選ばせることになり、常駐サーバーが止まっている間に
+    別のアカウントがポートを取れば、任意の TOML ファイルを書き換えさせられる。
     """
     try:
         if action.startswith("mute:"):
             client.call(base, "/mute", body={"minutes": int(action.split(":")[1])}, timeout=5)
         elif action.startswith("spatial:"):
             # 正本は設定ファイル。書き換えれば常駐サーバーが読み直す
-            path = Path(config_path) if config_path else DEFAULT_CONFIG_PATH.expanduser()
+            path = config_path or DEFAULT_CONFIG_PATH.expanduser()
             set_value(path, "playback", "spatial", action.partition(":")[2])
         elif action == "unmute":
             client.call(base, "/unmute", timeout=5)
@@ -392,10 +394,11 @@ def _controller_class(appkit, objc):
     class MenuBarApp(objc.lookUpClass("NSObject")):
         """NSStatusItem を持ち、menu_spec() の結果を NSMenuItem に変換する。"""
 
-        def initWithBase_parentPid_(self, base, parent_pid):
+        def initWithBase_parentPid_configPath_(self, base, parent_pid, config_path):
             self = objc.super(MenuBarApp, self).init()
             self._base = base
             self._parent_pid = parent_pid
+            self._config_path = config_path
             self._health = None
             self._updating = False
             self._item = appkit.NSStatusBar.systemStatusBar().statusItemWithLength_(
@@ -477,7 +480,7 @@ def _controller_class(appkit, objc):
             if self._updating:
                 self.performSelectorOnMainThread_withObject_waitUntilDone_("redraw:", None, False)
             try:
-                perform(action, self._base, (self._health or {}).get("config_path"))
+                perform(action, self._base, self._config_path)
             finally:
                 self._updating = False
             self._fetch()
@@ -485,10 +488,11 @@ def _controller_class(appkit, objc):
     return MenuBarApp
 
 
-def run(base: str, parent_pid: int | None = None) -> int:
+def run(base: str, parent_pid: int | None = None, config_path: Path | None = None) -> int:
     """メニューバーに常駐する。AppKit の import はここだけで行う。
 
     parent_pid を渡されたら、その親（serve）が消えたときに自分も終了する。
+    config_path は設定を書き換える項目の書き込み先（無ければ既定の設定ファイル）。
     """
     try:
         # pyobjc は名前を実行時に生やすので、型検査には中身が見えない
@@ -506,7 +510,11 @@ def run(base: str, parent_pid: int | None = None) -> int:
     # Dock にアイコンを出さない。アプリバンドルを作らないので LSUIElement は使えない。
     app.setActivationPolicy_(appkit.NSApplicationActivationPolicyAccessory)
 
-    controller = _controller_class(appkit, objc).alloc().initWithBase_parentPid_(base, parent_pid)
+    controller = (
+        _controller_class(appkit, objc)
+        .alloc()
+        .initWithBase_parentPid_configPath_(base, parent_pid, config_path)
+    )
     controller.redraw_(None)
     controller.refresh()
     appkit.NSTimer.scheduledTimerWithTimeInterval_target_selector_userInfo_repeats_(

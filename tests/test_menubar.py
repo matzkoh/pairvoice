@@ -374,7 +374,7 @@ def test_perform_spatial_rewrites_only_the_config(monkeypatch, tmp_path, mode):
     path.write_text("# 自分用\n[playback]\nvolume = 0.5\n", encoding="utf-8")
     monkeypatch.setattr(menubar.launchd, "restart", lambda: pytest.fail("再起動しない"))
 
-    menubar.perform(f"spatial:{mode}", "http://127.0.0.1:17495", str(path))
+    menubar.perform(f"spatial:{mode}", "http://127.0.0.1:17495", path)
 
     assert path.read_text(encoding="utf-8") == (
         f'# 自分用\n[playback]\nvolume = 0.5\nspatial = "{mode}"\n'
@@ -426,7 +426,7 @@ def test_controller_class_definition_is_accepted_by_pyobjc():
     assert controller.instanceMethodForSelector_("redraw:") is not None
     assert controller.instanceMethodForSelector_("menuWillOpen:") is not None
     assert controller.instanceMethodForSelector_("onAction:") is not None
-    assert controller.instanceMethodForSelector_("initWithBase:parentPid:") is not None
+    assert controller.instanceMethodForSelector_("initWithBase:parentPid:configPath:") is not None
 
 
 def test_run_reports_missing_pyobjc(monkeypatch, capsys):
