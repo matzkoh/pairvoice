@@ -163,8 +163,10 @@ def speech_blocks(analysis: curate.Analysis) -> list[np.ndarray]:
     ]
 
 
-def _distances(x: np.ndarray, squared: np.ndarray, centers: np.ndarray) -> np.ndarray:
-    return squared[:, None] - 2 * x @ centers.T + (centers**2).sum(1)[None]
+def _distances(doubled: np.ndarray, squared: np.ndarray, centers: np.ndarray) -> np.ndarray:
+    distances = squared[:, None] - doubled @ centers.T
+    distances += (centers**2).sum(1)[None]
+    return distances
 
 
 def medoids(x: np.ndarray, k: int, seed: int = 0) -> np.ndarray:
@@ -175,18 +177,25 @@ def medoids(x: np.ndarray, k: int, seed: int = 0) -> np.ndarray:
 
     rng = np.random.default_rng(seed)
     centers = [x[rng.integers(len(x))]]
-    nearest = ((x - centers[0]) ** 2).sum(1)
+    nearest = None
     for _ in range(k - 1):
+        distances = ((x - centers[-1]) ** 2).sum(1)
+        if nearest is None:
+            nearest = distances
+        else:
+            np.minimum(nearest, distances, out=nearest)
         centers.append(x[rng.choice(len(x), p=nearest / nearest.sum())])
-        nearest = np.minimum(nearest, ((x - centers[-1]) ** 2).sum(1))
     c = np.stack(centers)
     squared = (x**2).sum(1)
+    doubled = 2 * x
     rows = np.arange(len(x))
     previous = None
     for _ in range(KMEANS_ITERATIONS):
-        label = _distances(x, squared, c).argmin(1)
+        distances = _distances(doubled, squared, c)
+        label = distances.argmin(1)
         if previous is not None and np.array_equal(label, previous):
-            break
+            return np.unique(distances.argmin(0))
+        del distances
         previous = label
         # (塊, 点) の疎行列で、各塊の全次元をまとめて足す。列は元の点の順に並ぶ。
         if c.dtype in (np.float32, np.float64):
@@ -200,7 +209,7 @@ def medoids(x: np.ndarray, k: int, seed: int = 0) -> np.ndarray:
         counts = np.bincount(label, minlength=k)[:, None]
         # 点が来なかった塊は、中心をそのまま残す
         c = np.where(counts > 0, sums / np.maximum(counts, 1), c)
-    return np.unique(_distances(x, squared, c).argmin(0))
+    return np.unique(_distances(doubled, squared, c).argmin(0))
 
 
 def summarize(states: list[np.ndarray]) -> tuple[np.ndarray, int]:

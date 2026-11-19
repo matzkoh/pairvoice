@@ -30,6 +30,16 @@ def test_medoids_are_real_points():
     assert picked.max() < len(x)
 
 
+@pytest.mark.parametrize("iterations", [1, 30])
+def test_medoids_use_the_final_center_at_the_iteration_limit_and_at_convergence(
+    monkeypatch, iterations
+):
+    monkeypatch.setattr(fold, "KMEANS_ITERATIONS", iterations)
+    x = np.array([[0], [2], [3], [4], [10]], dtype=np.float32)
+    # 初期中心は10。更新後の中心3.8にいちばん近いのは4。
+    np.testing.assert_array_equal(medoids(x, 1, seed=0), [3])
+
+
 def test_summarize_leads_with_the_most_central_first_token():
     # 継続時間の予測は先頭の1トークンだけを見るので、先頭は各ブロックの先頭トークンの中心から選ぶ
     states = [
