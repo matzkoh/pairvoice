@@ -748,7 +748,9 @@ Dereverb = Callable[[np.ndarray], Awaitable[np.ndarray]]
 Offload = Callable[..., Awaitable]
 
 
-async def analyze(material: Material, diarize: Diarize, offload: Offload) -> Analysis:
+async def analyze(
+    material: Material, diarize: Diarize, offload: Offload, *, rank_candidates: bool = True
+) -> Analysis:
     """話者を分け、いちばん多く話す人の区間を切り出して採点する。"""
     segments = []
     for chunk in material.chunks():
@@ -764,9 +766,12 @@ async def analyze(material: Material, diarize: Diarize, offload: Offload) -> Ana
     await offload(refine_edges, pieces, material)
     for index, piece in enumerate(pieces):
         piece.index = index
-    await offload(measure_pieces, pieces, material.audio16)
-    score_deviation(pieces, material)
-    return Analysis(material, power, segments, talk, speaker, pieces, rank(pieces))
+    ranked = []
+    if rank_candidates:
+        await offload(measure_pieces, pieces, material.audio16)
+        score_deviation(pieces, material)
+        ranked = rank(pieces)
+    return Analysis(material, power, segments, talk, speaker, pieces, ranked)
 
 
 async def render(
@@ -1041,11 +1046,15 @@ class MlxCurateBackend:
     def load(self) -> None:
         import mlx.core as mx
         from mlx.utils import tree_unflatten
+        from mlx_audio.sts.models.mossformer2_se import model as mossformer
         from mlx_audio.sts.models.mossformer2_se.config import MossFormer2SEConfig
         from mlx_audio.sts.models.mossformer2_se.model import MossFormer2SEModel
         from mlx_audio.sts.models.mossformer2_se.mossformer2_se_wrapper import MossFormer2SE
         from mlx_audio.vad import load
 
+        from . import curate_speedups
+
+        mossformer.compute_deltas_kaldi = curate_speedups.kaldi_deltas  # ty: ignore[invalid-assignment]
         self._diarizer = load(self._config.diarize_model)
         # from_pretrained と同じ組み立てを、設定は既定のまま行う。MossFormer2SEModel は作るときに
         # nn.LayerNorm を mx.fast.layer_norm に差し替える（プロセス全体に効くが、計算は同じ）
@@ -1120,7 +1129,7 @@ def _load_dereverber(path: Path):
     import mlx.core as mx
     from mlx_audio.sts.models.mel_roformer import MelRoFormer, MelRoFormerConfig
 
-    from . import ckpt
+    from . import ckpt, curate_speedups
 
     # anvuew の重みは kim_vocal_2 と同じ形（深さ 6・60 帯域）
     model = MelRoFormer(MelRoFormerConfig.kim_vocal_2())
@@ -1130,9 +1139,11 @@ def _load_dereverber(path: Path):
     for pair in model.layers:
         for transformer in pair:
             transformer.set_dtype(mx.bfloat16)
-            for attention, _ in transformer.layers:
-                rotary = attention.rotary_embed
-                rotary.get_cos_sin = _half_rotations(rotary.get_cos_sin)
+            transformer.norm = curate_speedups.roformer_norm(transformer.norm)
+            for layer in transformer.layers:
+                ffn = layer[1]
+                ffn.net[0] = curate_speedups.roformer_norm(ffn.net[0])
+                layer[0] = curate_speedups.roformer_attention(layer[0])
     for estimator in model.mask_estimators:
         estimator.set_dtype(mx.bfloat16)
     split = model.band_split.split
@@ -1140,16 +1151,6 @@ def _load_dereverber(path: Path):
     mx.eval(model.parameters())
     model.band_split.merge = _band_mask_merger(model.band_split.filterbank)
     return model
-
-
-def _half_rotations(get_cos_sin):
-    import mlx.core as mx
-
-    def rotations(length):
-        cos, sin = get_cos_sin(length)
-        return cos.astype(mx.bfloat16), sin.astype(mx.bfloat16)
-
-    return rotations
 
 
 def _band_mask_merger(filterbank):

@@ -8,6 +8,7 @@
 - サンプラーの注意: 重みが0になるテキストの詰め物のキーを、値が変わらない単位で除く
 - 無音の位置探し（_find_silence_point）: 窓ごとに GPU と同期していたのを、numpy でまとめて
   測ってから、しきい値に近い窓だけ元の式で確かめる
+- DACVAE のエンコードでも、重み正規化と snake 活性化にデコーダーと同じ最適化を使う
 - DACVAE のデコード:
   - 重み正規化した重みを、呼ぶたびでなく読み込み時に1回だけ作る
   - 転置畳み込みを行列積に書き直す。MLX は転置畳み込みをゼロを挟んだ入力への畳み込みとして
@@ -57,6 +58,7 @@ def install(model) -> bool:
     _trim_text_padding(dit)
     # 同じ答えを返す関数なので、型の見た目が違うだけ
     irodori_tts._find_silence_point = find_silence_point  # ty: ignore[invalid-assignment]
+    _speed_up_encoder(dac.encoder, codec)
     _speed_up_decoder(dac.decoder, codec)
     _freeze_weight(dac.quantizer_out_proj, codec)
     dac._decode_chunked = types.MethodType(_decode_chunked, dac)
@@ -266,6 +268,13 @@ def _silence_masks(
 
 
 # --- DACVAE のデコーダー ---------------------------------------------------------------
+
+
+def _speed_up_encoder(encoder, codec) -> None:
+    """参照音声の符号化でも重み正規化を使い回し、Snake を1つのカーネルで実行する。"""
+    for _, module in encoder.named_modules():
+        _swap_snake(module, codec)
+        _freeze_weight(module, codec)
 
 
 def _speed_up_decoder(decoder, codec) -> None:

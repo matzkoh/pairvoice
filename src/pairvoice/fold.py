@@ -228,7 +228,8 @@ async def fold(
     await offload(shutil.rmtree, directory / "raw")
     progress("diarize", 0.0)
     material = await offload(curate.decode, paths, directory / "decoded")
-    analysis = await curate.analyze(material, diarize, offload)
+    # 本人の全区間を使うので、候補を順位づけるための声の高さや明るさの測定は省く。
+    analysis = await curate.analyze(material, diarize, offload, rank_candidates=False)
     blocks = await offload(speech_blocks, analysis)
     if not blocks:
         raise curate.TooLittleSpeech("本人の声が短すぎます")
