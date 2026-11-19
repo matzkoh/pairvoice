@@ -164,7 +164,8 @@ function JobStatus({ job, onOpen }: { job: FoldJob; onOpen: (id: string) => void
           <ProgressBar value={job.progress} />
         </div>
         <p className="text-xs text-muted-foreground">
-          処理時間は素材の長さと Mac の性能によって変わります。この画面を離れても、サーバーで続きます。
+          処理時間は素材の長さと Mac
+          の性能によって変わります。この画面を離れても、サーバーで続きます。
         </p>
       </div>
     )
