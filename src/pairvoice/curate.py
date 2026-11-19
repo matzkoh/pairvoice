@@ -378,10 +378,11 @@ def frame_power(audio16: np.ndarray) -> np.ndarray:
     frames = len(audio16) // hop
     # memmap を一度に読むと 1 時間で 0.2GB を作るので、区切って求める
     power = np.empty(frames, dtype=np.float64)
-    step = 360000
+    # 10ms のフレーム4096個で約5MiB。二乗の作業領域を全素材分確保せずに済む。
+    step = 4096
     for start in range(0, frames, step):
-        block = np.asarray(audio16[start * hop : min(frames, start + step) * hop], np.float64)
-        power[start : start + step] = (block.reshape(-1, hop) ** 2).mean(axis=1)
+        block = audio16[start * hop : min(frames, start + step) * hop].reshape(-1, hop)
+        power[start : start + step] = np.square(block, dtype=np.float64).mean(axis=1)
     return power
 
 
@@ -558,6 +559,14 @@ def clipped(samples: np.ndarray) -> bool:
 
 def louder_channel(frames: np.ndarray) -> np.ndarray:
     """フレーム × チャンネルのうち、声の大きいチャンネル。左右を混ぜるとこもる。"""
+    first = frames[:, 0]
+    if frames.shape[1] == 1:
+        return first
+    if frames.shape[1] == 2:
+        other = frames[:, 1]
+        # モノラルのデコード結果は両側が同じ。通常のステレオは間引いた比較で先に判別する。
+        if np.array_equal(first[::1024], other[::1024]) and np.array_equal(first, other):
+            return first
     return frames[:, int(np.argmax((frames**2).sum(axis=0)))]
 
 
@@ -720,6 +729,8 @@ def limit_peaks(samples: np.ndarray, sample_rate: int) -> np.ndarray:
     blocks = -(-len(samples) // block)
     padded = np.pad(np.abs(samples), (0, blocks * block - len(samples)))
     peaks = padded.reshape(blocks, block).max(axis=1)
+    if np.all(peaks <= ceiling):
+        return samples.astype(np.result_type(samples, np.float32), copy=True)
     need = np.minimum(1.0, ceiling / np.maximum(peaks, 1e-9))
     # 前後のブロックも同じだけ下げる（ブロックの間を直線でつなぐので、そうしないと大きな音の
     # 所で倍率が戻りかける）。下げた分は LIMIT_RELEASE_SECONDS かけて戻す
@@ -817,7 +828,7 @@ async def remove_reverb(
 
     x = await offload(resample_poly, samples, DEREVERB_RATE, OUTPUT_RATE)
     hop = DEREVERB_CHUNK - overlap
-    padded = np.pad(x.astype(np.float32), (overlap, DEREVERB_CHUNK))
+    padded = np.pad(np.asarray(x, dtype=np.float32), (overlap, DEREVERB_CHUNK))
     window = np.hanning(DEREVERB_CHUNK).astype(np.float32)
     total = np.zeros(len(padded), np.float32)
     weight = np.zeros(len(padded), np.float32)
@@ -825,10 +836,13 @@ async def remove_reverb(
         out = await dereverb(padded[start : start + DEREVERB_CHUNK])
         total[start : start + DEREVERB_CHUNK] += out * window
         weight[start : start + DEREVERB_CHUNK] += window
-    y = (total / np.maximum(weight, 1e-6))[overlap : overlap + len(x)]
+    kept = slice(overlap, overlap + len(x))
+    y = total[kept]
+    np.maximum(weight[kept], 1e-6, out=weight[kept])
+    y /= weight[kept]
     y = await offload(resample_poly, y, OUTPUT_RATE, DEREVERB_RATE)
     # 響きを除くと山の形が変わるので、ピークを抑え直す
-    return await offload(limit_peaks, _fit(y.astype(np.float32), len(samples)), OUTPUT_RATE)
+    return await offload(limit_peaks, _fit(np.asarray(y, np.float32), len(samples)), OUTPUT_RATE)
 
 
 async def _render_auto(analysis: Analysis, enhance: Enhance) -> list[Piece]:
@@ -1129,7 +1143,9 @@ class MlxCurateBackend:
 
 def _fit(samples: np.ndarray, length: int) -> np.ndarray:
     """末尾を切るか無音で埋めて length にそろえる。"""
-    return np.pad(samples[:length], (0, max(0, length - len(samples))))
+    if length <= len(samples):
+        return samples[:length]
+    return np.pad(samples, (0, length - len(samples)))
 
 
 def _weights(repo: str, filename: str, *, local_files_only: bool = False) -> str:

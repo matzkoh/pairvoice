@@ -254,6 +254,12 @@ def test_limit_peaks_only_touches_the_loud_moment():
     assert np.allclose(y[: rate // 2], x[: rate // 2])
 
 
+def test_louder_channel_detects_a_difference_between_sampled_frames():
+    frames = np.zeros((4096, 2), np.float32)
+    frames[1025, 1] = 1
+    np.testing.assert_array_equal(curate.louder_channel(frames), frames[:, 1])
+
+
 async def test_build_takes_the_louder_channel_without_mixing():
     # 左は小さく、右だけに大きく入った声。混ぜると半分の大きさになる
     plan = [(1, 7, 0.5, 220), (8, 14, 0.5, 220), (15, 21, 0.5, 220)]

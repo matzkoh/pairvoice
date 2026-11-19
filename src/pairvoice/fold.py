@@ -120,7 +120,7 @@ async def clean(
                 y = await _clean_span(x, enhance, dereverb, offload)
                 end = min(length, start + span)
                 pcm = (np.clip(y[start - lo : end - lo], -1.0, 1.0) * 32767.0).astype("<i2")
-                writer.writeframes(pcm.tobytes())
+                writer.writeframes(memoryview(pcm).cast("B"))
                 progress("clean", (done + end / RATE) / total)
         done += source.seconds
         cleaned.append((source.name, path))
@@ -171,6 +171,8 @@ def medoids(x: np.ndarray, k: int, seed: int = 0) -> np.ndarray:
     """k-means（k-means++ で始める）の各塊に、いちばん近い実在の点の番号。"""
     if len(x) <= k:
         return np.arange(len(x))
+    from scipy.sparse import csr_matrix
+
     rng = np.random.default_rng(seed)
     centers = [x[rng.integers(len(x))]]
     nearest = ((x - centers[0]) ** 2).sum(1)
@@ -179,14 +181,22 @@ def medoids(x: np.ndarray, k: int, seed: int = 0) -> np.ndarray:
         nearest = np.minimum(nearest, ((x - centers[-1]) ** 2).sum(1))
     c = np.stack(centers)
     squared = (x**2).sum(1)
+    rows = np.arange(len(x))
     previous = None
     for _ in range(KMEANS_ITERATIONS):
         label = _distances(x, squared, c).argmin(1)
         if previous is not None and np.array_equal(label, previous):
             break
         previous = label
-        sums = np.zeros_like(c)
-        np.add.at(sums, label, x)
+        # (塊, 点) の疎行列で、各塊の全次元をまとめて足す。列は元の点の順に並ぶ。
+        if c.dtype in (np.float32, np.float64):
+            membership = csr_matrix(
+                (np.ones(len(x), dtype=c.dtype), (label, rows)), shape=(k, len(x))
+            )
+            sums = membership @ x
+        else:
+            sums = np.zeros_like(c)
+            np.add.at(sums, label, x)
         counts = np.bincount(label, minlength=k)[:, None]
         # 点が来なかった塊は、中心をそのまま残す
         c = np.where(counts > 0, sums / np.maximum(counts, 1), c)
