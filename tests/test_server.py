@@ -511,7 +511,9 @@ def test_rejects_requests_from_foreign_pages():
     assert client.post("/stop", headers={"origin": "https://evil.example"}).status_code == 403
     assert client.post("/stop", headers={"origin": "null"}).status_code == 403
     assert client.get("/health", headers={"host": "localhost:17495"}).status_code == 200
-    assert client.post("/stop", headers={"origin": "http://127.0.0.1:17494"}).status_code == 200
+    assert client.post("/stop", headers={"origin": "http://127.0.0.1:17495"}).status_code == 200
+    # ループバックでも別のポートで動く他のサービスのページは外部のページ
+    assert client.post("/stop", headers={"origin": "http://127.0.0.1:17494"}).status_code == 403
 
 
 @pytest.mark.parametrize(
@@ -519,15 +521,33 @@ def test_rejects_requests_from_foreign_pages():
     [
         ("127.0.0.1:17495", None, True),
         ("LOCALHOST", None, True),
-        ("[::1]:17495", "http://[::1]:17494", True),
         ("[::1]", None, True),
+        ("127.0.0.1:17495", "http://127.0.0.1:17495", True),
+        ("localhost:17495", "http://localhost:17495", True),
+        ("[::1]:17495", "http://[::1]:17495", True),
+        ("127.0.0.1:17495", "HTTP://LOCALHOST:17495", True),
+        # 開発中の studio（Vite の proxy は Origin を書き換えない）
+        ("127.0.0.1:17495", "http://127.0.0.1:17493", True),
+        ("127.0.0.1:17495", "http://localhost:17493", True),
         (None, None, False),
         ("127.0.0.1.evil.example", None, False),
         ("127.0.0.1:17495", "http://127.0.0.1.evil.example", False),
+        ("127.0.0.1:17495", "http://127.0.0.1:8080", False),
+        ("[::1]:17495", "http://[::1]:17494", False),
+        ("127.0.0.1:17495", "http://127.0.0.1", False),
+        ("127.0.0.1:17495", "https://127.0.0.1:17495", False),
+        ("127.0.0.1:17495", "http://user@127.0.0.1:17495", False),
+        ("127.0.0.1:17495", "null", False),
     ],
 )
 def test_is_local_request(host, origin, expected):
-    assert is_local_request(host, origin) is expected
+    assert is_local_request(host, origin, 17495) is expected
+
+
+def test_is_local_request_accepts_the_port_80_origin_without_a_port():
+    # ブラウザは http の既定ポートを Origin から省く
+    assert is_local_request("127.0.0.1", "http://127.0.0.1", 80)
+    assert not is_local_request("127.0.0.1", "http://127.0.0.1:8080", 80)
 
 
 def test_speak_forwards_mix_as_resolved_paths_and_weights():

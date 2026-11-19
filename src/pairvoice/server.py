@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import asyncio
 import contextlib
+import functools
 import os
 import signal
 import tempfile
@@ -11,7 +12,6 @@ from contextlib import asynccontextmanager
 from importlib.metadata import version
 from pathlib import Path
 from typing import Annotated, Literal
-from urllib.parse import urlsplit
 
 from fastapi import APIRouter, BackgroundTasks, Body, Depends, FastAPI, Header, Request
 from fastapi.openapi.models import Example
@@ -37,8 +37,9 @@ from .studio_web import mount_studio, open_studio
 from .tts import MlxAudioBackend
 from .updates import UpdateChecker
 
-# ポートは問わない（開発中の Vite の :17493 から来るため）
 LOCAL_HOSTNAMES = frozenset({"127.0.0.1", "localhost", "[::1]"})
+# 開発中の studio（Vite）の待ち受け。proxy は Host だけを書き換え、画面の Origin はそのまま届く
+STUDIO_DEV_PORT = 17493
 
 
 def _hostname(netloc: str) -> str:
@@ -47,16 +48,28 @@ def _hostname(netloc: str) -> str:
     return (host if port.isdigit() and not netloc.endswith("]") else netloc).lower()
 
 
-def is_local_request(host: str | None, origin: str | None) -> bool:
+@functools.cache
+def _local_origins(port: int) -> frozenset[str]:
+    # ブラウザは http の既定ポート 80 を Origin から省く
+    ports = {port, STUDIO_DEV_PORT}
+    return frozenset(
+        f"http://{host}" if p == 80 else f"http://{host}:{p}"
+        for host in LOCAL_HOSTNAMES
+        for p in ports
+    )
+
+
+def is_local_request(host: str | None, origin: str | None, port: int) -> bool:
     """ブラウザで開いた外部のページからの要求を断るための判定。
 
     127.0.0.1 にだけ待ち受けても、外部のページから2つの経路で届く。DNS rebinding では Host が
     外部の名前のまま届き、単純な POST（no-cors）では Host は 127.0.0.1 でも Origin に外部の
     ページが付く。Origin はブラウザしか付けないので、無ければ通す（フック、CLI）。
+    Origin はポートまで見る。ループバックの別のポートで動く他のサービスのページも外部のページである。
     """
     if host is None or _hostname(host) not in LOCAL_HOSTNAMES:
         return False
-    return origin is None or _hostname(urlsplit(origin).netloc) in LOCAL_HOSTNAMES
+    return origin is None or origin.lower() in _local_origins(port)
 
 
 # 外部のページに iframe で埋めさせない（studio/vite.config.ts の dev / preview も同じ値を送る）
@@ -72,7 +85,8 @@ API_DESCRIPTION = """\
 pairvoice の常駐サーバーの API。要約（mlx-lm）と音声合成（Irodori-TTS）を1本のキューで順に処理する。
 
 - API はすべて `/api` の下にある（根の `/` は studio の画面）。この説明と各項目の説明では `/api` を省いて書く
-- 待ち受けは 127.0.0.1 だけ。ブラウザで開いた外部のページ（Host か Origin がループバックでない要求）は 403 で断る
+- 待ち受けは 127.0.0.1 だけ。ブラウザで開いた外部のページ（Host がループバックでない要求、または Origin がこのサーバーか開発中の studio（:17493）でない要求）は 403 で断る
+- 認証は無い。同じ Mac で 127.0.0.1 に繋げるプロセスは誰でも使える（ひとりで使う Mac を前提にしている）
 - ミュート中は `/speak`（鳴らす）と `respect_mute` 付きの `/llm`・`/warmup` を 409 `{"error": "muted", "reason": ...}` で断る。`/speak` は `bypass_mute` で鳴らせる。`/synthesize` は wav を作るだけなのでミュートを見ない
 - 声は `voice`（プロファイルの名前か ID）、話し方は `style`（studio の「スタイル」画面で作る名前）で選ぶ。選べる名前は `GET /profiles` と `GET /styles` で引ける
 - ランダムの声（`source` が `random` のプロファイル）は、要約・合成のたびにメンバーから1つを選ぶ（`order` が `shuffle` なら、全員を一巡するまで同じ声を選ばない）。`group` を渡すと、同じ `group` には同じ声を選び続ける（読み上げフックは Claude Code のセッションごとに渡す）。`/llm` が返す `voice` を `/speak` に渡すと、要約の口調と同じ声で読む（`/narrate` はこれを1回で行う）
@@ -405,7 +419,8 @@ def create_app(engine: Engine) -> FastAPI:
 
     @app.middleware("http")
     async def reject_foreign_pages(request: Request, call_next):
-        if not is_local_request(request.headers.get("host"), request.headers.get("origin")):
+        host, origin = request.headers.get("host"), request.headers.get("origin")
+        if not is_local_request(host, origin, engine.config.port):
             response = JSONResponse(status_code=403, content={"error": "forbidden_origin"})
         else:
             response = await call_next(request)
