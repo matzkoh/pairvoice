@@ -73,6 +73,28 @@ async def test_clean_stitches_spans_back_to_the_full_length(tmp_path, monkeypatc
     np.testing.assert_allclose(out, x, atol=1e-4)
 
 
+async def test_fold_crossfades_dereverb_windows_and_keeps_the_tail():
+    from pairvoice import curate
+
+    # 継ぎ目が2つあり、最後の窓は端数。どこも欠けず元と同じレベルに戻る。
+    x = tone(15.4, amp=0.1)
+    chunks = []
+
+    async def enhance(samples):
+        return samples
+
+    async def dereverb(samples):
+        chunks.append(len(samples))
+        return samples
+
+    async def offload(fn, *args):
+        return fn(*args)
+
+    y = await fold._clean_span(x, enhance, dereverb, offload)
+    assert chunks == [curate.DEREVERB_CHUNK] * 3
+    np.testing.assert_allclose(y, x, atol=1e-3)
+
+
 async def test_speech_blocks_level_the_voice_like_a_reference():
     from pairvoice.postprocess import TARGET_RMS_DB, voiced_rms_db
     from tests.test_curate import material, run_analyze

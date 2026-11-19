@@ -424,6 +424,22 @@ async def test_render_uses_the_selection_and_keeps_the_analysis():
     assert [p["index"] for p in again.report["pieces"]] == [0, 4]
 
 
+def test_band_mask_merge_preserves_frequency_channel_and_frame_order():
+    from types import SimpleNamespace
+
+    import mlx.core as mx
+
+    bank = SimpleNamespace(
+        freq_indices=[mx.array([0, 1, 2, 3]), mx.array([2, 3])],
+        num_bands_per_freq=np.array([1, 1, 2, 2], np.float32),
+    )
+    masks = [mx.arange(48).reshape(2, 3, 8), mx.arange(24).reshape(2, 3, 4)]
+    expected = np.asarray(masks[0], np.float32).reshape(2, 3, 4, 2).copy()
+    expected[:, :, 2:] = (expected[:, :, 2:] + np.asarray(masks[1]).reshape(2, 3, 2, 2)) / 2
+    expected = expected.transpose(0, 2, 1, 3)
+    np.testing.assert_array_equal(curate._band_mask_merger(bank)(masks, 4), expected)
+
+
 async def test_render_dereverbs_the_whole_reference_in_chunks():
     plan = [(1 + 7 * k, 6 + 7 * k, 0.4, 220) for k in range(5)]
     analysis = await run_analyze(material(plan))

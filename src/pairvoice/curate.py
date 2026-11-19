@@ -804,21 +804,23 @@ async def render(
     return outcome
 
 
-async def remove_reverb(samples: np.ndarray, dereverb: Dereverb, offload: Offload) -> np.ndarray:
+async def remove_reverb(
+    samples: np.ndarray, dereverb: Dereverb, offload: Offload, *, overlap: int = DEREVERB_CHUNK // 2
+) -> np.ndarray:
     """響きを除く。8 秒ずつ別の仕事にして、その合間に読み上げが割り込めるようにする。"""
     from scipy.signal import resample_poly
 
     x = await offload(resample_poly, samples, DEREVERB_RATE, OUTPUT_RATE)
-    hop = DEREVERB_CHUNK // 2
-    padded = np.pad(x.astype(np.float32), (hop, hop + DEREVERB_CHUNK))
+    hop = DEREVERB_CHUNK - overlap
+    padded = np.pad(x.astype(np.float32), (overlap, DEREVERB_CHUNK))
     window = np.hanning(DEREVERB_CHUNK).astype(np.float32)
     total = np.zeros(len(padded), np.float32)
     weight = np.zeros(len(padded), np.float32)
-    for start in range(0, len(x) + hop, hop):
+    for start in range(0, len(x) + overlap, hop):
         out = await dereverb(padded[start : start + DEREVERB_CHUNK])
         total[start : start + DEREVERB_CHUNK] += out * window
         weight[start : start + DEREVERB_CHUNK] += window
-    y = (total / np.maximum(weight, 1e-6))[hop : hop + len(x)]
+    y = (total / np.maximum(weight, 1e-6))[overlap : overlap + len(x)]
     y = await offload(resample_poly, y, OUTPUT_RATE, DEREVERB_RATE)
     # 響きを除くと山の形が変わるので、ピークを抑え直す
     return await offload(limit_peaks, _fit(y.astype(np.float32), len(samples)), OUTPUT_RATE)
@@ -1124,5 +1126,43 @@ def _load_dereverber(path: Path):
     model = MelRoFormer(MelRoFormerConfig.kim_vocal_2())
     weights = model.sanitize({k: mx.array(v) for k, v in ckpt.load(path).items()})
     model.load_weights(list(weights.items()), strict=True)
+    # FFT と小さいスペクトル値の正規化は float32 のまま、Transformer は半精度で計算する。
+    for pair in model.layers:
+        for transformer in pair:
+            transformer.set_dtype(mx.bfloat16)
+            for attention, _ in transformer.layers:
+                rotary = attention.rotary_embed
+                rotary.get_cos_sin = _half_rotations(rotary.get_cos_sin)
+    for estimator in model.mask_estimators:
+        estimator.set_dtype(mx.bfloat16)
+    split = model.band_split.split
+    model.band_split.split = lambda x: split(x).astype(mx.bfloat16)
     mx.eval(model.parameters())
+    model.band_split.merge = _band_mask_merger(model.band_split.filterbank)
     return model
+
+
+def _half_rotations(get_cos_sin):
+    import mlx.core as mx
+
+    def rotations(length):
+        cos, sin = get_cos_sin(length)
+        return cos.astype(mx.bfloat16), sin.astype(mx.bfloat16)
+
+    return rotations
+
+
+def _band_mask_merger(filterbank):
+    """帯域の重なる周波数のマスクを平均する。全帯域の加算を1回にまとめる。"""
+    import mlx.core as mx
+
+    indices = mx.concatenate(filterbank.freq_indices)
+    counts = mx.array(filterbank.num_bands_per_freq).reshape(1, -1, 1, 1)
+
+    def merge(band_masks, freq_bins_times_two):
+        batch, frames, _ = band_masks[0].shape
+        masks = mx.concatenate(band_masks, axis=-1).reshape(batch, frames, -1, 2)
+        output = mx.zeros((batch, freq_bins_times_two, frames, 2))
+        return output.at[:, indices, :, :].add(masks.transpose(0, 2, 1, 3)) / counts
+
+    return merge

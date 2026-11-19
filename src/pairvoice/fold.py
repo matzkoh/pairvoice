@@ -81,7 +81,10 @@ async def _clean_span(
         lo, hi = max(0, start - context), min(len(x), start + step + context)
         end = min(len(x), start + step)
         y[start:end] = (await enhance(x[lo:hi]))[start - lo : end - lo]
-    return y if dereverb is None else await curate.remove_reverb(y, dereverb, offload)
+    if dereverb is None:
+        return y
+    # 8 秒の窓を1秒だけ重ねる。境目は窓で混ぜつつ、長い素材の二重処理を減らす。
+    return await curate.remove_reverb(y, dereverb, offload, overlap=curate.DEREVERB_RATE)
 
 
 async def clean(
@@ -176,8 +179,12 @@ def medoids(x: np.ndarray, k: int, seed: int = 0) -> np.ndarray:
         nearest = np.minimum(nearest, ((x - centers[-1]) ** 2).sum(1))
     c = np.stack(centers)
     squared = (x**2).sum(1)
+    previous = None
     for _ in range(KMEANS_ITERATIONS):
         label = _distances(x, squared, c).argmin(1)
+        if previous is not None and np.array_equal(label, previous):
+            break
+        previous = label
         sums = np.zeros_like(c)
         np.add.at(sums, label, x)
         counts = np.bincount(label, minlength=k)[:, None]
