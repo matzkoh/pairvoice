@@ -1,5 +1,6 @@
 import { useRef } from 'react'
 
+import { SPOKEN } from '@/components/spoken'
 import { Button } from '@/components/ui/button'
 import { Kbd } from '@/components/ui/kbd'
 import { Textarea } from '@/components/ui/textarea'
@@ -36,7 +37,7 @@ export function ConditionsPanel(p: Props) {
   const captionEdited = p.caption !== p.adoptedCaption
 
   return (
-    <div className="sticky top-0 space-y-4 rounded-lg border bg-card p-4">
+    <div className="tray sticky top-0 space-y-4 max-lg:static">
       <div>
         <div className="mb-1.5 flex items-center">
           <label htmlFor="voice-text" className="text-xs text-muted-foreground">
@@ -57,11 +58,10 @@ export function ConditionsPanel(p: Props) {
           rows={3}
           value={p.text}
           onChange={(e) => p.onTextChange(e.target.value)}
+          className={SPOKEN}
         />
         <details className="mt-2">
-          <summary className="cursor-pointer text-xs text-muted-foreground">
-            絵文字で演技を指示
-          </summary>
+          <summary className="text-xs text-muted-foreground">絵文字で演技を指示</summary>
           <div className="mt-2">
             <EmojiPalette onInsert={insertEmoji} />
           </div>
@@ -72,7 +72,7 @@ export function ConditionsPanel(p: Props) {
           <label htmlFor="voice-caption" className="text-xs text-muted-foreground">
             caption
           </label>
-          <span className="text-xs text-muted-foreground">
+          <span className={captionEdited ? 'marked text-xs' : 'text-xs text-muted-foreground'}>
             {captionEdited ? '保存済みから変更' : '保存済み'}
           </span>
           {captionEdited && (
@@ -97,7 +97,7 @@ export function ConditionsPanel(p: Props) {
         </p>
       </div>
       <details>
-        <summary className="cursor-pointer text-xs text-muted-foreground">サンプラー</summary>
+        <summary className="text-xs text-muted-foreground">サンプラー</summary>
         <div className="mt-3">
           <SamplerFields values={p.values} onChange={p.onKnobChange} disabled={p.running} />
         </div>
@@ -122,15 +122,15 @@ export function ConditionsPanel(p: Props) {
           value={p.count}
           disabled={p.running}
           onChange={(e) => p.onCountChange(Number(e.target.value))}
-          className="flex-1 accent-primary"
+          className="flex-1"
         />
       </div>
       {p.running ? (
-        <Button variant="outline" className="w-full" onClick={p.onStop}>
+        <Button variant="outline" size="lg" className="w-full" onClick={p.onStop}>
           残りを中止
         </Button>
       ) : (
-        <Button className="w-full" disabled={!p.canGenerate} onClick={p.onGenerate}>
+        <Button size="lg" className="w-full" disabled={!p.canGenerate} onClick={p.onGenerate}>
           生成 <Kbd>⌘↵</Kbd>
         </Button>
       )}

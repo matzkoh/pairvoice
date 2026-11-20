@@ -1,4 +1,5 @@
 import { Button } from '@/components/ui/button'
+import { VoiceMark } from '@/components/VoiceMark'
 import type { ProfileItem, ProfileOrder } from '@/lib/api-types'
 
 import { SOURCE_LABELS } from './ProfileList'
@@ -56,7 +57,7 @@ export function OrderPicker({ value, disabled, onChange }: OrderProps) {
             checked={value === order}
             disabled={disabled}
             onChange={() => onChange(order)}
-            className="size-3.5 accent-primary"
+            className="size-3.5"
           />
           {ORDER_LABELS[order]}
           <span className="text-xs text-muted-foreground">{ORDER_HINTS[order]}</span>
@@ -104,13 +105,13 @@ export function MemberPicker({ voices, value, disabled, onChange }: PickerProps)
       {/* 声が増えても縦に伸びすぎないよう、幅に合わせて段を組む */}
       <ul
         aria-label="メンバー"
-        className="grid grid-cols-[repeat(auto-fill,minmax(11rem,1fr))] gap-1"
+        className="grid grid-cols-[repeat(auto-fill,minmax(11rem,1fr))] gap-1.5"
       >
         {voices.map((voice) => (
           <li key={voice.id}>
             <label
               title={voice.name}
-              className="flex items-center gap-2 rounded-md border px-2.5 py-1.5 text-sm transition-colors hover:bg-muted has-checked:border-primary/40 has-checked:bg-primary/5"
+              className="flex items-center gap-2 rounded-lg border border-transparent bg-background px-2 py-1.5 text-sm text-muted-foreground hover:border-input has-checked:border-foreground has-checked:bg-card has-checked:text-foreground has-focus-visible:ring-3 has-focus-visible:ring-ring/50"
             >
               <input
                 type="checkbox"
@@ -121,9 +122,14 @@ export function MemberPicker({ voices, value, disabled, onChange }: PickerProps)
                     e.target.checked ? [...value, voice.id] : value.filter((id) => id !== voice.id),
                   )
                 }
-                className="size-3.5 shrink-0 accent-primary"
+                className="size-3.5 shrink-0"
               />
-              <span className="truncate">{voice.name}</span>
+              <VoiceMark
+                id={voice.id}
+                members={voice.source === 'random' ? voice.members : undefined}
+                className="size-5"
+              />
+              <span className="truncate font-voice">{voice.name}</span>
               {voice.source === 'random' && (
                 <span className="ml-auto shrink-0 text-xs text-muted-foreground">
                   {SOURCE_LABELS.random}

@@ -15,7 +15,7 @@ export function useMute() {
   const [pending, startTransition] = useTransition()
   const [error, setError] = useState('')
 
-  // 失敗を投げ直さない。サイドバーとコマンドパレットには局所的な error boundary が無く、
+  // 失敗を投げ直さない。ヘッダーとコマンドパレットには局所的な error boundary が無く、
   // 投げると root の errorComponent まで飛んで画面ごと消える。
   function choose(minutes: number | null) {
     setError('')

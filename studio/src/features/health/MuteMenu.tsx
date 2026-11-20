@@ -22,14 +22,14 @@ export function MuteMenu({ disabled }: { disabled: boolean }) {
               variant="ghost"
               size="sm"
               disabled={disabled || pending}
-              className="-ml-2 h-7 px-2 text-muted-foreground"
+              className="text-muted-foreground"
             />
           }
         >
-          <BellOff className="size-3.5" aria-hidden="true" />
-          ミュート
+          <BellOff aria-hidden="true" />
+          <span className="max-lg:sr-only">ミュート</span>
         </DropdownMenuTrigger>
-        <DropdownMenuContent align="start">
+        <DropdownMenuContent align="end">
           {MUTE_CHOICES.map((choice) => (
             <DropdownMenuItem key={choice.label} onClick={() => choose(choice.minutes)}>
               {choice.label}

@@ -1,8 +1,10 @@
 import { keepPreviousData, useQuery, useQueryClient, useSuspenseQuery } from '@tanstack/react-query'
+import { cn } from 'cn'
 import { useDeferredValue, useEffect, useRef, useState, useTransition } from 'react'
 
 import { PageHeader } from '@/components/PageHeader'
 import { SaveBar } from '@/components/SaveBar'
+import { SPOKEN, SPOKEN_RESULT } from '@/components/spoken'
 import { Kbd } from '@/components/ui/kbd'
 import { Textarea } from '@/components/ui/textarea'
 import { apiSend, toErrorMessage } from '@/lib/api'
@@ -142,61 +144,67 @@ export function DictTable() {
   return (
     <div>
       <PageHeader title="辞書" description="読み上げる前に、表記を読みに置き換えます。" />
-      <section className="mb-5 rounded-lg border bg-card p-4">
-        <label htmlFor="dict-preview" className="mb-1.5 block text-xs text-muted-foreground">
-          試し置換（保存前の表で置き換えます）
-        </label>
-        <Textarea
-          id="dict-preview"
-          rows={2}
-          value={previewText}
-          onChange={(e) => setPreviewText(e.target.value)}
-        />
-        {/* 失敗したときに前回の結果を残すと、今の入力での結果に見えてしまう */}
-        {preview.isError ? (
-          <p className="mt-2 text-xs text-destructive">
-            プレビューに失敗しました: {toErrorMessage(preview.error)}
-          </p>
-        ) : (
-          preview.data && (
-            <p className="mt-2 rounded-md bg-muted px-3 py-2 text-sm" aria-label="置換後">
-              {preview.data.result}
+      {/* 表を直しながら結果を見られるよう、試し置換は表の横に留める */}
+      <div className="grid grid-cols-[minmax(0,1fr)_22rem] items-start gap-6 max-lg:grid-cols-1">
+        <section className="sticky top-0 col-start-2 space-y-2 max-lg:static max-lg:col-start-1">
+          <label htmlFor="dict-preview" className="block text-xs text-muted-foreground">
+            試し置換（保存前の表で置き換えます）
+          </label>
+          <Textarea
+            id="dict-preview"
+            rows={3}
+            className={SPOKEN}
+            value={previewText}
+            onChange={(e) => setPreviewText(e.target.value)}
+          />
+          {/* 失敗したときに前回の結果を残すと、今の入力での結果に見えてしまう */}
+          {preview.isError ? (
+            <p className="text-xs text-destructive">
+              プレビューに失敗しました: {toErrorMessage(preview.error)}
             </p>
-          )
-        )}
-      </section>
-      <div className="overflow-hidden rounded-lg border bg-card">
-        <table className="w-full text-sm">
-          <thead className="bg-muted/50 text-left text-xs text-muted-foreground">
-            <tr>
-              <th className="w-10">
-                <span className="sr-only">行</span>
-              </th>
-              <th className="w-1/4 px-2 py-2 font-medium">表記</th>
-              <th className="w-1/4 px-2 py-2 font-medium">読み</th>
-              <th className="px-2 py-2 font-medium">メモ</th>
-              <th className="w-10">
-                <span className="sr-only">削除</span>
-              </th>
-            </tr>
-          </thead>
-          <tbody>
-            {rows.map((row, i) => (
-              <DictRow
-                key={row.id}
-                row={row}
-                rownum={i + 1}
-                isLast={i === rows.length - 1}
-                onChange={(field, value) => changeCell(row.id, field, value)}
-                onDelete={() => deleteRow(row.id)}
-              />
-            ))}
-          </tbody>
-        </table>
+          ) : (
+            preview.data && (
+              <p className={cn(SPOKEN_RESULT, 'text-[15px]')} aria-label="置換後">
+                {preview.data.result}
+              </p>
+            )
+          )}
+        </section>
+        <div className="col-start-1 row-start-1 max-lg:row-start-2">
+          <div className="overflow-hidden rounded-2xl border bg-card">
+            <table className="w-full text-sm">
+              <thead className="text-left text-xs text-muted-foreground">
+                <tr>
+                  <th className="w-10">
+                    <span className="sr-only">行</span>
+                  </th>
+                  <th className="w-1/4 px-2 py-2 font-medium">表記</th>
+                  <th className="w-1/4 px-2 py-2 font-medium">読み</th>
+                  <th className="px-2 py-2 font-medium">メモ</th>
+                  <th className="w-10">
+                    <span className="sr-only">削除</span>
+                  </th>
+                </tr>
+              </thead>
+              <tbody>
+                {rows.map((row, i) => (
+                  <DictRow
+                    key={row.id}
+                    row={row}
+                    rownum={i + 1}
+                    isLast={i === rows.length - 1}
+                    onChange={(field, value) => changeCell(row.id, field, value)}
+                    onDelete={() => deleteRow(row.id)}
+                  />
+                ))}
+              </tbody>
+            </table>
+          </div>
+          <p className="mt-2 text-xs text-muted-foreground">
+            最後の行に書くと次の空行が増えます。行の削除は <Kbd>⌘Z</Kbd> で戻せます。
+          </p>
+        </div>
       </div>
-      <p className="mt-2 text-xs text-muted-foreground">
-        最後の行に書くと次の空行が増えます。行の削除は <Kbd>⌘Z</Kbd> で戻せます。
-      </p>
       <SaveBar dirty={dirty} pending={pending} status={status} onSave={save} />
     </div>
   )

@@ -3,6 +3,8 @@ import { Play } from 'lucide-react'
 import { useState, useTransition } from 'react'
 
 import { ConfirmButton } from '@/components/ConfirmButton'
+import { selectClass } from '@/components/selectClass'
+import { SPOKEN } from '@/components/spoken'
 import { Button } from '@/components/ui/button'
 import { Input } from '@/components/ui/input'
 import { Kbd } from '@/components/ui/kbd'
@@ -127,12 +129,12 @@ export function StyleEditor({
   return (
     <div className="space-y-5">
       {pairvoiceDown && (
-        <p className="rounded-md border border-destructive/40 bg-destructive/5 px-3 py-2 text-sm text-destructive">
+        <p className="rounded-lg border border-destructive/40 bg-destructive/5 px-3 py-2 text-sm text-destructive">
           pairvoice が止まっているので、試聴と保存はできません。
         </p>
       )}
-      <div className="grid grid-cols-[minmax(0,1fr)_minmax(0,20rem)] items-start gap-6">
-        <div className="space-y-4">
+      <div className="grid grid-cols-[minmax(0,1fr)_minmax(0,20rem)] items-start gap-6 max-lg:grid-cols-1">
+        <div className="space-y-5">
           <div>
             <label htmlFor="style-name" className="mb-1.5 block text-xs text-muted-foreground">
               名前（API の style に渡す値）
@@ -141,6 +143,7 @@ export function StyleEditor({
               id="style-name"
               value={name}
               placeholder="ささやき"
+              className="h-10 max-w-96 font-voice text-lg"
               onChange={(e) => setName(e.target.value)}
             />
             {nameTaken && (
@@ -148,7 +151,7 @@ export function StyleEditor({
             )}
           </div>
           <div>
-            <div className="mb-1.5 flex items-center gap-3">
+            <div className="mb-1.5 flex flex-wrap items-center gap-x-3">
               <label htmlFor="style-caption" className="text-xs text-muted-foreground">
                 caption
               </label>
@@ -157,7 +160,7 @@ export function StyleEditor({
                   type="checkbox"
                   checked={keepProfileCaption}
                   onChange={(e) => setKeepProfileCaption(e.target.checked)}
-                  className="size-3.5 accent-primary"
+                  className="size-3.5"
                 />
                 声のプロファイルの caption のまま読む
               </label>
@@ -172,11 +175,12 @@ export function StyleEditor({
             />
             <p className="mt-1 text-xs text-muted-foreground">
               プロファイルの caption
-              の代わりに使います。よく効くのは「ゆっくり」「早口に」のような速さと、テンションの指示です。
+              の代わりに使います。よく効くのは「ゆっくり」「早口に」のような速さと、テンションの指示です。変えられるのは速さ・テンション・抑揚の傾きまでで、ささやき声のような声質は参照音声で決まるので変わりません。声質を変えたいときは
+              voice で別のプロファイルを選んでください。
             </p>
           </div>
           <details open={Object.keys(style?.sampler ?? {}).length > 0}>
-            <summary className="cursor-pointer text-xs text-muted-foreground">
+            <summary className="text-xs text-muted-foreground">
               サンプラー（変えた項目だけをスタイルに保存し、ほかは config.toml の値で読みます）
             </summary>
             <div className="mt-3">
@@ -200,6 +204,7 @@ export function StyleEditor({
             </Button>
             {style && (
               <ConfirmButton
+                variant="ghost"
                 idle="消す"
                 armed="もう一度押すと消します"
                 disabled={saving}
@@ -208,7 +213,7 @@ export function StyleEditor({
             )}
           </div>
         </div>
-        <section aria-label="試聴" className="space-y-3 rounded-lg border bg-card p-4">
+        <section aria-label="試聴" className="tray space-y-3">
           <div>
             <label htmlFor="style-voice" className="mb-1.5 block text-xs text-muted-foreground">
               声
@@ -217,7 +222,7 @@ export function StyleEditor({
               id="style-voice"
               value={voice}
               onChange={(e) => setVoice(e.target.value)}
-              className="h-8 w-full rounded-md border bg-transparent px-2 text-sm"
+              className={selectClass}
             >
               {profiles.items.map((p) => (
                 <option key={p.id} value={p.id}>
@@ -235,15 +240,16 @@ export function StyleEditor({
               id="style-text"
               rows={3}
               value={text}
+              className={SPOKEN}
               onChange={(e) => setText(e.target.value)}
             />
           </div>
-          <Button variant="outline" className="w-full" disabled={!canTry} onClick={tryStyle}>
-            <Play />
+          <Button size="lg" className="w-full" disabled={!canTry} onClick={tryStyle}>
+            <Play fill="currentColor" strokeWidth={0} />
             {trying ? '合成しています…' : '試聴'} <Kbd>⌘↵</Kbd>
           </Button>
           {style && (
-            <pre className="overflow-x-auto rounded-md bg-muted px-3 py-2 text-xs">
+            <pre className="overflow-x-auto rounded-lg bg-code px-3 py-2 font-mono text-xs text-code-foreground">
               {`PAIRVOICE_STYLE=${style.name}\npairvoice say --style ${style.name} "…"`}
             </pre>
           )}

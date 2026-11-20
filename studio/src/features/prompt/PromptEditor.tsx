@@ -100,7 +100,7 @@ function TextEditor({ target, tabs }: { target: PromptTarget; tabs: React.ReactN
     <div>
       <PageHeader title={title} description={`${description}保存すると旧版は履歴に残ります。`} />
       {tabs}
-      <div className="grid grid-cols-[minmax(0,1fr)_16rem] items-start gap-6">
+      <div className="grid grid-cols-[minmax(0,1fr)_15rem] items-start gap-6 max-md:grid-cols-1">
         {/* 送った値は送信の時点で覚える。action の中で覚えると transition の更新になり、
             保存の後に取り直した本文が先に描かれて、打ち足した分を上書きすることがある */}
         <form ref={formRef} action={submit} onSubmit={() => markSubmitted(text)}>
@@ -109,14 +109,17 @@ function TextEditor({ target, tabs }: { target: PromptTarget; tabs: React.ReactN
             aria-label={label}
             value={text}
             onChange={(e) => setText(e.target.value)}
-            className="min-h-[60vh] resize-y font-mono text-[13px] leading-relaxed"
+            className="min-h-[60vh] resize-y rounded-2xl px-5 py-4 font-mono text-[13px] leading-[1.75]"
           />
           <p className="mt-2 text-xs text-muted-foreground tabular-nums">
             {text.length.toLocaleString('ja-JP')} 文字
           </p>
           <p className="mt-1 text-xs text-muted-foreground">
             レビューをもとに改善するときは、Claude Code で{' '}
-            <span className="font-mono text-foreground">/pairvoice:tune</span> を実行します。
+            <code className="rounded-sm bg-muted px-1 py-0.5 font-mono text-foreground">
+              /pairvoice:tune
+            </code>{' '}
+            を実行します。
           </p>
         </form>
         <aside>

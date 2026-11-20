@@ -1,8 +1,8 @@
 import { cn } from 'cn'
-import { Play } from 'lucide-react'
 import { type MouseEvent, type ReactNode, useEffect, useRef } from 'react'
 
-import { Badge } from '@/components/ui/badge'
+import { PlayButton } from '@/components/PlayButton'
+import { SPOKEN } from '@/components/spoken'
 import { Button } from '@/components/ui/button'
 import { Input } from '@/components/ui/input'
 import { Kbd } from '@/components/ui/kbd'
@@ -64,17 +64,15 @@ export function ReviewRow({
       data-selected={selected || undefined}
       aria-current={selected || undefined}
       className={cn(
-        'border-b last:border-b-0',
-        selected && 'bg-primary/5 shadow-[inset_2px_0_0_var(--primary)]',
+        'scroll-mb-12 border-b last:border-b-0',
+        selected && 'bg-background shadow-[inset_3px_0_0_var(--foreground)]',
       )}
     >
       {/* キーボードでは j / k で選ぶ */}
       {/* oxlint-disable-next-line jsx-a11y/click-events-have-key-events, jsx-a11y/no-static-element-interactions */}
-      <div className="flex cursor-default items-center gap-3 px-3 py-2" onClick={onSelect}>
-        <Button
-          variant="ghost"
-          size="icon-sm"
-          className="flex-none text-primary"
+      <div className="flex cursor-default items-center gap-3 px-4 py-2" onClick={onSelect}>
+        <PlayButton
+          voice={item.voice}
           aria-label="再生"
           title={item.audio_path ? '再生' : '音声ファイルなし'}
           disabled={!item.audio_path}
@@ -82,20 +80,13 @@ export function ReviewRow({
             e.stopPropagation()
             onPlay()
           }}
-        >
-          <Play className="size-3.5" aria-hidden="true" />
-        </Button>
+        />
         <span
           id={summaryElementId(item.message_id)}
-          className={cn('min-w-0 flex-1 text-sm', !open && 'truncate')}
+          className={cn('min-w-0 flex-1', SPOKEN, !open && 'truncate')}
         >
           {item.summary}
         </span>
-        {item.voice_name && (
-          <Badge variant="secondary" className="max-w-32 truncate" title={`声: ${item.voice_name}`}>
-            {item.voice_name}
-          </Badge>
-        )}
         {item.verdict && (
           <span
             className="flex-none text-xs"
@@ -104,8 +95,16 @@ export function ReviewRow({
             {item.verdict === 'good' ? '👍' : '👎'}
           </span>
         )}
+        {item.voice_name && (
+          <span
+            className="max-w-28 flex-none truncate text-xs text-muted-foreground max-md:max-w-20"
+            title={`声: ${item.voice_name}`}
+          >
+            {item.voice_name}
+          </span>
+        )}
         <time
-          className="flex-none text-xs text-muted-foreground tabular-nums"
+          className="w-20 flex-none text-right text-xs text-muted-foreground max-md:w-auto"
           title={`message_id: ${item.message_id}`}
         >
           {formatWhen(item.ts)}
@@ -122,7 +121,7 @@ export function ReviewRow({
           extra={extra}
         />
       )}
-      {!open && error && <p className="px-3 pb-2 pl-13 text-xs text-destructive">{error}</p>}
+      {!open && error && <p className="px-4 pb-2 pl-15 text-xs text-destructive">{error}</p>}
     </li>
   )
 }
@@ -151,7 +150,7 @@ function RowDetail({
     if (onSaveIdeal(idealText)) markSubmitted(idealText)
   }
   return (
-    <div className="space-y-3 px-3 pb-3 pl-13">
+    <div className="space-y-3 px-4 pb-4 pl-15">
       <div className="flex flex-wrap items-center gap-2">
         {/* 差し込み部品（辞書に追加）は外す。ポップオーバーはトリガーのフォーカスが外れると閉じる */}
         <div className="contents" onClickCapture={releaseAfterClick}>
@@ -173,6 +172,7 @@ function RowDetail({
           </label>
           <Input
             id={`ideal-${item.message_id}`}
+            className={SPOKEN}
             value={idealText}
             onChange={(e) => setIdealText(e.target.value)}
             onBlur={save}
@@ -189,7 +189,7 @@ function RowDetail({
       <RowMeta item={item} />
       <div>
         <div className="mb-1 text-xs text-muted-foreground">生成元テキスト</div>
-        <div className="max-h-45 overflow-y-auto rounded-md bg-muted px-3 py-2 text-xs whitespace-pre-wrap text-muted-foreground">
+        <div className="max-h-45 overflow-y-auto rounded-lg border bg-card px-3 py-2 text-xs whitespace-pre-wrap text-muted-foreground">
           {item.input}
         </div>
       </div>

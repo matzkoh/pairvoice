@@ -7,6 +7,21 @@ import { apiSend, toErrorMessage } from '@/lib/api'
 
 import { type HistorySource, historyQueryOptions } from './queries'
 
+// 版の名前に入っている時刻（2026-01-01T00-00-00-000Z。ファイル名にするため : と . を - にしてある）を、
+// 手元の時刻で読める形にする
+function formatVersionTs(ts: string): string {
+  const iso = ts.replace(/T(\d\d)-(\d\d)-(\d\d)-(\d+)Z$/, 'T$1:$2:$3.$4Z')
+  const d = new Date(iso)
+  if (Number.isNaN(d.getTime())) return ts
+  return d.toLocaleString('ja-JP', {
+    year: 'numeric',
+    month: 'numeric',
+    day: 'numeric',
+    hour: '2-digit',
+    minute: '2-digit',
+  })
+}
+
 type Props = {
   source: HistorySource
   // 未保存の変更がある時だけ二段確認にする（呼び出し側の dirty をそのまま渡す）
@@ -41,12 +56,12 @@ export function HistoryList({ source, confirmBeforeRestore = false, onRestored, 
   }
 
   return (
-    <ul className="divide-y rounded-lg border bg-card">
+    <ul className="divide-y border-y">
       {data.items.map((item) => (
-        <li key={item.name} className="flex items-center gap-2 px-3 py-1.5">
-          <span className="flex-1 font-mono text-xs text-muted-foreground tabular-nums">
-            {item.ts}
-          </span>
+        <li key={item.name} className="flex items-center gap-2 py-1">
+          <time className="flex-1 text-xs text-muted-foreground" title={item.ts}>
+            {formatVersionTs(item.ts)}
+          </time>
           {confirmBeforeRestore ? (
             <ConfirmButton
               variant="ghost"

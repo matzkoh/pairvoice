@@ -31,7 +31,7 @@ export type ReviewCounts = Record<Filter, number> & {
   reviewedUnarchived: number
 }
 
-// 絞り込みの件数・一括アーカイブの活性条件・サイドバーの未レビューバッジは、ここから1箇所で計算する。
+// 絞り込みの件数・一括アーカイブの活性条件・ヘッダーの未レビューバッジは、ここから1箇所で計算する。
 // 母集団は必ず全件（CorpusResponse.items）。絞り込み済みの配列を渡すと「未レビュー」を
 // 選んだ瞬間に「すべて」の件数が化ける
 export function computeReviewCounts(items: readonly CorpusItem[]): ReviewCounts {

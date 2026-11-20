@@ -2,37 +2,42 @@
 @import 'tw-animate-css';
 @import 'shadcn/tailwind.css';
 
-/* shadcn の命名に揃える。accent は「ブランド色」ではなく「ホバー時の薄い背景」の意味で、
-   ブランド色（ローズ）は primary が持つ。 */
+/* 画面の地は墨と紙の2色だけで組み、色は声（--voice）と状態（成功・失敗・注意）にだけ使う。
+   操作の部品に色を付けると、声の色が誰の声かを伝える手がかりにならなくなる。
+   命名は shadcn に揃える。primary は墨、accent は「ホバー時の薄い背景」の意味。 */
 :root {
-  --background: #ffffff;
-  --foreground: #18181b;
+  --background: #f2f4f3;
+  --foreground: #18211f;
   --card: #ffffff;
-  --card-foreground: #18181b;
+  --card-foreground: #18211f;
   --popover: #ffffff;
-  --popover-foreground: #18181b;
-  --primary: #c2507e;
+  --popover-foreground: #18211f;
+  --primary: #18211f;
   --primary-foreground: #ffffff;
-  --secondary: #f4f4f5;
-  --secondary-foreground: #18181b;
-  --muted: #f4f4f5;
-  --muted-foreground: #71717a;
-  --accent: #f4f4f5;
-  --accent-foreground: #18181b;
-  --destructive: #dc2626;
-  --success: #16a34a;
-  --warning: #b45309;
-  --border: #e4e4e7;
-  --input: #e4e4e7;
-  --ring: #c2507e;
-  --code: #18181b;
-  --code-foreground: #e4e4e7;
-  --sidebar: #fafafa;
-  --sidebar-foreground: #18181b;
-  --sidebar-border: #e4e4e7;
-  --sidebar-accent: #efeff1;
-  --sidebar-accent-foreground: #18181b;
+  --secondary: #e6eae8;
+  --secondary-foreground: #18211f;
+  --muted: #e9edeb;
+  --muted-foreground: #56625f;
+  --accent: #e9edeb;
+  --accent-foreground: #18211f;
+  --destructive: #c5372a;
+  --success: #1c7f54;
+  --warning: #9a5b00;
+  --border: #d8dedc;
+  --input: #c3ccc9;
+  --ring: #18211f;
+  --code: #18211f;
+  --code-foreground: #dde3e1;
   --radius: 0.5rem;
+  /* 台本に引く蛍光ペン。「いま効いているもの・まだ手を付けていないもの」に引く。
+     声の色はこの色相（黄）を避けて振る（lib/voiceColor.ts） */
+  --mark: #ffe04a;
+  --mark-foreground: #18211f;
+  /* 声の色の明るさと鮮やかさ。声ごとに変えるのは色相（--voice-h）と、濃淡の段（--voice-deep）。
+     色相だけでは見分けられるのが8色ほどなので、段を足して倍にする */
+  --voice-l: 0.62;
+  --voice-c: 0.16;
+  --voice-deep-l: -0.2;
   /* 2択の A と B（データ可視化の既定パレットの1・2番。明暗それぞれで見分けやすさを検証済み） */
   --pick-a: #2a78d6;
   --pick-b: #eb6834;
@@ -40,33 +45,33 @@
 
 @media (prefers-color-scheme: dark) {
   :root {
-    --background: #18181b;
-    --foreground: #f4f4f5;
-    --card: #1f1f23;
-    --card-foreground: #f4f4f5;
-    --popover: #1f1f23;
-    --popover-foreground: #f4f4f5;
-    --primary: #e0709b;
-    --primary-foreground: #18181b;
-    --secondary: #27272a;
-    --secondary-foreground: #f4f4f5;
-    --muted: #27272a;
-    --muted-foreground: #a1a1aa;
-    --accent: #27272a;
-    --accent-foreground: #f4f4f5;
-    --destructive: #f87171;
-    --success: #4ade80;
-    --warning: #fbbf24;
-    --border: #2e2e33;
-    --input: #3f3f46;
-    --ring: #e0709b;
-    --code: #0f0f11;
-    --code-foreground: #d4d4d8;
-    --sidebar: #141416;
-    --sidebar-foreground: #f4f4f5;
-    --sidebar-border: #27272a;
-    --sidebar-accent: #232327;
-    --sidebar-accent-foreground: #f4f4f5;
+    --background: #121615;
+    --foreground: #eceeed;
+    --card: #1a1f1e;
+    --card-foreground: #eceeed;
+    --popover: #1f2524;
+    --popover-foreground: #eceeed;
+    --primary: #eceeed;
+    --primary-foreground: #121615;
+    --secondary: #262d2b;
+    --secondary-foreground: #eceeed;
+    --muted: #222827;
+    --muted-foreground: #9ba6a3;
+    --accent: #262d2b;
+    --accent-foreground: #eceeed;
+    --destructive: #f08373;
+    --success: #5fca98;
+    --warning: #eeb04c;
+    --border: #2a3230;
+    --input: #3b4542;
+    --ring: #eceeed;
+    --code: #0c0f0e;
+    --code-foreground: #d3d9d7;
+    --mark: #f2d23c;
+    --mark-foreground: #121615;
+    --voice-l: 0.8;
+    --voice-c: 0.13;
+    --voice-deep-l: -0.17;
     --pick-a: #3987e5;
     --pick-b: #d95926;
   }
@@ -96,19 +101,26 @@
   --color-ring: var(--ring);
   --color-code: var(--code);
   --color-code-foreground: var(--code-foreground);
-  --color-sidebar: var(--sidebar);
-  --color-sidebar-foreground: var(--sidebar-foreground);
-  --color-sidebar-border: var(--sidebar-border);
-  --color-sidebar-accent: var(--sidebar-accent);
-  --color-sidebar-accent-foreground: var(--sidebar-accent-foreground);
+  --color-mark: var(--mark);
+  --color-mark-foreground: var(--mark-foreground);
+  /* 声の色。--voice-h を持つ要素（VoiceMark など）の中でだけ意味を持つ */
+  --color-voice: oklch(
+    calc(var(--voice-l) + var(--voice-deep, 0) * var(--voice-deep-l)) var(--voice-c)
+      var(--voice-h, 0)
+  );
 
   --radius-sm: calc(var(--radius) - 4px);
   --radius-md: calc(var(--radius) - 2px);
   --radius-lg: var(--radius);
   --radius-xl: calc(var(--radius) + 4px);
 
-  --font-sans: 'Hiragino Sans', 'Yu Gothic UI', system-ui, sans-serif;
-  --font-mono: 'SF Mono', Menlo, monospace;
+  /* どれも macOS に初めから入っている書体（外から取らない。手元だけで動く道具なので）。
+     欧文と数字は SF、和文はヒラギノ角ゴ */
+  --font-sans: system-ui, -apple-system, 'Hiragino Sans', sans-serif;
+  /* 声に出る言葉（読み上げた文・試聴の文・声の名前）は丸ゴシックで組み、
+     操作や説明の文字と見分ける */
+  --font-voice: 'Hiragino Maru Gothic ProN', 'Hiragino Sans', system-ui, sans-serif;
+  --font-mono: ui-monospace, 'SF Mono', Menlo, monospace;
 }
 
 @layer base {
@@ -123,13 +135,46 @@
     font-variant-numeric: tabular-nums;
   }
   button:not(:disabled),
-  [role='button']:not([aria-disabled='true']) {
+  [role='button']:not([aria-disabled='true']),
+  summary {
     cursor: pointer;
+  }
+  /* 素の入力部品（range / checkbox / radio）も墨で塗る */
+  input[type='range'],
+  input[type='checkbox'],
+  input[type='radio'] {
+    accent-color: var(--primary);
+  }
+  ::selection {
+    background: var(--mark);
+    color: var(--mark-foreground);
   }
   @media (prefers-reduced-motion: reduce) {
     * {
       transition: none !important;
       animation: none !important;
+    }
+  }
+}
+
+@layer components {
+  /* 白い面の上に置く、地の色の受け皿。入力をひとまとまりにして、結果の側と見分ける */
+  .tray {
+    border-radius: var(--radius-xl);
+    background: var(--background);
+    padding: 1rem;
+  }
+  /* 蛍光ペンを引いた語。文字の下半分にだけ引くと、暗い地でも文字の色を変えずに済む */
+  .marked {
+    background: linear-gradient(transparent 55%, var(--mark) 55%);
+    padding-inline: 0.15em;
+  }
+  @media (prefers-color-scheme: dark) {
+    .marked {
+      background: linear-gradient(
+        transparent 62%,
+        color-mix(in oklch, var(--mark) 55%, transparent) 62%
+      );
     }
   }
 }

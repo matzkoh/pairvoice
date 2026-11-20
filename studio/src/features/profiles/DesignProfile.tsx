@@ -1,6 +1,7 @@
-import { Play } from 'lucide-react'
 import { useState } from 'react'
 
+import { PlayButton } from '@/components/PlayButton'
+import { SPOKEN } from '@/components/spoken'
 import { Button } from '@/components/ui/button'
 import { Textarea } from '@/components/ui/textarea'
 import type { SamplerOverrides } from '@/lib/api-types'
@@ -80,7 +81,7 @@ export function DesignProfile({
         label="参照音声"
         hint="caption から seed だけ変えた候補を作ります。選んだ候補の音声がそのまま参照音声になります。"
       >
-        <div className="space-y-3 rounded-lg border bg-background p-3">
+        <div className="tray space-y-3">
           <div>
             <label htmlFor="design-text" className="mb-1.5 block text-xs text-muted-foreground">
               候補に読ませる文
@@ -88,6 +89,7 @@ export function DesignProfile({
             <Textarea
               id="design-text"
               rows={2}
+              className={SPOKEN}
               value={text}
               onChange={(e) => setText(e.target.value)}
             />
@@ -104,7 +106,6 @@ export function DesignProfile({
               step={1}
               value={count}
               disabled={running}
-              className="accent-primary"
               onChange={(e) => setCount(Number(e.target.value))}
             />
             <Button
@@ -121,7 +122,7 @@ export function DesignProfile({
             <p className="text-xs text-destructive">pairvoice が止まっているので作れません。</p>
           )}
           {takes.length > 0 && (
-            <ul aria-label="候補" className="space-y-2 border-t pt-3">
+            <ul aria-label="候補" className="space-y-2 border-t border-input pt-3">
               {takes.map((take) => (
                 <CandidateRow
                   key={take.id}
@@ -151,16 +152,13 @@ function CandidateRow({ take, onPlay, onStatus, onCreated }: RowProps) {
 
   return (
     <li className="flex items-center gap-2">
-      <Button
-        variant="ghost"
-        size="icon-xs"
+      <PlayButton
+        size="sm"
         aria-label={`候補 #${take.id} を再生`}
         disabled={!relativePath}
         onClick={() => relativePath && onPlay(audioFileUrl(relativePath))}
-      >
-        <Play />
-      </Button>
-      <span className="text-sm tabular-nums">#{take.id}</span>
+      />
+      <span className="text-sm font-medium">#{take.id}</span>
       <span className="font-mono text-xs text-muted-foreground">seed {take.seed}</span>
       {take.status === 'waiting' && <span className="text-xs text-muted-foreground">待機中</span>}
       {take.status === 'running' && <span className="text-xs text-muted-foreground">生成中…</span>}

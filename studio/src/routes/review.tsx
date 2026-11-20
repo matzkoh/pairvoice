@@ -137,7 +137,8 @@ function ReviewPage() {
   const bulkError = actions.errors[BULK_ERROR_ID] ?? ''
 
   return (
-    <div>
+    // 読み上げは2文・45字ほどなので、行を広げすぎない
+    <div className="mx-auto max-w-5xl">
       <PageHeader
         title="レビュー"
         description={hint}
@@ -147,7 +148,7 @@ function ReviewPage() {
               type="search"
               aria-label="テキスト検索"
               placeholder="検索"
-              className="h-8 w-48"
+              className="w-48"
               value={search.q}
               onChange={(e) =>
                 navigate({ search: (prev) => setQuery(prev, e.target.value), replace: true })
@@ -155,16 +156,9 @@ function ReviewPage() {
             />
             <DropdownMenu>
               <DropdownMenuTrigger
-                render={
-                  <Button
-                    variant="ghost"
-                    size="icon"
-                    className="size-8"
-                    aria-label="その他の操作"
-                  />
-                }
+                render={<Button variant="ghost" size="icon" aria-label="その他の操作" />}
               >
-                <Ellipsis className="size-4" aria-hidden="true" />
+                <Ellipsis aria-hidden="true" />
               </DropdownMenuTrigger>
               <DropdownMenuContent align="end">
                 <DropdownMenuItem
@@ -178,22 +172,22 @@ function ReviewPage() {
           </>
         }
       />
-      <div className="mb-3 flex flex-wrap gap-1">
+      <div className="flex flex-wrap gap-x-1 border-b">
         {FILTER_ORDER.map((f) => (
-          <Button
+          <button
             key={f}
-            variant={search.filter === f ? 'secondary' : 'ghost'}
-            size="sm"
+            type="button"
             aria-pressed={search.filter === f}
+            className="-mb-px flex items-baseline gap-1.5 border-b-2 border-transparent px-2.5 py-2 text-sm text-muted-foreground outline-none hover:text-foreground focus-visible:bg-accent aria-pressed:border-foreground aria-pressed:font-medium aria-pressed:text-foreground"
             onClick={() => navigate({ search: (prev) => setFilter(prev, f), replace: true })}
           >
             {FILTER_LABELS[f]}
-            <span className="text-muted-foreground tabular-nums">{counts[f]}</span>
-          </Button>
+            <span className="text-xs font-normal">{counts[f]}</span>
+          </button>
         ))}
       </div>
       {confirmBulk && (
-        <div className="mb-3 flex items-center gap-2 rounded-md border bg-muted/50 px-3 py-2 text-sm">
+        <div className="mt-3 flex items-center gap-2 rounded-lg border bg-card px-3 py-2 text-sm">
           <span className="flex-1">レビュー済みの {bulkTargets.length} 件をアーカイブしますか</span>
           <Button
             size="sm"
@@ -209,12 +203,14 @@ function ReviewPage() {
           </Button>
         </div>
       )}
-      {bulkError && <p className="mb-2 text-xs text-destructive">{bulkError}</p>}
-      {playerError && <p className="mb-2 text-xs text-destructive">{playerError}</p>}
+      {bulkError && <p className="mt-2 text-xs text-destructive">{bulkError}</p>}
+      {playerError && <p className="mt-2 text-xs text-destructive">{playerError}</p>}
       {shown.length === 0 ? (
-        <EmptyState>{emptyMessage}</EmptyState>
+        <div className="mt-4">
+          <EmptyState>{emptyMessage}</EmptyState>
+        </div>
       ) : (
-        <ul className="overflow-hidden rounded-lg border bg-card">
+        <ul className="mt-3 overflow-hidden rounded-2xl border bg-card">
           {shown.map((item) => (
             <ReviewRow
               key={item.message_id}
@@ -247,7 +243,8 @@ function ReviewPage() {
           さらに {Math.min(REVIEW_PAGE_SIZE, filtered.length - shown.length)} 件を表示
         </Button>
       )}
-      <p className="mt-4 flex flex-wrap gap-x-3 gap-y-1 text-xs text-muted-foreground">
+      {/* 手を離さずに片付けるためのキーなので、一覧を送っても見える所に置く */}
+      <p className="sticky bottom-0 mt-4 flex flex-wrap gap-x-4 gap-y-1 border-t bg-background py-2.5 text-xs text-muted-foreground">
         <span>
           <Kbd>j</Kbd> <Kbd>k</Kbd> 移動
         </span>

@@ -1,6 +1,6 @@
 import type { Filter } from './reviewCounts'
 
-// URL に載せる値。すべて任意にして、サイドバーや ⌘K から search 無しで開けるようにする
+// URL に載せる値。すべて任意にして、ヘッダーや ⌘K から search 無しで開けるようにする
 export type ReviewSearch = { filter?: Filter; q?: string; visible?: number }
 
 export const REVIEW_PAGE_SIZE = 100

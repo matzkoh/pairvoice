@@ -1,6 +1,7 @@
 import { useQuery } from '@tanstack/react-query'
 import { useEffect, useEffectEvent, useMemo, useState } from 'react'
 
+import { SPOKEN } from '@/components/spoken'
 import { Button } from '@/components/ui/button'
 import { Textarea } from '@/components/ui/textarea'
 import { apiSend, toErrorMessage } from '@/lib/api'
@@ -97,7 +98,13 @@ export function PickProfile({ anchorText, pairvoiceDown, onPlay, onStatus, onCre
   return (
     <div className="max-w-2xl space-y-5">
       <Field label="候補に読ませる文" htmlFor="pick-text">
-        <Textarea id="pick-text" rows={2} value={text} onChange={(e) => setText(e.target.value)} />
+        <Textarea
+          id="pick-text"
+          rows={2}
+          value={text}
+          className={SPOKEN}
+          onChange={(e) => setText(e.target.value)}
+        />
       </Field>
       <Button
         disabled={pairvoiceDown || text.trim() === ''}

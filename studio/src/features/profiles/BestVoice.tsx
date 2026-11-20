@@ -69,9 +69,9 @@ export function BestVoice({
       aria-label="見つけた声"
       className={cn(
         'space-y-3 rounded-xl border-2 p-4 transition-colors',
-        stage === 'ready' && 'border-primary bg-primary/5 shadow-sm',
-        stage === 'warm' && 'border-primary/40 bg-background',
-        stage === 'early' && 'border-border bg-muted/30',
+        stage === 'ready' && 'border-foreground bg-card',
+        stage === 'warm' && 'border-input bg-background',
+        stage === 'early' && 'border-transparent bg-background',
       )}
     >
       <div className="flex items-center gap-3">

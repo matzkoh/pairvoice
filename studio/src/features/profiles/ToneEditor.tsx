@@ -39,10 +39,10 @@ export function ToneEditor({
   }
 
   return (
-    <section aria-label="要約の口調" className="rounded-lg border bg-card p-4">
-      <div className="mb-2 flex items-center gap-2">
-        <h2 className="text-sm font-semibold">要約の口調</h2>
-        <span className="text-xs text-muted-foreground">
+    <section aria-label="要約の口調" className="border-t pt-6">
+      <div className="mb-3 flex flex-wrap items-center gap-x-3 gap-y-2">
+        <h2 className="text-base font-semibold">要約の口調</h2>
+        <span className={dirty ? 'marked text-xs' : 'text-xs text-muted-foreground'}>
           {dirty ? '未保存の変更あり' : item.tone.trim() ? '保存済み' : '既定の口調で読む'}
         </span>
         <div className="ml-auto flex items-center gap-2">
@@ -62,9 +62,9 @@ export function ToneEditor({
         onChange={(e) => setDraft(e.target.value)}
         className="font-mono text-[13px] leading-relaxed"
       />
-      <p className="mt-1 text-xs text-muted-foreground">
+      <p className="mt-1.5 text-xs text-muted-foreground">
         この声で読むときの、口調の指示と入出力の例です。要約のプロンプトの共通の部分の後ろに足します。空にすると
-        <Link to="/prompt" search={{ target: 'tone' }} className="underline">
+        <Link to="/prompt" search={{ target: 'tone' }} className="underline underline-offset-2">
           既定の口調
         </Link>
         で読みます。

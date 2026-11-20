@@ -180,7 +180,7 @@ function JobStatus({ job, onOpen }: { job: FoldJob; onOpen: (id: string) => void
   }
   const { profile, report } = job
   return (
-    <div className="space-y-3 rounded-lg border bg-background p-4">
+    <div className="tray space-y-3">
       <p className="text-sm">
         本人の声 {Math.round(report.speech_seconds / 60)} 分（{report.pieces} 区間）を、
         {report.tokens} トークンに畳み込みました。

@@ -1,10 +1,12 @@
+import { cn } from 'cn'
 import { Plus, Search } from 'lucide-react'
 import { useRef, useState } from 'react'
 
-import { Badge } from '@/components/ui/badge'
+import { LIST_ROW } from '@/components/ListDetail'
 import { Button } from '@/components/ui/button'
 import { Input } from '@/components/ui/input'
 import { Kbd } from '@/components/ui/kbd'
+import { VoiceMark } from '@/components/VoiceMark'
 import type { ProfileItem, ProfileSource } from '@/lib/api-types'
 import { isImeConfirm, useHotkeys } from '@/lib/hotkeys'
 
@@ -112,7 +114,7 @@ export function ProfileList({ items, active, selected, onSelect, onCreate }: Pro
           />
         </div>
         <Button
-          variant={selected === null ? 'secondary' : 'outline'}
+          variant={selected === null ? 'default' : 'outline'}
           size="icon"
           aria-label="新しく作る"
           aria-current={selected === null ? 'true' : undefined}
@@ -125,11 +127,11 @@ export function ProfileList({ items, active, selected, onSelect, onCreate }: Pro
       <ul className="-mx-1 min-h-0 flex-1 overflow-y-auto px-1 pb-2">
         {groups.map((group) => (
           <li key={group.source}>
-            <h3 className="sticky top-0 z-10 flex items-baseline justify-between bg-background px-3 pt-3 pb-1 text-xs font-medium text-muted-foreground">
+            <h3 className="sticky top-0 z-10 flex items-baseline justify-between bg-background px-2 pt-3 pb-1 text-xs font-medium text-muted-foreground">
               {SOURCE_LABELS[group.source]}
-              <span className="tabular-nums">{group.items.length}</span>
+              <span>{group.items.length}</span>
             </h3>
-            <ul className="space-y-0.5">
+            <ul className="space-y-px">
               {group.items.map((item) => {
                 const sub = detail(item, names)
                 return (
@@ -139,18 +141,29 @@ export function ProfileList({ items, active, selected, onSelect, onCreate }: Pro
                       ref={item.id === selected ? scrollIntoView : undefined}
                       aria-current={item.id === selected ? 'true' : undefined}
                       title={item.name}
-                      className="w-full rounded-md px-3 py-1.5 text-left transition-colors hover:bg-muted aria-[current]:bg-muted"
+                      className={cn(LIST_ROW, 'flex items-center gap-2.5 px-2 py-1.5')}
                       onClick={() => onSelect(item.id)}
                     >
-                      <span className="flex items-center gap-2">
-                        <span className="truncate text-sm font-medium">{item.name}</span>
-                        {item.id === active && <Badge className="ml-auto shrink-0">使用中</Badge>}
-                      </span>
-                      {sub && (
-                        <span className="mt-0.5 block truncate text-xs text-muted-foreground">
-                          {sub}
+                      <VoiceMark
+                        id={item.id}
+                        members={item.source === 'random' ? item.members : undefined}
+                        className="size-7"
+                      />
+                      <span className="min-w-0 flex-1">
+                        <span className="flex items-center gap-2">
+                          <span className="truncate font-voice">{item.name}</span>
+                          {item.id === active && (
+                            <span className="marked ml-auto flex-none text-[11px] font-medium">
+                              使用中
+                            </span>
+                          )}
                         </span>
-                      )}
+                        {sub && (
+                          <span className="block truncate text-xs text-muted-foreground">
+                            {sub}
+                          </span>
+                        )}
+                      </span>
                     </button>
                   </li>
                 )
@@ -164,7 +177,7 @@ export function ProfileList({ items, active, selected, onSelect, onCreate }: Pro
           </li>
         )}
       </ul>
-      <p className="flex items-center gap-1 px-3 text-xs text-muted-foreground">
+      <p className="flex items-center gap-1 px-2 text-xs text-muted-foreground max-md:hidden">
         <Kbd>/</Kbd>絞り込む
         <Kbd className="ml-2">J</Kbd>
         <Kbd>K</Kbd>上下に移る

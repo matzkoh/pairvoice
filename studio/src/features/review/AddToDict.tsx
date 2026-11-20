@@ -1,7 +1,9 @@
 import { keepPreviousData, useQuery } from '@tanstack/react-query'
+import { cn } from 'cn'
 import { BookPlus } from 'lucide-react'
 import { useActionState, useDeferredValue, useState } from 'react'
 
+import { SPOKEN_RESULT } from '@/components/spoken'
 import { Button } from '@/components/ui/button'
 import { Input } from '@/components/ui/input'
 import { Popover, PopoverContent, PopoverTrigger } from '@/components/ui/popover'
@@ -142,7 +144,7 @@ function AddToDictForm({ summary, initialFrom, onDone }: FormProps) {
         </p>
       ) : (
         preview.data && (
-          <p className="rounded-md bg-muted px-3 py-2 text-xs" aria-label="置換後">
+          <p className={cn(SPOKEN_RESULT, 'text-sm')} aria-label="置換後">
             {preview.data.result}
           </p>
         )

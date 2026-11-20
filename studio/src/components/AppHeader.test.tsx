@@ -14,7 +14,7 @@ import { afterEach, expect, it, vi } from 'vitest'
 import { apiGet, UnreachableServerError } from '@/lib/api'
 import type { CorpusCounts } from '@/lib/api-types'
 
-import { AppSidebar } from './AppSidebar'
+import { AppHeader } from './AppHeader'
 
 vi.mock('@/lib/api', async (importOriginal) => {
   const actual = await importOriginal<typeof import('@/lib/api')>()
@@ -43,7 +43,7 @@ function renderAt(path: string) {
   const rootRoute = createRootRoute({
     component: () => (
       <>
-        <AppSidebar />
+        <AppHeader />
         <Outlet />
       </>
     ),

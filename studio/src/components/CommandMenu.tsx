@@ -2,7 +2,9 @@ import { useNavigate } from '@tanstack/react-router'
 import { cn } from 'cn'
 import { useRef, useState } from 'react'
 
+import { Button } from '@/components/ui/button'
 import { Dialog, DialogContent, DialogTitle } from '@/components/ui/dialog'
+import { Kbd } from '@/components/ui/kbd'
 import { MUTE_CHOICES, useMute } from '@/features/health/useMute'
 import { isImeConfirm, useHotkeys } from '@/lib/hotkeys'
 
@@ -29,6 +31,17 @@ export function CommandMenu() {
 
   return (
     <>
+      {/* ⌘K を知らない人の入口 */}
+      <Button
+        variant="ghost"
+        size="sm"
+        className="text-muted-foreground"
+        aria-label="コマンドを開く"
+        aria-keyshortcuts="Meta+K Control+K"
+        onClick={toggle}
+      >
+        <Kbd aria-hidden="true">⌘K</Kbd>
+      </Button>
       <Dialog open={open} onOpenChange={setOpen}>
         <DialogContent
           showCloseButton={false}

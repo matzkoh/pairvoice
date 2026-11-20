@@ -41,7 +41,7 @@ export function ProfileHistorySheet({
   const [error, setError] = useState('')
   return (
     <Sheet>
-      <SheetTrigger render={<Button variant="outline" size="sm" />}>
+      <SheetTrigger render={<Button variant="ghost" size="sm" />}>
         <History className="size-3.5" aria-hidden="true" />
         {label.title}
       </SheetTrigger>

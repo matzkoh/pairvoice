@@ -32,7 +32,7 @@ async function fetchAllCorpus(): Promise<CorpusResponse> {
 }
 
 // ウィンドウのフォーカスが戻るたびに全件（チャンク取得）を取り直さないよう
-// staleTime を置く。既定の 0 だと refetchOnWindowFocus と組み合わさり、サイドバーに
+// staleTime を置く。既定の 0 だと refetchOnWindowFocus と組み合わさり、ヘッダーに
 // レビュー画面がフォーカスのたびに corpus 全件を取り直す。
 // 1分は、画面を開きっぱなしにしている間にフックが読み上げを増やす頻度に対して
 // 許容できる遅れとして選んだ値。投票・アーカイブは setQueryData で即時に反映するので
@@ -49,9 +49,9 @@ export function corpusQueryOptions() {
 
 export const CORPUS_COUNTS_KEY = ['corpus', 'counts'] as const
 
-// サイドバーの未レビュー件数バッジ。どの画面にも出るので、全件は読まずに件数だけを取る。
+// ヘッダーの未レビュー件数バッジ。どの画面にも出るので、全件は読まずに件数だけを取る。
 // 投票・アーカイブのあとは useReviewActions が取り直させる。
-// suspense にするとサイドバーごと止まるので、読めるまでは null（呼び出し側は何も出さない）。
+// suspense にするとヘッダーごと止まるので、読めるまでは null（呼び出し側は何も出さない）。
 export function useUnreviewedCount(): number | null {
   const { data } = useQuery({
     queryKey: CORPUS_COUNTS_KEY,

@@ -27,14 +27,11 @@ export function SaveBar({ dirty, pending, status, onSave, label = '保存', chil
   })
 
   return (
-    <div className="sticky bottom-0 z-10 mt-2 flex items-center justify-end gap-3 border-t bg-background py-3">
+    <div className="sticky bottom-0 z-10 mt-4 flex items-center justify-end gap-3 border-t bg-background py-3">
       {status ? (
         <StatusText as="span" message={status.message} isError={status.isError} />
       ) : dirty ? (
-        <span className="flex items-center gap-1.5 text-xs">
-          <span className="size-1.5 rounded-full bg-primary" aria-hidden="true" />
-          未保存の変更あり
-        </span>
+        <span className="marked text-xs">未保存の変更あり</span>
       ) : (
         <span className="text-xs text-muted-foreground">保存済み</span>
       )}

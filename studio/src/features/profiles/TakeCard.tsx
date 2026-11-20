@@ -1,8 +1,8 @@
 import { useQueryClient } from '@tanstack/react-query'
-import { Play } from 'lucide-react'
 import { useState, useTransition } from 'react'
 
 import { ConfirmButton } from '@/components/ConfirmButton'
+import { PlayButton } from '@/components/PlayButton'
 import { Button } from '@/components/ui/button'
 import { apiSend, toErrorMessage } from '@/lib/api'
 import { useTransientStatus } from '@/lib/useTransientStatus'
@@ -72,18 +72,14 @@ export function TakeCard({
   }
 
   return (
-    <li className="rounded-lg border bg-card p-3">
+    <li className="py-3">
       <div className="flex items-start gap-3">
-        <Button
-          variant="ghost"
-          size="icon"
-          className="size-8 flex-none text-primary"
+        <PlayButton
+          voice={profileId}
           aria-label={`テイク ${take.id} を再生`}
           disabled={!take.relativePath}
           onClick={onPlay}
-        >
-          <Play className="size-4" aria-hidden="true" />
-        </Button>
+        />
         <div className="min-w-0 flex-1">
           <div className="flex flex-wrap items-baseline gap-x-3 text-sm">
             <span className="font-medium">#{take.id}</span>
@@ -110,7 +106,7 @@ export function TakeCard({
           {take.message && <p className="text-xs text-destructive">{take.message}</p>}
         </div>
       </div>
-      <div className="mt-2 flex flex-wrap gap-1 pl-11">
+      <div className="mt-1.5 -ml-2.5 flex flex-wrap gap-1 pl-11">
         <Button variant="ghost" size="sm" disabled={!canRetry} onClick={onRetry}>
           この seed で再生成
         </Button>

@@ -129,25 +129,33 @@ export function PickRound({
               key={side}
               aria-current={playing === side}
               className={cn(
-                'space-y-3 rounded-lg border bg-background p-3 transition-shadow',
-                playing === side && 'border-primary ring-2 ring-primary/40',
+                'space-y-3 rounded-xl border-2 border-transparent bg-background p-3',
+                // 地図（VoiceMap）の A と B と同じ色で囲む
+                playing === side && (side === 'a' ? 'border-(--pick-a)' : 'border-(--pick-b)'),
               )}
             >
               <Button
                 variant="outline"
-                className="h-14 w-full justify-start gap-3 text-base"
+                className="h-14 w-full justify-start gap-3 bg-card text-base"
                 aria-label={`${name} を再生`}
                 disabled={!path}
                 onClick={() => play(side)}
               >
                 <Play className="size-5" />
-                <span className="font-semibold">{name}</span>
+                <span
+                  className={cn(
+                    'font-semibold',
+                    side === 'a' ? 'text-(--pick-a)' : 'text-(--pick-b)',
+                  )}
+                >
+                  {name}
+                </span>
                 <Kbd>{i + 1}</Kbd>
                 {audio[side].isFetching && (
                   <span className="text-xs font-normal text-muted-foreground">生成中…</span>
                 )}
                 {playing === side && (
-                  <span className="ml-auto flex items-center gap-1 text-xs font-medium text-primary">
+                  <span className="ml-auto flex items-center gap-1 text-xs font-medium">
                     <Volume2 className="size-3.5 animate-pulse" />
                     再生中
                   </span>

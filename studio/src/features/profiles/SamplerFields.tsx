@@ -1,5 +1,6 @@
 import { Info } from 'lucide-react'
 
+import { selectClass } from '@/components/selectClass'
 import { Input } from '@/components/ui/input'
 
 import {
@@ -46,7 +47,7 @@ function KnobField({ knob, values, onChange, disabled }: { knob: Knob } & Props)
           value={Number(value)}
           disabled={inert}
           onChange={(e) => onChange(knob.key, Number(e.target.value))}
-          className="w-full accent-primary"
+          className="w-full"
         />
       )}
       {knob.kind === 'select' && (
@@ -55,7 +56,7 @@ function KnobField({ knob, values, onChange, disabled }: { knob: Knob } & Props)
           value={String(value)}
           disabled={inert}
           onChange={(e) => onChange(knob.key, e.target.value)}
-          className="h-8 w-full rounded-md border bg-transparent px-2 text-sm focus-visible:border-ring focus-visible:ring-[3px] focus-visible:ring-ring/50 focus-visible:outline-none disabled:cursor-not-allowed disabled:opacity-50"
+          className={selectClass}
         >
           {knob.options.map((option) => (
             <option key={option} value={option}>
@@ -71,7 +72,7 @@ function KnobField({ knob, values, onChange, disabled }: { knob: Knob } & Props)
           checked={Boolean(value)}
           disabled={inert}
           onChange={(e) => onChange(knob.key, e.target.checked)}
-          className="size-4 accent-primary"
+          className="size-4"
         />
       )}
       {knob.kind === 'optionalNumber' && (
@@ -102,7 +103,7 @@ export function SamplerFields(props: Props) {
       </div>
       {/* 効き方が分かりにくい項目は畳んでおく。既定のままで困らない */}
       <details>
-        <summary className="cursor-pointer text-xs text-muted-foreground">Advanced</summary>
+        <summary className="text-xs text-muted-foreground">Advanced</summary>
         <div className="mt-3 grid grid-cols-2 gap-x-4 gap-y-3">
           {advanced.map((knob) => (
             <KnobField key={knob.key} knob={knob} {...props} />

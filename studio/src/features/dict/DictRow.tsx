@@ -10,7 +10,7 @@ export type EditableDictRow = DictRowData & { id: number }
 export type Field = 'from' | 'to' | 'memo'
 
 const CELL_INPUT =
-  'h-8 w-full border-0 bg-transparent px-2 outline-none focus-visible:ring-2 focus-visible:ring-ring/50 focus-visible:ring-inset'
+  'h-8 w-full border-0 bg-transparent px-2 outline-none focus-visible:bg-background focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-inset'
 
 type Props = {
   row: EditableDictRow
@@ -23,7 +23,7 @@ type Props = {
 
 export function DictRow({ row, rownum, isLast, onChange, onDelete }: Props) {
   return (
-    <tr className="border-t">
+    <tr className="border-t hover:bg-background/60">
       <td className="w-10 px-2 text-center text-xs text-muted-foreground tabular-nums">{rownum}</td>
       <td className="p-0">
         <input
@@ -38,7 +38,7 @@ export function DictRow({ row, rownum, isLast, onChange, onDelete }: Props) {
           aria-label={`${rownum}行目の読み`}
           value={row.to}
           onChange={(e) => onChange('to', e.target.value)}
-          className={`${CELL_INPUT} font-mono text-xs`}
+          className={`${CELL_INPUT} font-voice`}
         />
       </td>
       <td className="p-0">

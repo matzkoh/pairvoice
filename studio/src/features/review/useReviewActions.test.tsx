@@ -66,7 +66,7 @@ function setup(target: CorpusItem) {
   return { current, queryClient }
 }
 
-it('投票とアーカイブのあとは、サイドバーの件数を取り直させる', async () => {
+it('投票とアーカイブのあとは、ヘッダーの件数を取り直させる', async () => {
   vi.mocked(apiSend).mockResolvedValue({ ok: true })
   const { queryClient } = setup(item({}))
   const counts = { all: 1, unreviewed: 1, bad: 0, archived: 0, stale: 0 }

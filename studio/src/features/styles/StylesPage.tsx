@@ -3,9 +3,8 @@ import { cn } from 'cn'
 import { Plus } from 'lucide-react'
 import { useRef, useState } from 'react'
 
-import { ListDetail } from '@/components/ListDetail'
+import { LIST_ROW, ListDetail } from '@/components/ListDetail'
 import { PageHeader } from '@/components/PageHeader'
-import { StatusText } from '@/components/StatusText'
 import { useTransientStatus } from '@/lib/useTransientStatus'
 
 import { healthQueryOptions } from '../health/queries'
@@ -13,7 +12,7 @@ import { type ProfileStatus, profilesQueryOptions } from '../profiles/queries'
 import { stylesQueryOptions } from './queries'
 import { StyleEditor } from './StyleEditor'
 
-const ROW = 'w-full rounded-md px-3 py-2 text-left transition-colors hover:bg-muted'
+const ROW = cn(LIST_ROW, 'px-3 py-2')
 
 export function StylesPage() {
   const { data } = useSuspenseQuery(stylesQueryOptions())
@@ -38,15 +37,11 @@ export function StylesPage() {
     <>
       <ListDetail
         header={
-          <>
-            <PageHeader
-              title="スタイル"
-              description="caption（話し方の指示）とサンプラーの組に名前を付けて保存しておき、読み上げごとに選べます。API の /speak に style で名前を渡すと、そのリクエストだけこの caption とサンプラーで読みます。変えられるのは速さ・テンション・抑揚の傾きまでで、ささやき声のような声質は参照音声で決まるので変わりません。声質を変えたいときは voice で別のプロファイルを選んでください。"
-            />
-            <div className="mb-3 min-h-4">
-              {status && <StatusText message={status.message} isError={status.isError} />}
-            </div>
-          </>
+          <PageHeader
+            title="スタイル"
+            description="caption（話し方の指示）とサンプラーの組に名前を付けて保存しておき、読み上げごとに選べます。API の /speak に style で名前を渡すと、そのリクエストだけこの caption とサンプラーで読みます。"
+            status={status}
+          />
         }
         list={
           <nav aria-label="スタイル一覧" className="space-y-1">
@@ -56,10 +51,10 @@ export function StylesPage() {
                   <button
                     type="button"
                     aria-current={style.name === selected?.name ? 'true' : undefined}
-                    className={cn(ROW, 'aria-[current]:bg-muted')}
+                    className={ROW}
                     onClick={() => setSelectedName(style.name)}
                   >
-                    <span className="block truncate text-sm font-medium">{style.name}</span>
+                    <span className="block truncate font-voice">{style.name}</span>
                     <span className="mt-0.5 line-clamp-2 text-xs text-muted-foreground">
                       {style.caption ?? 'プロファイルの caption のまま'}
                     </span>
@@ -72,7 +67,7 @@ export function StylesPage() {
               aria-current={selected === null ? 'true' : undefined}
               className={cn(
                 ROW,
-                'flex items-center gap-1.5 text-sm text-muted-foreground aria-[current]:bg-muted aria-[current]:text-foreground',
+                'flex items-center gap-1.5 text-sm text-muted-foreground aria-[current]:text-foreground',
               )}
               onClick={() => setSelectedName(null)}
             >

@@ -2,6 +2,8 @@ import { useQueryClient } from '@tanstack/react-query'
 import { LoaderCircle } from 'lucide-react'
 import { useRef, useState, useTransition } from 'react'
 
+import { selectClass } from '@/components/selectClass'
+import { SPOKEN } from '@/components/spoken'
 import { Button } from '@/components/ui/button'
 import { Input } from '@/components/ui/input'
 import { Textarea } from '@/components/ui/textarea'
@@ -137,9 +139,6 @@ export function MixProfile({
     })
   }
 
-  const selectClass =
-    'h-9 w-full rounded-md border bg-transparent px-2 text-sm shadow-xs disabled:opacity-50'
-
   return (
     <div className="max-w-2xl space-y-5">
       <div className="grid grid-cols-2 gap-4">
@@ -180,7 +179,7 @@ export function MixProfile({
           step={1}
           value={position}
           disabled={!ready || saving}
-          className="w-full accent-primary"
+          className="w-full"
           onPointerDown={() => {
             dragging.current = true
           }}
@@ -227,6 +226,7 @@ export function MixProfile({
         <Textarea
           id="mix-text"
           rows={2}
+          className={SPOKEN}
           value={text}
           disabled={saving}
           onChange={(e) => setText(e.target.value)}

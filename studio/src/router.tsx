@@ -7,7 +7,7 @@ import { Route as promptRoute } from './routes/prompt'
 import { Route as reviewRoute } from './routes/review'
 import { Route as stylesRoute } from './routes/styles'
 
-// サイドバーの先頭の画面を入口にする
+// ヘッダーの先頭の画面を入口にする
 const indexRoute = createRoute({
   getParentRoute: () => rootRoute,
   path: '/',

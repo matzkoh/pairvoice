@@ -86,19 +86,21 @@ export function VoiceWorkbench({
   }
 
   return (
-    <div>
+    <section aria-labelledby="workbench-heading" className="border-t pt-6">
       <div className="mb-3 flex items-center gap-3">
-        <h2 className="text-sm font-medium">試聴して caption を直す</h2>
+        <h2 id="workbench-heading" className="text-base font-semibold">
+          試聴して caption を直す
+        </h2>
         <div className="ml-auto">
           <ProfileHistorySheet profileId={profileId} field="caption" />
         </div>
       </div>
       {pairvoiceDown && (
-        <p className="mb-3 rounded-md border border-destructive/40 bg-destructive/5 px-3 py-2 text-sm text-destructive">
+        <p className="mb-3 rounded-lg border border-destructive/40 bg-destructive/5 px-3 py-2 text-sm text-destructive">
           pairvoice が止まっているので生成できません。
         </p>
       )}
-      <div className="grid grid-cols-[minmax(0,22rem)_minmax(0,1fr)] items-start gap-6">
+      <div className="grid grid-cols-[minmax(0,22rem)_minmax(0,1fr)] items-start gap-6 max-lg:grid-cols-1">
         <ConditionsPanel
           text={text}
           onTextChange={setText}
@@ -119,9 +121,9 @@ export function VoiceWorkbench({
           onStop={stop}
         />
         <section aria-label="テイク">
-          <div className="mb-2 flex items-center">
+          <div className="mb-1 flex h-7 items-center">
             <h3 className="text-xs font-medium text-muted-foreground">
-              テイク <span className="tabular-nums">{takes.length}</span>
+              テイク <span>{takes.length}</span>
             </h3>
             <Button
               variant="ghost"
@@ -134,9 +136,9 @@ export function VoiceWorkbench({
             </Button>
           </div>
           {takes.length === 0 ? (
-            <EmptyState>左で条件を組んで「生成」を押すと、ここにテイクが溜まります。</EmptyState>
+            <EmptyState>条件を組んで「生成」を押すと、ここにテイクが溜まります。</EmptyState>
           ) : (
-            <ul className="space-y-2">
+            <ul className="divide-y border-y">
               {takes.map((take) => (
                 <TakeCard
                   key={take.id}
@@ -153,6 +155,6 @@ export function VoiceWorkbench({
           )}
         </section>
       </div>
-    </div>
+    </section>
   )
 }

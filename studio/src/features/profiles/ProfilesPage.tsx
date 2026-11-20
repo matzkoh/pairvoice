@@ -4,7 +4,6 @@ import { useRef, useState } from 'react'
 
 import { ListDetail } from '@/components/ListDetail'
 import { PageHeader } from '@/components/PageHeader'
-import { StatusText } from '@/components/StatusText'
 import { useTransientStatus } from '@/lib/useTransientStatus'
 
 import { healthQueryOptions } from '../health/queries'
@@ -55,17 +54,11 @@ export function ProfilesPage() {
     <>
       <ListDetail
         header={
-          <>
-            <PageHeader
-              title="プロファイル"
-              description="プロファイルは参照音声（声そのもの）と caption（話し方の指示）、要約の口調の組です。試聴しながら caption を直せます。切り替えは次の読み上げから効き、再起動は要りません。"
-            />
-            {/* 知らせが消えても下がずれないよう、行の高さを先に取っておく。ずれると
-          押そうとしたボタンの隣を押してしまう */}
-            <div className="mb-3 min-h-4">
-              {status && <StatusText message={status.message} isError={status.isError} />}
-            </div>
-          </>
+          <PageHeader
+            title="プロファイル"
+            description="プロファイルは参照音声（声そのもの）と caption（話し方の指示）、要約の口調の組です。試聴しながら caption を直せます。切り替えは次の読み上げから効き、再起動は要りません。"
+            status={status}
+          />
         }
         list={
           <ProfileList
@@ -92,7 +85,7 @@ export function ProfilesPage() {
           />
         ) : (
           // プロファイルを移ったら、試聴の入力とテイクは持ち越さない
-          <div key={selected.id} className="space-y-6">
+          <div key={selected.id} className="space-y-8">
             <ProfileCard
               item={selected}
               voices={profiles.items}
@@ -104,7 +97,6 @@ export function ProfilesPage() {
             {/* ランダムの声は caption と口調を持たず、選んだメンバーのものを使う */}
             {selected.source !== 'random' && (
               <>
-                <ToneEditor item={selected} onStatus={setStatus} />
                 <VoiceWorkbench
                   profileId={selected.id}
                   adoptedCaption={selected.caption}
@@ -113,6 +105,7 @@ export function ProfilesPage() {
                   onPlay={play}
                   onStatus={setStatus}
                 />
+                <ToneEditor item={selected} onStatus={setStatus} />
               </>
             )}
           </div>
