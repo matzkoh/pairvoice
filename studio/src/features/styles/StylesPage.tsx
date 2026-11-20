@@ -5,6 +5,7 @@ import { useRef, useState } from 'react'
 
 import { LIST_ROW, ListDetail } from '@/components/ListDetail'
 import { PageHeader } from '@/components/PageHeader'
+import { PlayerBar } from '@/components/PlayerBar'
 import { useTransientStatus } from '@/lib/useTransientStatus'
 
 import { healthQueryOptions } from '../health/queries'
@@ -96,6 +97,7 @@ export function StylesPage() {
         hidden
         onError={() => setStatus({ message: '音声を再生できませんでした', isError: true })}
       />
+      <PlayerBar audioRef={audioRef} />
     </>
   )
 }

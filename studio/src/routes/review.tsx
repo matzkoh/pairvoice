@@ -5,6 +5,7 @@ import { useState } from 'react'
 
 import { EmptyState } from '@/components/EmptyState'
 import { PageHeader } from '@/components/PageHeader'
+import { PlayerBar } from '@/components/PlayerBar'
 import { Button } from '@/components/ui/button'
 import {
   DropdownMenu,
@@ -262,6 +263,7 @@ function ReviewPage() {
         </span>
       </p>
       <audio ref={audioRef} hidden onError={handleAudioError} />
+      <PlayerBar audioRef={audioRef} />
     </div>
   )
 }

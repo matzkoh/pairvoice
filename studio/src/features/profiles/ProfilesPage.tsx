@@ -4,6 +4,7 @@ import { useRef, useState } from 'react'
 
 import { ListDetail } from '@/components/ListDetail'
 import { PageHeader } from '@/components/PageHeader'
+import { PlayerBar } from '@/components/PlayerBar'
 import { useTransientStatus } from '@/lib/useTransientStatus'
 
 import { healthQueryOptions } from '../health/queries'
@@ -117,6 +118,7 @@ export function ProfilesPage() {
         // 合成は成功しても、ファイルが消えていれば再生は無言で終わる。鳴らない理由を出す
         onError={() => setStatus({ message: '音声を再生できませんでした', isError: true })}
       />
+      <PlayerBar audioRef={audioRef} />
     </>
   )
 }

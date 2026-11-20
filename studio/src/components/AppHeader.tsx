@@ -6,6 +6,7 @@ import { useUnreviewedCount } from '@/features/review/queries'
 
 import { CommandMenu } from './CommandMenu'
 import { NAV_GROUPS } from './nav'
+import { PLAYER_SLOT_ID } from './PlayerBar'
 
 // suspense にすると corpus の全件取得が終わるまでヘッダーごと止まるので、
 // 通常の useQuery で読み、読めるまでは何も出さない
@@ -59,8 +60,10 @@ export function AppHeader() {
           </div>
         ))}
       </nav>
+      {/* 左に寄せる。中央に置くと、右の状態の文字の長さが変わるたびにコントローラーが動く */}
+      <div id={PLAYER_SLOT_ID} className="flex min-w-0 flex-1 pl-3" />
       {/* 幅が足りないときは、移動の項目ではなく状態の文字のほうを詰める */}
-      <div className="flex min-w-0 flex-1 items-center justify-end gap-1">
+      <div className="flex min-w-0 flex-none items-center justify-end gap-1 max-lg:shrink">
         <Suspense fallback={null}>
           <StatusIndicator />
         </Suspense>
