@@ -155,7 +155,7 @@ async def remove_reverb(
     """区間をつないだ声の響きを除き、区間ごとに切り戻す。pieces は空にする（つないだ写しと二重に抱えない）。"""
     progress("dereverb", 0.0)
     bounds = np.cumsum([len(p) for p in pieces])[:-1]
-    speech = np.concatenate(pieces)
+    speech = await offload(np.concatenate, pieces)
     pieces.clear()
     span, context = int(DEREVERB_SPAN_SECONDS * RATE), int(DEREVERB_CONTEXT_SECONDS * RATE)
     dry = np.empty_like(speech)
