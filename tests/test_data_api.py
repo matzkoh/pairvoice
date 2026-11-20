@@ -735,6 +735,20 @@ def test_fold_builds_a_profile_from_all_speech_in_the_background(tmp_path):
 
 
 @needs_ffmpeg
+def test_fold_removes_reverb_from_the_speaker_only(tmp_path):
+    curate = FakeCurate(dereverbs=True)
+    _, client = build(data_root=tmp_path, curate=curate)
+    # 80 秒の素材のうち、本人が話すのは 19 秒。響きを除くのはその声だけ（8 秒の窓を 7 秒ずつ、
+    # 前後の余白ごと。素材を丸ごと除くと 12 回になる）
+    body = speech_wav(tmp_path, [(1, 20, 0.5, 220), (21, 30, 0.2, 330), (79, 80, 0.2, 330)])
+    with client:
+        job = wait_fold(client, start_fold(client, body, "響きを除いた声"))
+
+    assert job["status"] == "done", job
+    assert curate.dereverb_calls == 4
+
+
+@needs_ffmpeg
 def test_stopping_a_fold_cancels_queued_work_and_frees_the_queue(tmp_path, monkeypatch):
     scratch = tmp_path / "tmp"
     scratch.mkdir()

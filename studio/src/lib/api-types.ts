@@ -107,7 +107,7 @@ export type ProfileItem = {
 export type ProfilesResponse = { items: ProfileItem[]; active: string | null }
 
 // POST /profiles/fold・GET /profiles/fold/{job_id} の応答。後ろで走る畳み込みの仕事
-export type FoldStage = 'upload' | 'decode' | 'clean' | 'diarize' | 'encode' | 'summarize' | 'save'
+export type FoldStage = 'upload' | 'decode' | 'clean' | 'diarize' | 'dereverb' | 'encode' | 'summarize' | 'save'
 export type FoldJob = {
   job_id: string
   status: 'running' | 'done' | 'failed'

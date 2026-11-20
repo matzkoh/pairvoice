@@ -388,8 +388,11 @@ class FoldJobResponse(BaseModel):
         description="`GET /profiles/fold/{job_id}` で問い合わせ、`DELETE` で止める ID"
     )
     status: Literal["running", "done", "failed"] = Field(description="走っている・できた・失敗した")
-    stage: Literal["upload", "decode", "clean", "diarize", "encode", "summarize", "save"] = Field(
-        description="いまの段階。clean（雑音と響きを除く）がいちばん長い"
+    stage: Literal[
+        "upload", "decode", "clean", "diarize", "dereverb", "encode", "summarize", "save"
+    ] = Field(
+        description="いまの段階。clean（雑音を除く）がいちばん長い。"
+        "dereverb（本人の声の響きを除く）は、響きを除かない設定なら通らない"
     )
     progress: float = Field(description="その段階の進み具合（0〜1）")
     profile: ProfileItem | None = Field(default=None, description="作った声（done のとき）")

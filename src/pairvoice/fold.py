@@ -3,10 +3,14 @@
 30 秒の参照音声は、どの区間を選ぶかで声がぶれ、人が聴いて選ぶしかなかった。素材の
 本人の声を全部トークンにして要約すれば、選ばずに素材全体の平均の声が得られる。
 
-1. 素材を丸ごと、参照音声と同じクリーンアップにかける（雑音除去 → 残響除去）
-2. きれいにした音で話者を分け、いちばん多く話す人の区間を全部使う（S/N や話し方では選ばない）
-3. 区間の長い無音を詰めてつなぎ、BLOCK_SECONDS ずつ話者の表現にする
-4. 溜めたトークンを TOKENS 個に要約する
+1. 素材を丸ごと雑音除去にかける
+2. 雑音を除いた音で話者を分け、いちばん多く話す人の区間を全部使う（S/N や話し方では選ばない）
+3. 区間の長い無音を詰めてつなぎ、残響除去にかける（参照音声と同じく、つないだあとの声にかける）
+4. BLOCK_SECONDS ずつ話者の表現にする
+5. 溜めたトークンを TOKENS 個に要約する
+
+残響除去は全体の時間の大半を占めるので、使う声だけにかける。素材を丸ごとかけると、ほかの人の
+声や無音にも同じだけ時間がかかる（数人が話す素材では、本人の声は全体の1〜2割）。
 
 合成の本体は話者のトークンを位置なしで参照する（順番のない袋）ので、似たトークンの塊ごとに
 実在の代表（medoid）を選べば袋の要約になる。代表は平均で作らない（モデルが見たことのない
@@ -38,10 +42,12 @@ TOKENS = 180
 BLOCK_SECONDS = 26.0
 # 雑音除去を1回にかける長さ。前後に curate.ENHANCE_CONTEXT_SECONDS の文脈を足す
 ENHANCE_SECONDS = 20.0
-# クリーンアップを1回に通す長さと、前後に足す文脈（残響除去の窓より長く）。数時間のファイルを
-# 丸ごと抱えると、残響除去の途中の配列で数 GB になる
+# 雑音除去を1回に通して書き足す長さ（前後に同じ文脈を足す）。数時間のファイルを丸ごとメモリに抱えない
 SPAN_SECONDS = 300.0
-SPAN_CONTEXT_SECONDS = 10.0
+# 残響除去を1回に通す長さと、前後に足す文脈（残響除去の窓より長く）。数時間の声を丸ごと通すと、
+# 途中の配列で数 GB になる
+DEREVERB_SPAN_SECONDS = 900.0
+DEREVERB_CONTEXT_SECONDS = 10.0
 # 区間の中で、いちばん大きい所からこれより小さい 10ms は無音とみなす
 SILENCE_DB = 40.0
 # これより長い無音は、この長さに詰める
@@ -68,38 +74,28 @@ class Folded:
     model: str
 
 
-async def _clean_span(
-    x: np.ndarray,
-    enhance: curate.Enhance,
-    dereverb: curate.Dereverb | None,
-    offload: curate.Offload,
-) -> np.ndarray:
+async def _enhance_span(x: np.ndarray, enhance: curate.Enhance) -> np.ndarray:
     step = int(ENHANCE_SECONDS * RATE)
     context = int(curate.ENHANCE_CONTEXT_SECONDS * RATE)
-    y = np.zeros_like(x)
+    y = np.empty_like(x)
     for start in range(0, len(x), step):
         lo, hi = max(0, start - context), min(len(x), start + step + context)
         end = min(len(x), start + step)
         y[start:end] = (await enhance(x[lo:hi]))[start - lo : end - lo]
-    if dereverb is None:
-        return y
-    # 8 秒の窓を1秒だけ重ねる。境目は窓で混ぜつつ、長い素材の二重処理を減らす。
-    return await curate.remove_reverb(y, dereverb, offload, overlap=curate.DEREVERB_RATE)
+    return y
 
 
 async def clean(
     material: curate.Material,
     directory: Path,
     enhance: curate.Enhance,
-    dereverb: curate.Dereverb | None,
-    offload: curate.Offload,
     progress: Progress,
 ) -> list[tuple[str, Path]]:
-    """ファイルごとに丸ごと雑音と響きを除き、48kHz モノラルの wav に書く。
+    """ファイルごとに丸ごと雑音を除き、48kHz モノラルの wav に書く。
 
     SPAN_SECONDS ずつ前後の文脈つきで除いて書き足す（長い素材をメモリに抱えない）。
     """
-    span, context = int(SPAN_SECONDS * RATE), int(SPAN_CONTEXT_SECONDS * RATE)
+    span, context = int(SPAN_SECONDS * RATE), int(curate.ENHANCE_CONTEXT_SECONDS * RATE)
     total = sum(s.seconds for s in material.sources)
     # 最初の SPAN_SECONDS を除き終えるまで、前の段のままに見えないように
     progress("clean", 0.0)
@@ -117,7 +113,7 @@ async def clean(
                 x = curate.louder_channel(
                     np.asarray(material.audio48[offset + lo : offset + hi], np.float32)
                 )
-                y = await _clean_span(x, enhance, dereverb, offload)
+                y = await _enhance_span(x, enhance)
                 end = min(length, start + span)
                 pcm = (np.clip(y[start - lo : end - lo], -1.0, 1.0) * 32767.0).astype("<i2")
                 writer.writeframes(memoryview(pcm).cast("B"))
@@ -141,17 +137,53 @@ def trim_silence(x: np.ndarray) -> np.ndarray:
     return frames[index - last_voiced <= int(MAX_PAUSE_SECONDS * 100)].reshape(-1)
 
 
-def speech_blocks(analysis: curate.Analysis) -> list[np.ndarray]:
-    """話者分離で取れた本人の区間を全部、無音を詰めてつなぎ、BLOCK_SECONDS ずつに切る。
-
-    区間ごとの声の大きさは、ふだんの参照音声と同じくそろえる（素材の録り方で十数 dB 違い、
-    小さいまま符号化すると、モデルがふだん見ている参照音声と大きさの違う声を表現にする）。
-    """
+def speech_pieces(analysis: curate.Analysis) -> list[np.ndarray]:
+    """話者分離で取れた本人の区間を全部、無音を詰めて返す。"""
     audio = analysis.material.audio48
-    parts = []
+    pieces = []
     for piece in analysis.pieces:
         a, b = int(piece.start * RATE), int(piece.end * RATE)
         trimmed = trim_silence(curate.louder_channel(np.asarray(audio[a:b], np.float32)))
+        if len(trimmed):
+            pieces.append(trimmed)
+    return pieces
+
+
+async def remove_reverb(
+    pieces: list[np.ndarray], dereverb: curate.Dereverb, offload: curate.Offload, progress: Progress
+) -> list[np.ndarray]:
+    """区間をつないだ声の響きを除き、区間ごとに切り戻す。pieces は空にする（つないだ写しと二重に抱えない）。"""
+    progress("dereverb", 0.0)
+    bounds = np.cumsum([len(p) for p in pieces])[:-1]
+    speech = np.concatenate(pieces)
+    pieces.clear()
+    span, context = int(DEREVERB_SPAN_SECONDS * RATE), int(DEREVERB_CONTEXT_SECONDS * RATE)
+    dry = np.empty_like(speech)
+    for start in range(0, len(speech), span):
+        lo, hi = max(0, start - context), min(len(speech), start + span + context)
+        end = min(len(speech), start + span)
+
+        def advance(fraction: float, start: int = start, end: int = end) -> None:
+            progress("dereverb", (start + fraction * (end - start)) / len(speech))
+
+        # 8 秒の窓を1秒だけ重ねる。境目は窓で混ぜつつ、長い素材の二重処理を減らす。
+        y = await curate.remove_reverb(
+            speech[lo:hi], dereverb, offload, overlap=curate.DEREVERB_RATE, progress=advance
+        )
+        dry[start:end] = y[start - lo : end - lo]
+    return np.split(dry, bounds)
+
+
+def speech_blocks(pieces: list[np.ndarray]) -> list[np.ndarray]:
+    """本人の区間の無音を詰めてつなぎ、BLOCK_SECONDS ずつに切る。
+
+    無音は響きを除いたあとにも詰める（響きが消えると、声の切れ目の無音が伸びる）。
+    区間ごとの声の大きさは、ふだんの参照音声と同じくそろえる（素材の録り方で十数 dB 違い、
+    小さいまま符号化すると、モデルがふだん見ている参照音声と大きさの違う声を表現にする）。
+    """
+    parts = []
+    for piece in pieces:
+        trimmed = trim_silence(piece)
         if len(trimmed):
             parts.append(curate.level_piece(trimmed))
     speech = np.concatenate(parts) if parts else np.zeros(0, np.float32)
@@ -256,7 +288,7 @@ async def fold(
         (directory / sub).mkdir(parents=True, exist_ok=True)
     progress("decode", 0.0)
     raw = await offload(curate.decode, files, directory / "raw")
-    paths = await clean(raw, directory / "clean", enhance, dereverb, offload, progress)
+    paths = await clean(raw, directory / "clean", enhance, progress)
     del raw
     # デコードした元の音はもう読まない（数時間分で数 GB になる）
     await offload(shutil.rmtree, directory / "raw")
@@ -264,7 +296,10 @@ async def fold(
     material = await offload(curate.decode, paths, directory / "decoded")
     # 本人の全区間を使うので、候補を順位づけるための声の高さや明るさの測定は省く。
     analysis = await curate.analyze(material, diarize, offload, rank_candidates=False)
-    blocks = await offload(speech_blocks, analysis)
+    pieces = await offload(speech_pieces, analysis)
+    if dereverb is not None and pieces:
+        pieces = await remove_reverb(pieces, dereverb, offload, progress)
+    blocks = await offload(speech_blocks, pieces)
     if not blocks:
         raise curate.TooLittleSpeech("本人の声が短すぎます")
     states = []
@@ -303,7 +338,7 @@ class FoldJob:
 
 
 class FoldJobs:
-    """後ろで走らせる畳み込みの仕事。素材の長さの 1/7 ほどかかる（1時間半で十数分）ので、受け付けたら返して問い合わせてもらう。"""
+    """後ろで走らせる畳み込みの仕事。数分かかる（数人が話す素材 77 分で 3 分半。本人の声が多いほど延びる）ので、受け付けたら返して問い合わせてもらう。"""
 
     def __init__(self) -> None:
         self._jobs: dict[str, FoldJob] = {}

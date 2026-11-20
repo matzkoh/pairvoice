@@ -18,8 +18,9 @@ export const POLL_MS = 3000
 const STAGE_LABELS: Record<FoldStage, string> = {
   upload: '素材を受け取りました',
   decode: '素材を読み込んでいます',
-  clean: '雑音と響きを除いています',
+  clean: '雑音を除いています',
   diarize: '話者を分けています',
+  dereverb: '本人の声の響きを除いています',
   encode: '声を話者の表現にしています',
   summarize: '表現を要約しています',
   save: '声を保存しています',
@@ -34,7 +35,7 @@ type Props = {
 }
 
 // 長い素材の本人の声を全部、話者の表現にして1つに畳み込む。区間を選ばないので、
-// 素材全体の平均の声になる。素材1時間半で十数分かかるので、サーバーが後ろで走らせ、ここは進み具合を追う
+// 素材全体の平均の声になる。数分かかるので、サーバーが後ろで走らせ、ここは進み具合を追う
 export function FoldProfile({ jobId, onJobChange, onStatus, onCreated }: Props) {
   const queryClient = useQueryClient()
   const [files, setFiles] = useState<File[]>([])
@@ -110,7 +111,7 @@ export function FoldProfile({ jobId, onJobChange, onStatus, onCreated }: Props) 
     <div className="max-w-xl space-y-5">
       <Field
         label="素材"
-        hint="音声か動画のファイル。いくつでも、長くても、BGM が乗っていても構いません。雑音と響きを除いてから、いちばん多く話す人の声を全部使います。長いほど声がぶれません（数十分〜数時間が目安）。"
+        hint="音声か動画のファイル。いくつでも、長くても、BGM が乗っていても構いません。いちばん多く話す人の声を全部使い、雑音と響きを除きます。長いほど声がぶれません（数十分〜数時間が目安）。"
       >
         <FilePicker
           label="ファイルを選ぶ"

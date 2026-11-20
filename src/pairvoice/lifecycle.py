@@ -741,7 +741,7 @@ class Engine:
         self, files: list[tuple[str, Path]], directory: Path, progress: fold.Progress
     ) -> fold.Folded:
         """素材を話者の表現1つに畳み込む。雑音除去・残響除去・話者分離・符号化は、どれも
-        小分けにして列に並べる（十数分かかっても、その合間に読み上げが割り込める）。"""
+        小分けにして列に並べる（数分かかっても、その合間に読み上げが割り込める）。"""
 
         async def encode(samples):
             return await self._measure(self._tts, self._tts_backend.speaker_tokens, samples)

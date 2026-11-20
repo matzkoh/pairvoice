@@ -63,7 +63,6 @@ async def test_clean_stitches_spans_back_to_the_full_length(tmp_path, monkeypatc
     from pairvoice.curate import Material, Source
 
     monkeypatch.setattr(fold, "SPAN_SECONDS", 2.0)
-    monkeypatch.setattr(fold, "SPAN_CONTEXT_SECONDS", 0.5)
     monkeypatch.setattr(fold, "ENHANCE_SECONDS", 0.7)
     x = tone(5.3, amp=0.3)
     material = Material(np.zeros(1), np.stack([x, x * 0.5], axis=1), [Source("a", 0.0, 5.3)])
@@ -71,10 +70,7 @@ async def test_clean_stitches_spans_back_to_the_full_length(tmp_path, monkeypatc
     async def same(samples):
         return samples
 
-    async def offload(fn, *args):
-        return fn(*args)
-
-    [(name, path)] = await fold.clean(material, tmp_path, same, None, offload, lambda *_: None)
+    [(name, path)] = await fold.clean(material, tmp_path, same, lambda *_: None)
 
     with wave.open(str(path)) as reader:
         out = np.frombuffer(reader.readframes(reader.getnframes()), "<i2") / 32767.0
@@ -83,15 +79,14 @@ async def test_clean_stitches_spans_back_to_the_full_length(tmp_path, monkeypatc
     np.testing.assert_allclose(out, x, atol=1e-4)
 
 
-async def test_fold_crossfades_dereverb_windows_and_keeps_the_tail():
+async def test_remove_reverb_crossfades_windows_and_splits_back_into_pieces(monkeypatch):
     from pairvoice import curate
 
-    # 継ぎ目が2つあり、最後の窓は端数。どこも欠けず元と同じレベルに戻る。
-    x = tone(15.4, amp=0.1)
-    chunks = []
-
-    async def enhance(samples):
-        return samples
+    # 区切りが1つ、窓の継ぎ目がいくつもあり、最後の窓は端数。どこも欠けず元と同じレベルに戻る。
+    monkeypatch.setattr(fold, "DEREVERB_SPAN_SECONDS", 12.0)
+    monkeypatch.setattr(fold, "DEREVERB_CONTEXT_SECONDS", 2.0)
+    pieces = [tone(9.1, amp=0.1), tone(4.2, amp=0.2), tone(2.1, amp=0.1)]
+    chunks, stages = [], []
 
     async def dereverb(samples):
         chunks.append(len(samples))
@@ -100,9 +95,18 @@ async def test_fold_crossfades_dereverb_windows_and_keeps_the_tail():
     async def offload(fn, *args):
         return fn(*args)
 
-    y = await fold._clean_span(x, enhance, dereverb, offload)
-    assert chunks == [curate.DEREVERB_CHUNK] * 3
-    np.testing.assert_allclose(y, x, atol=1e-3)
+    dry = await fold.remove_reverb(
+        list(pieces), dereverb, offload, lambda stage, fraction: stages.append((stage, fraction))
+    )
+
+    assert set(chunks) == {curate.DEREVERB_CHUNK}
+    assert [len(d) for d in dry] == [len(p) for p in pieces]
+    for d, p in zip(dry, pieces, strict=True):
+        np.testing.assert_allclose(d, p, atol=1e-3)
+    fractions = [fraction for _, fraction in stages]
+    assert {stage for stage, _ in stages} == {"dereverb"}
+    assert fractions == sorted(fractions)
+    assert fractions[-1] == 1.0
 
 
 async def test_speech_blocks_level_the_voice_like_a_reference():
@@ -112,7 +116,7 @@ async def test_speech_blocks_level_the_voice_like_a_reference():
     # 素材のままの大きさ（-9 dB ほど）ではなく、ふだんの参照音声の大きさにそろえて符号化する
     analysis = await run_analyze(material([(1, 12, 0.5, 220), (13, 30, 0.5, 220)]))
 
-    blocks = fold.speech_blocks(analysis)
+    blocks = fold.speech_blocks(fold.speech_pieces(analysis))
 
     assert len(blocks) == 1
     assert voiced_rms_db(blocks[0], RATE) == pytest.approx(TARGET_RMS_DB, abs=1.0)

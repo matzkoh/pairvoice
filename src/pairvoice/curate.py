@@ -817,7 +817,12 @@ async def render(
 
 
 async def remove_reverb(
-    samples: np.ndarray, dereverb: Dereverb, offload: Offload, *, overlap: int = DEREVERB_CHUNK // 2
+    samples: np.ndarray,
+    dereverb: Dereverb,
+    offload: Offload,
+    *,
+    overlap: int = DEREVERB_CHUNK // 2,
+    progress: Callable[[float], None] | None = None,
 ) -> np.ndarray:
     """響きを除く。8 秒ずつ別の仕事にして、その合間に読み上げが割り込めるようにする。"""
     from scipy.signal import resample_poly
@@ -832,6 +837,8 @@ async def remove_reverb(
         out = await dereverb(padded[start : start + DEREVERB_CHUNK])
         total[start : start + DEREVERB_CHUNK] += out * window
         weight[start : start + DEREVERB_CHUNK] += window
+        if progress is not None:
+            progress(min(1.0, (start + hop) / (len(x) + overlap)))
     kept = slice(overlap, overlap + len(x))
     y = total[kept]
     np.maximum(weight[kept], 1e-6, out=weight[kept])

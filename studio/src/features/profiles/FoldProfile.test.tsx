@@ -101,7 +101,7 @@ it('starts a fold job, follows its progress and opens the voice', async () => {
   const [path, form] = vi.mocked(apiSendForm).mock.calls[0]!
   expect(path).toBe('/profiles/fold?name=%E9%9B%91%E8%AB%87&caption=')
   expect(form.getAll('files')).toHaveLength(1)
-  expect(screen.getByText('雑音と響きを除いています')).toBeTruthy()
+  expect(screen.getByText('雑音を除いています')).toBeTruthy()
   // 走っている間は、同じ素材をもう一度送らない
   expect(screen.getByRole('button', { name: 'プロファイルを作る' })).toHaveProperty(
     'disabled',
