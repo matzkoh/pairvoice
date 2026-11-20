@@ -1,6 +1,6 @@
-import contextlib
 import json
 import shutil
+from unittest.mock import ANY
 
 import pytest
 
@@ -187,16 +187,15 @@ def test_random_profile_can_hold_random_profiles(tmp_path, monkeypatch):
     store = ProfileStore(tmp_path / "profiles")
     inner, members = make_random(store)
     third = store.create(name="丙", caption="", source="design", write_reference=write_wav)
-    outer = store.create_random(name="外", members=[inner.id, third.id])
+    outer = store.create_random(name="外", members=[inner.id, third.id], order="shuffle")
     monkeypatch.setattr("pairvoice.profiles.random.sample", lambda seq, k: list(seq))
 
-    # 選んだのがランダムの声なら、そのメンバーまで降りて読む
-    assert store.pick(outer).id == members[0]
+    # 入れ子をほどいた末端の声（甲・乙・丙）を等しく並べて選ぶ
+    assert [store.pick(outer).id for _ in range(3)] == [*members, third.id]
     assert store.pick(outer, "s1").id == members[0]
-    # グループには、外の声が選んだメンバー（内のランダムの声）を覚える
+    # グループには、外の声が選んだ末端の声を覚え、内の声の記録は作らない
     groups = json.loads((store.root / "groups.json").read_text(encoding="utf-8"))
-    assert groups[f"{outer.id}/s1"]["voice"] == inner.id
-    assert groups[f"{inner.id}/s1"]["voice"] == members[0]
+    assert groups == {f"{outer.id}/s1": {"voice": members[0], "used_at": ANY}}
     # 読める声が無い入れ子は飛ばす
     for member in members:
         shutil.rmtree(store.root / member)
@@ -226,11 +225,9 @@ def test_hand_written_loop_does_not_hang(tmp_path):
     meta["members"] = [outer.id, inner.id]
     path.write_text(json.dumps(meta), encoding="utf-8")
 
-    # 輪に入ると ProfileNotFound で止まり、回り続けない
+    # 輪をたどっても回り続けず、行き着く末端の声を選ぶ
     for meta in (outer, inner):
-        for _ in range(10):
-            with contextlib.suppress(ProfileNotFound):
-                assert store.pick(store.require(meta.id)).id == members[0]
+        assert store.pick(store.require(meta.id)).id == members[0]
 
 
 def test_update_keeps_random_and_voice_fields_apart(tmp_path):

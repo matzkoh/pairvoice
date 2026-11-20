@@ -621,7 +621,7 @@ class MixProfileBody(BaseModel):
 class RandomProfileBody(BaseModel):
     name: ProfileName = Field(description="声の名前")
     members: list[str] = Field(
-        description="選ぶ声の ID（2つ以上）。`random` の声も入れられ、選ぶとさらにそのメンバーから選ぶ。"
+        description="選ぶ声の ID（2つ以上）。`random` の声も入れられ、その末端の声も並べて等しく選ぶ。"
         "選んだ声の caption と口調で読む",
     )
     order: Order = Field(default="random", description=_ORDER_DESCRIPTION)

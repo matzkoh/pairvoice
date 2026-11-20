@@ -5,10 +5,10 @@
 再起動なしに効く。
 
 ランダムの声（source が random）は参照音声を持たず、ほかの声（メンバー）を束ねる。
-メンバーにはランダムの声も入れられ（自分に戻る入れ子は断る）、選んだのがランダムの声なら、
-さらにそのメンバーから選ぶ。使用中にも `voice` にもでき、要約・合成のたびにメンバーから
-読む声を1つ選ぶ（pick）。
-選び方（order）がシャッフルなら、混ぜた順に全員を一巡するまで同じ声を選ばない。
+メンバーにはランダムの声も入れられ（自分に戻る入れ子は断る）、入れ子をたどって行き着く
+末端の声すべてから等しく選ぶ（フラット。入れ子の声の選び方は使わない）。使用中にも `voice` にもでき、
+要約・合成のたびに読む声を1つ選ぶ（pick）。
+選び方（order）がシャッフルなら、混ぜた順に末端の声の全員を一巡するまで同じ声を選ばない。
 グループ（group）を渡すと、同じグループには前に選んだ声を選び続ける（groups.json に覚える）。
 """
 
@@ -243,26 +243,19 @@ class ProfileStore:
         return self.pick(profile, group)
 
     def pick(self, profile: Profile, group: str | None = None) -> Profile:
-        """読む声。ランダムの声ならメンバーから1つを選び、読めるメンバーが無ければ ProfileNotFound。
+        """読む声。ランダムの声なら末端の声から1つを選び、読める声が無ければ ProfileNotFound。
 
-        選んだメンバーがランダムの声なら、同じ group でそのメンバーからさらに選ぶ。
-        group を渡すと、そのグループに前に選んだ声がまだ読めるメンバーならそれを返す。
+        入れ子のランダムの声は1人と数えず、その末端の声を並べて選ぶ（声の数に比例して当たる）。
+        group を渡すと、そのグループに前に選んだ声がまだ読める末端の声ならそれを返す。
         初めてのグループにだけ新しく選ぶので、シャッフルならグループ同士が別の声になる
         """
-        seen: set[str] = set()
-        while profile.is_random:
-            # 作るときに断るが、profile.json を手で書き換えると輪になり得る
-            if profile.id in seen:
-                raise ProfileNotFound(profile.id)
-            seen.add(profile.id)
-            # 入れ子の声もグループの記録を読み書きするので、1段ずつ _groups_lock を出てから選ぶ
-            profile = self._choose(profile, group)
-        return profile
-
-    def _choose(self, profile: Profile, group: str | None) -> Profile:
-        """ランダムの声のメンバーから1つを選ぶ（ランダムの声のこともある）。"""
+        if not profile.is_random:
+            return profile
+        leaves = {d.id: d for d in self._descendants(profile) if not d.is_random}
+        if not leaves:
+            raise ProfileNotFound(profile.id)
         if group is None:
-            return self._draw(profile)
+            return self._draw(profile, leaves)
         path = self.root / GROUPS_FILENAME
         # ID は / を含まないので、グループに / があっても取り違えない
         key = f"{profile.id}/{group}"
@@ -270,15 +263,13 @@ class ProfileStore:
         with _groups_lock:
             groups = _read_groups(path)
             entry = groups.get(key) or {}
-            chosen = (
-                self._readable(entry["voice"]) if entry.get("voice") in profile.members else None
-            )
+            chosen = leaves.get(entry.get("voice"))
             if (
                 chosen is not None
                 and now - datetime.fromisoformat(entry["used_at"]) < GROUP_TOUCH_INTERVAL
             ):
                 return chosen
-            voice = chosen or self._draw(profile)
+            voice = chosen or self._draw(profile, leaves)
             groups[key] = {"voice": voice.id, "used_at": now.isoformat()}
             fresh = {
                 k: e
@@ -288,55 +279,37 @@ class ProfileStore:
             atomic_write(path, json.dumps(fresh, ensure_ascii=False))
         return voice
 
-    def _draw(self, profile: Profile) -> Profile:
-        """選び方（order）に従って、メンバーから新しく1つを選ぶ。"""
-        deck = random.sample(profile.members, len(profile.members))
+    def _draw(self, profile: Profile, leaves: dict[str, Profile]) -> Profile:
+        """選び方（order）に従って、末端の声から新しく1つを選ぶ。"""
+        deck = random.sample(list(leaves), len(leaves))
         if profile.order != "shuffle":
-            return self._first_readable(profile, deck)[1]
+            return leaves[deck[0]]
         key = self.root / profile.id
         with _shuffle_lock:
             rest, last = _shuffle_rounds.get(key, ([], None))
-            # 外したメンバーは残りから除く。足したメンバーは次の巡から入る
-            rest = [m for m in rest if m in profile.members]
-            # 巡の変わり目で同じ声が続かないよう、前の巡の最後を後ろへ回す
-            if deck[0] == last:
-                deck.append(deck.pop(0))
-            # 残りを引き切ったら（読めない声しか残っていなければ）、混ぜた次の巡に移る
-            candidates = rest + deck
-            index, voice = self._first_readable(profile, candidates)
-            remaining = rest[index + 1 :] if index < len(rest) else candidates[index + 1 :]
-            _shuffle_rounds[key] = (remaining, candidates[index])
-        return voice
-
-    def _first_readable(self, profile: Profile, candidates: list[str]) -> tuple[int, Profile]:
-        """候補を順に読み、最初に読めた声とその位置。全員を読むと読み上げのたびにメンバーの数だけ読む。"""
-        for index, member in enumerate(candidates):
-            voice = self._readable(member)
-            if voice is not None:
-                return index, voice
-        raise ProfileNotFound(profile.id)
-
-    def _readable(self, member: str) -> Profile | None:
-        """メンバーとして読める声。ランダムの声なら、その先に読める声が1つでもあるもの。
-
-        ここでは選ばない（シャッフルの巡を進めない）。読めない入れ子を選んで読み上げが落ちないよう、
-        選ぶ前に確かめる
-        """
-        voice = self.get(member)
-        if voice is None or not voice.is_random:
-            return voice
-        return voice if any(not d.is_random for d in self._descendants(voice)) else None
+            # 外した声・読めなくなった声は残りから除く。足した声は次の巡から入る
+            rest = [m for m in rest if m in leaves]
+            if not rest:
+                # 巡の変わり目で同じ声が続かないよう、前の巡の最後を後ろへ回す
+                if deck[0] == last:
+                    deck.append(deck.pop(0))
+                rest = deck
+            _shuffle_rounds[key] = (rest[1:], rest[0])
+        return leaves[rest[0]]
 
     def _descendants(self, profile: Profile) -> list[Profile]:
-        """メンバーをたどって行き着く、読める声すべて（ランダムの声も含む）。手で書き換えた輪でも止まる。"""
+        """メンバーをたどって行き着く、読める声すべて（ランダムの声も含む）。
+
+        メンバーの並び順に深さ優先でたどる。何通りの入れ子から行き着いても1つと数え、手で書き換えた輪でも止まる
+        """
         found: dict[str, Profile] = {}
-        stack = list(profile.members)
+        stack = list(reversed(profile.members))
         while stack:
             member = stack.pop()
             if member in found or (voice := self.get(member)) is None:
                 continue
             found[member] = voice
-            stack.extend(voice.members)
+            stack.extend(reversed(voice.members))
         return list(found.values())
 
     def tone(self, profile_id: str) -> history.VersionedText:
