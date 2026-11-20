@@ -1,12 +1,31 @@
 import { Button } from '@/components/ui/button'
 import type { ProfileItem, ProfileOrder } from '@/lib/api-types'
 
+import { SOURCE_LABELS } from './ProfileList'
+
 // 1つだけでは選ぶ意味が無い（pairvoice も 400 で断る）
 export const MIN_MEMBERS = 2
 
-// ランダムの声のメンバーにできる声。ランダムの声は入れ子にできない
-export function memberCandidates(items: readonly ProfileItem[]): ProfileItem[] {
+// 混ぜられる声。ランダムの声は話者の表現を持たない
+export function mixCandidates(items: readonly ProfileItem[]): ProfileItem[] {
   return items.filter((item) => item.source !== 'random')
+}
+
+// owner（書き換えるランダムの声）のメンバーにできる声。owner に戻る声は輪になるので外す（pairvoice も 400 で断る）
+export function eligibleMembers(items: readonly ProfileItem[], owner: string): ProfileItem[] {
+  const byId = new Map(items.map((item) => [item.id, item]))
+  const reaches = (start: ProfileItem) => {
+    const visited = new Set<string>()
+    const stack = [start.id]
+    for (let id = stack.pop(); id !== undefined; id = stack.pop()) {
+      if (id === owner) return true
+      if (visited.has(id)) continue
+      visited.add(id)
+      stack.push(...(byId.get(id)?.members ?? []))
+    }
+    return false
+  }
+  return items.filter((item) => !reaches(item))
 }
 
 const ORDERS: readonly ProfileOrder[] = ['random', 'shuffle']
@@ -105,6 +124,11 @@ export function MemberPicker({ voices, value, disabled, onChange }: PickerProps)
                 className="size-3.5 shrink-0 accent-primary"
               />
               <span className="truncate">{voice.name}</span>
+              {voice.source === 'random' && (
+                <span className="ml-auto shrink-0 text-xs text-muted-foreground">
+                  {SOURCE_LABELS.random}
+                </span>
+              )}
             </label>
           </li>
         ))}

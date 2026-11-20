@@ -10,7 +10,7 @@ import { apiSend, apiUrl, toErrorMessage } from '@/lib/api'
 import type { ProfileItem, ProfileOrder } from '@/lib/api-types'
 import { isImeConfirm } from '@/lib/hotkeys'
 
-import { MemberPicker, MIN_MEMBERS, OrderPicker } from './MemberPicker'
+import { eligibleMembers, MemberPicker, MIN_MEMBERS, OrderPicker } from './MemberPicker'
 import { SOURCE_LABELS } from './ProfileList'
 import { invalidateProfiles, type ProfileStatus } from './queries'
 
@@ -189,6 +189,7 @@ type MembersProps = {
 }
 
 function MembersEditor({ item, voices, pending, onSave }: MembersProps) {
+  const candidates = eligibleMembers(voices, item.id)
   const [members, setMembers] = useState<string[]>(item.members)
   const [order, setOrder] = useState<ProfileOrder>(item.order)
   const changed =
@@ -201,7 +202,7 @@ function MembersEditor({ item, voices, pending, onSave }: MembersProps) {
       <p className="text-xs text-muted-foreground">
         読み上げのたびに、この中から1つを選んで読みます。caption と口調はその声のものを使います。
       </p>
-      <MemberPicker voices={voices} value={members} disabled={pending} onChange={setMembers} />
+      <MemberPicker voices={candidates} value={members} disabled={pending} onChange={setMembers} />
       <OrderPicker value={order} disabled={pending} onChange={setOrder} />
       <Button
         size="sm"

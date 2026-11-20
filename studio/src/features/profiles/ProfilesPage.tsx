@@ -8,7 +8,6 @@ import { StatusText } from '@/components/StatusText'
 import { useTransientStatus } from '@/lib/useTransientStatus'
 
 import { healthQueryOptions } from '../health/queries'
-import { memberCandidates } from './MemberPicker'
 import { NewProfile } from './NewProfile'
 import { ProfileCard } from './ProfileCard'
 import { ProfileList } from './ProfileList'
@@ -29,7 +28,6 @@ export function ProfilesPage() {
   const audioRef = useRef<HTMLAudioElement>(null)
 
   const activeItem = profiles.items.find((item) => item.id === profiles.active)
-  const voices = memberCandidates(profiles.items)
   // 消された ID や古いブックマークは、使用中（無ければ先頭）に落とす
   const selected =
     id === NEW_PROFILE
@@ -81,7 +79,7 @@ export function ProfilesPage() {
       >
         {selected === null ? (
           <NewProfile
-            voices={voices}
+            voices={profiles.items}
             initialCaption={activeItem?.caption ?? ''}
             anchorText={health?.tts.anchor_text ?? ''}
             sampler={health?.tts.sampler}
@@ -97,7 +95,7 @@ export function ProfilesPage() {
           <div key={selected.id} className="space-y-6">
             <ProfileCard
               item={selected}
-              voices={voices}
+              voices={profiles.items}
               isActive={selected.id === profiles.active}
               onPlay={play}
               onStatus={setStatus}

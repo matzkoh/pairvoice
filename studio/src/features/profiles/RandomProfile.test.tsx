@@ -6,7 +6,7 @@ import { afterEach, expect, it, vi } from 'vitest'
 import { apiSend } from '@/lib/api'
 import type { ProfileItem } from '@/lib/api-types'
 
-import { memberCandidates } from './MemberPicker'
+import { eligibleMembers, mixCandidates } from './MemberPicker'
 import { RandomProfile } from './RandomProfile'
 
 vi.mock('@/lib/api', async (importOriginal) => {
@@ -43,9 +43,13 @@ function renderForm(voices: ProfileItem[] = VOICES) {
   return { onCreated }
 }
 
-it('ランダムの声はメンバーの候補にしない', () => {
-  const random: ProfileItem = { ...VOICE, id: 'p-r', source: 'random', members: ['p-a', 'p-b'] }
-  expect(memberCandidates([...VOICES, random]).map((v) => v.id)).toEqual(['p-a', 'p-b'])
+it('ランダムの声もメンバーの候補にするが、自分に戻る声は外す。混ぜる候補には入れない', () => {
+  const inner: ProfileItem = { ...VOICE, id: 'p-r', source: 'random', members: ['p-a', 'p-b'] }
+  const outer: ProfileItem = { ...VOICE, id: 'p-o', source: 'random', members: ['p-r', 'p-a'] }
+  const items = [...VOICES, inner, outer]
+  expect(eligibleMembers(items, 'p-r').map((v) => v.id)).toEqual(['p-a', 'p-b'])
+  expect(eligibleMembers(items, 'p-o').map((v) => v.id)).toEqual(['p-a', 'p-b', 'p-r'])
+  expect(mixCandidates(items).map((v) => v.id)).toEqual(['p-a', 'p-b'])
 })
 
 it('名前とメンバー2つを選ぶと作れる', async () => {

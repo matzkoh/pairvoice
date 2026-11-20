@@ -1,3 +1,4 @@
+import contextlib
 import json
 import shutil
 
@@ -167,20 +168,69 @@ def test_random_profile_skips_members_that_are_gone(tmp_path):
         store.pick(meta)
 
 
-@pytest.mark.parametrize("bad", ["one", "duplicate", "nested", "missing"])
+@pytest.mark.parametrize("bad", ["one", "duplicate", "missing"])
 def test_random_profile_rejects_invalid_members(tmp_path, bad):
     store = ProfileStore(tmp_path / "profiles")
-    nested, members = make_random(store)
+    _, members = make_random(store)
     members = {
         "one": members[:1],
         "duplicate": [members[0], members[0]],
-        "nested": [members[0], nested.id],
         "missing": [members[0], "p-missing"],
     }[bad]
 
     error = ProfileNotFound if bad == "missing" else ProfileRejected
     with pytest.raises(error):
         store.create_random(name="不正", members=members)
+
+
+def test_random_profile_can_hold_random_profiles(tmp_path, monkeypatch):
+    store = ProfileStore(tmp_path / "profiles")
+    inner, members = make_random(store)
+    third = store.create(name="丙", caption="", source="design", write_reference=write_wav)
+    outer = store.create_random(name="外", members=[inner.id, third.id])
+    monkeypatch.setattr("pairvoice.profiles.random.sample", lambda seq, k: list(seq))
+
+    # 選んだのがランダムの声なら、そのメンバーまで降りて読む
+    assert store.pick(outer).id == members[0]
+    assert store.pick(outer, "s1").id == members[0]
+    # グループには、外の声が選んだメンバー（内のランダムの声）を覚える
+    groups = json.loads((store.root / "groups.json").read_text(encoding="utf-8"))
+    assert groups[f"{outer.id}/s1"]["voice"] == inner.id
+    assert groups[f"{inner.id}/s1"]["voice"] == members[0]
+    # 読める声が無い入れ子は飛ばす
+    for member in members:
+        shutil.rmtree(store.root / member)
+    assert store.pick(outer).id == third.id
+    assert store.pick(outer, "s2").id == third.id
+
+
+def test_random_profile_rejects_loops(tmp_path):
+    store = ProfileStore(tmp_path / "profiles")
+    inner, members = make_random(store)
+    outer = store.create_random(name="外", members=[inner.id, members[0]])
+
+    with pytest.raises(ProfileRejected):
+        store.update(inner.id, members=[members[0], inner.id])
+    with pytest.raises(ProfileRejected):
+        store.update(inner.id, members=[members[0], outer.id])
+    assert store.require(inner.id).members == tuple(members)
+
+
+def test_hand_written_loop_does_not_hang(tmp_path):
+    store = ProfileStore(tmp_path / "profiles")
+    inner, members = make_random(store)
+    outer = store.create_random(name="外", members=[inner.id, members[0]])
+    # 手で profile.json を書き換えて輪にしても、読める声へ降りる
+    path = store.root / inner.id / "profile.json"
+    meta = json.loads(path.read_text(encoding="utf-8"))
+    meta["members"] = [outer.id, inner.id]
+    path.write_text(json.dumps(meta), encoding="utf-8")
+
+    # 輪に入ると ProfileNotFound で止まり、回り続けない
+    for meta in (outer, inner):
+        for _ in range(10):
+            with contextlib.suppress(ProfileNotFound):
+                assert store.pick(store.require(meta.id)).id == members[0]
 
 
 def test_update_keeps_random_and_voice_fields_apart(tmp_path):

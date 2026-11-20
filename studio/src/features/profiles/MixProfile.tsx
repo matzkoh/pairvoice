@@ -10,7 +10,7 @@ import type { ProfileItem } from '@/lib/api-types'
 import { audioFileUrl } from '@/lib/speak'
 
 import { Field } from './Field'
-import { memberCandidates } from './MemberPicker'
+import { mixCandidates } from './MemberPicker'
 import { mixWeight } from './mixCurve'
 import { mixQueryOptions } from './mixSynth'
 import { randomSeed } from './PickProfile'
@@ -53,7 +53,7 @@ export function MixProfile({
   onCreated,
 }: Props) {
   const queryClient = useQueryClient()
-  const candidates = memberCandidates(voices)
+  const candidates = mixCandidates(voices)
   const [a, setA] = useState('')
   const [b, setB] = useState('')
   const [caption, setCaption] = useState('')

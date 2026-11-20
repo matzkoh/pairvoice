@@ -5,7 +5,9 @@
 再起動なしに効く。
 
 ランダムの声（source が random）は参照音声を持たず、ほかの声（メンバー）を束ねる。
-使用中にも `voice` にもでき、要約・合成のたびにメンバーから1つを選んで読む（pick）。
+メンバーにはランダムの声も入れられ（自分に戻る入れ子は断る）、選んだのがランダムの声なら、
+さらにそのメンバーから選ぶ。使用中にも `voice` にもでき、要約・合成のたびにメンバーから
+読む声を1つ選ぶ（pick）。
 選び方（order）がシャッフルなら、混ぜた順に全員を一巡するまで同じ声を選ばない。
 グループ（group）を渡すと、同じグループには前に選んだ声を選び続ける（groups.json に覚える）。
 """
@@ -243,11 +245,22 @@ class ProfileStore:
     def pick(self, profile: Profile, group: str | None = None) -> Profile:
         """読む声。ランダムの声ならメンバーから1つを選び、読めるメンバーが無ければ ProfileNotFound。
 
+        選んだメンバーがランダムの声なら、同じ group でそのメンバーからさらに選ぶ。
         group を渡すと、そのグループに前に選んだ声がまだ読めるメンバーならそれを返す。
         初めてのグループにだけ新しく選ぶので、シャッフルならグループ同士が別の声になる
         """
-        if not profile.is_random:
-            return profile
+        seen: set[str] = set()
+        while profile.is_random:
+            # 作るときに断るが、profile.json を手で書き換えると輪になり得る
+            if profile.id in seen:
+                raise ProfileNotFound(profile.id)
+            seen.add(profile.id)
+            # 入れ子の声もグループの記録を読み書きするので、1段ずつ _groups_lock を出てから選ぶ
+            profile = self._choose(profile, group)
+        return profile
+
+    def _choose(self, profile: Profile, group: str | None) -> Profile:
+        """ランダムの声のメンバーから1つを選ぶ（ランダムの声のこともある）。"""
         if group is None:
             return self._draw(profile)
         path = self.root / GROUPS_FILENAME
@@ -304,9 +317,27 @@ class ProfileStore:
         raise ProfileNotFound(profile.id)
 
     def _readable(self, member: str) -> Profile | None:
-        """メンバーとして読める声（読めて、ランダムでない）。"""
+        """メンバーとして読める声。ランダムの声なら、その先に読める声が1つでもあるもの。
+
+        ここでは選ばない（シャッフルの巡を進めない）。読めない入れ子を選んで読み上げが落ちないよう、
+        選ぶ前に確かめる
+        """
         voice = self.get(member)
-        return voice if voice is not None and not voice.is_random else None
+        if voice is None or not voice.is_random:
+            return voice
+        return voice if any(not d.is_random for d in self._descendants(voice)) else None
+
+    def _descendants(self, profile: Profile) -> list[Profile]:
+        """メンバーをたどって行き着く、読める声すべて（ランダムの声も含む）。手で書き換えた輪でも止まる。"""
+        found: dict[str, Profile] = {}
+        stack = list(profile.members)
+        while stack:
+            member = stack.pop()
+            if member in found or (voice := self.get(member)) is None:
+                continue
+            found[member] = voice
+            stack.extend(voice.members)
+        return list(found.values())
 
     def tone(self, profile_id: str) -> history.VersionedText:
         """その声の要約の口調（版つき）。空なら既定の口調で読む。"""
@@ -378,7 +409,7 @@ class ProfileStore:
     def create_random(self, *, name: str, members: list[str], order: str = "random") -> Profile:
         """メンバーから毎回1つを選ぶ声を作る。"""
         with _write_lock:
-            members = self._check_members(members)
+            members = self._check_members(members, None)
             _check_order(order)
             profile_id, now = self._new_directory()
             meta = {
@@ -398,13 +429,16 @@ class ProfileStore:
         (self.root / profile_id).mkdir(parents=True)
         return profile_id, now
 
-    def _check_members(self, members: list[str]) -> list[str]:
-        """重なりを除いて、ランダムでない声だけが MIN_MEMBERS 以上あることを確かめる。"""
+    def _check_members(self, members: list[str], owner: str | None) -> list[str]:
+        """重なりを除いて、MIN_MEMBERS 以上あり、どれも owner（書き換えるランダムの声）に戻らないことを確かめる。"""
         unique = list(dict.fromkeys(members))
         for member in unique:
-            # ランダムの声を入れ子にすると、消したときの扱いや循環を考えることになる
-            if self.require(member).is_random:
-                raise ProfileRejected("ランダムの声はメンバーにできません")
+            # 輪になると、選ぶたびに同じ声の間を回り続ける
+            voice = self.require(member)
+            if owner is not None and (
+                voice.id == owner or any(d.id == owner for d in self._descendants(voice))
+            ):
+                raise ProfileRejected("自分を含むランダムの声はメンバーにできません")
         if len(unique) < MIN_MEMBERS:
             raise ProfileRejected(f"メンバーは {MIN_MEMBERS} つ以上選びます")
         return unique
@@ -436,7 +470,7 @@ class ProfileStore:
             if not profile.is_random and (members is not None or order is not None):
                 raise ProfileRejected("メンバーと選び方を持つのはランダムの声だけです")
             if members is not None:
-                members = self._check_members(members)
+                members = self._check_members(members, profile.id)
             if order is not None:
                 _check_order(order)
             directory = self.root / profile.id
