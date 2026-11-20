@@ -29,7 +29,7 @@ export function NewProfile({ voices, onStatus, onCreated, foldJob, onFoldJob, ..
       {/* 切り替えても作りかけの候補や入力を失わないよう、両方を載せたまま隠す */}
       {/* 畳み込みの仕事を追っている URL で来たら、「素材から作る」から始める */}
       <Tabs defaultValue={foldJob ? 'curate' : 'design'} className="mt-4 gap-5">
-        <TabsList>
+        <TabsList className="flex-wrap justify-start *:flex-none group-data-horizontal/tabs:h-auto">
           <TabsTrigger value="design">caption から声を作る</TabsTrigger>
           <TabsTrigger value="pick">2択で絞り込む</TabsTrigger>
           <TabsTrigger value="mix">2つの声を混ぜる</TabsTrigger>
