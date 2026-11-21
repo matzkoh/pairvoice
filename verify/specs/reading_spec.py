@@ -27,7 +27,7 @@ def rows_apply_from_the_top(text: str, s1: str, t1: str, s2: str, t2: str) -> bo
     """先の行の置換先も、後の行の置換元として置き換わる。
 
     pre: len(text) <= 3
-    pre: 1 <= len(s1) <= 2 and len(t1) <= 2 and 1 <= len(s2) <= 2 and len(t2) <= 2
+    pre: len(s1) == 1 and len(t1) <= 2 and len(s2) == 1 and len(t2) <= 2
     post: __return__
     """
     return apply_dict(text, [(s1, t1), (s2, t2)]) == apply_dict(

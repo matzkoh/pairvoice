@@ -2,7 +2,7 @@ import { describe, expect, it } from 'vitest'
 
 import type { CorpusItem } from '@/lib/api-types'
 
-import { bulkArchiveTargets, computeReviewCounts } from './reviewCounts'
+import { bulkArchiveTargets, computeReviewCounts, filterReviews } from './reviewCounts'
 
 function item(overrides: Partial<CorpusItem>): CorpusItem {
   return {
@@ -50,6 +50,18 @@ describe('computeReviewCounts', () => {
       item({ message_id: '2', stale: true, archived: true }),
     ]
     expect(computeReviewCounts(items).stale).toBe(1)
+  })
+})
+
+describe('filterReviews', () => {
+  // どの行が残るかは注釈で証明している。並び順と重複は証明の外なので、ここで押さえる
+  it('残す行を元の順に1度ずつ返す', () => {
+    const items = [
+      item({ message_id: '1', summary: 'match here', input: 'x' }),
+      item({ message_id: '2', summary: 'x', input: 'y' }),
+      item({ message_id: '3', summary: 'x', input: 'match here' }),
+    ]
+    expect(filterReviews(items, 'all', 'match').map((r) => r.message_id)).toEqual(['1', '3'])
   })
 })
 

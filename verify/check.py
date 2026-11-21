@@ -18,7 +18,7 @@ from pathlib import Path
 
 SPECS = Path(__file__).parent / "specs"
 CONFIRMED = "Confirmed over all paths."
-# 条件1つあたりの上限。ふだんはどれも数十秒で網羅し終わる
+# 条件1つあたりの上限。いちばん重い条件（reading_spec の rows_apply_from_the_top）が手元で約70秒
 PER_CONDITION_TIMEOUT = 300
 RESULT = re.compile(r"^(?P<path>.+?):(?P<line>\d+): (?P<level>\w+): (?P<message>.*)$")
 
