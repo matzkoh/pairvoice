@@ -42,6 +42,10 @@ jobs:
         working-directory: studio
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+      # 自前の Node 16 を PATH の先頭に入れるので、setup-node より前に置いて上書きさせる
+      - uses: dafny-lang/setup-dafny-action@be023fc606339d46ed6b077dcb8614d0279ded31 # v1.9.1
+        with:
+          dafny-version: "4.11.0"
       - uses: pnpm/action-setup@73e46992e05b19abd31f2f3c20e0e7370d762115 # v6.1.1
         with:
           package_json_file: studio/package.json
@@ -56,9 +60,6 @@ jobs:
       - run: pnpm lint
       - run: pnpm format:check
       # 状態遷移と純関数の性質は、//@ の注釈を LemmaScript が Dafny に写して証明する
-      - uses: dafny-lang/setup-dafny-action@be023fc606339d46ed6b077dcb8614d0279ded31 # v1.9.1
-        with:
-          dafny-version: "4.11.0"
       - run: pnpm verify
       # 生成した Dafny（verify/）が TS の今の注釈から作り直したものと一致するか
       - run: git diff --exit-code -- verify
