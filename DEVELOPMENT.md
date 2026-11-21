@@ -57,6 +57,27 @@ uv run ruff check && uv run ruff format --check && uv run ty check
 cd studio && pnpm test && pnpm typecheck && pnpm lint && pnpm format:check
 ```
 
+## 形式検証
+
+状態遷移と純関数の性質は、例を並べるテストでなく形式検証で確かめる。
+
+```bash
+uv run python verify/check.py                   # Python。数分かかる
+cd studio && pnpm verify                        # studio。Dafny 4.x が要る（brew install dafny）
+```
+
+- **Python（`verify/specs/`）**: 実コードを呼ぶ関数の docstring に `post:` を書き、CrossHair が記号実行ですべての経路を辿る。
+  引数は有限の候補（番号・真偽値）か長さに上限のある文字列に絞り、「Confirmed over all paths」まで網羅させる。
+  `verify/check.py` は、条件が1つでも網羅しきれなければ落とす（`crosshair check` 自体は時間切れでも 0 で終わる）。
+  時間は整数秒で渡す（壁時計の値に小数秒を足すと丸まり、期限ちょうどの判定が揺れる）
+- **studio（`studio/verify/`）**: 関数の先頭に `//@ verify` と `//@ ensures` を書き、LemmaScript が Dafny に写して証明する。
+  対象のファイルは `studio/LemmaScript-files.txt` に足す。注釈を変えたら `pnpm exec lsc regen --backend=dafny <file>` で
+  `verify/` の `.dfy` に取り込む。補題は `.dfy` に書き足すだけにする（生成した行を書き換えると `lsc check` が落ちる）。
+  `.dfy` を消して作り直すと補題が消える
+- **テストに残すもの**: 入出力・非同期・スレッド、浮動小数の信号処理、正規表現と Unicode の判定、決まった文言の表。
+  LemmaScript が写せない書き方（null を含む文字列テンプレート、交差型、オブジェクトのフィールドの書き換え）を
+  含む関数も、検証のために書き換えずテストのままにする
+
 ## 公開用のビルド
 
 ```bash

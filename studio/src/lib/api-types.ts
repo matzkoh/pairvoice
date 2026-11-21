@@ -140,8 +140,10 @@ export type SpeakResponse = { relative_path: string; duration: number }
 // レビューの判定。'none' は「取り消し」を送るときだけ使う値で、POST /api/reviews は
 // この3値を受け付ける。保存された状態としての判定（CorpusItem.verdict）は 'none' を
 // 持たない — サーバーが 'none' のレビューを null に潰して返すため（review タブが
-// この潰しをフロントで再現しないよう、型でも Exclude<Verdict, 'none'> にしてある）。
-export type Verdict = 'good' | 'bad' | 'none'
+// この潰しをフロントで再現しないよう、型でも 'none' を持たない SavedVerdict にしてある）。
+// SavedVerdict は Exclude で導かず字句で書く（LemmaScript が検証の型に写せるのは字句の union だけ）
+export type SavedVerdict = 'good' | 'bad'
+export type Verdict = SavedVerdict | 'none'
 
 // /api/corpus の1件。caption タブは summary だけを使うが、review タブが全項目を使う。
 export type CorpusItem = {
@@ -158,7 +160,7 @@ export type CorpusItem = {
   style?: string | null
   // 要約に使ったモデル（記録し始める前の読み上げには無い）
   summary_model?: string | null
-  verdict: Exclude<Verdict, 'none'> | null
+  verdict: SavedVerdict | null
   ideal: string | null
   archived: boolean
   stale: boolean

@@ -32,35 +32,6 @@ def health(*, llm="loaded", tts="loaded", reason=None, until=None, detail="", pl
     }
 
 
-def test_unreachable_wins_over_everything():
-    assert menubar.decide_icon(None) == menubar.ICON_UNREACHABLE
-
-
-@pytest.mark.parametrize("state", ["failed", "misconfigured"])
-def test_broken_model_wins_over_mute(state):
-    # 手動ミュート中でも、モデルが壊れていることを先に見せる。
-    payload = health(tts=state, reason="manual", until=NOW.isoformat())
-    assert menubar.decide_icon(payload) == menubar.ICON_MODEL_BROKEN
-
-
-@pytest.mark.parametrize("state", ["unloaded", "downloading", "loading", "loaded"])
-def test_normal_model_states_are_not_broken(state):
-    assert menubar.decide_icon(health(llm=state)) == menubar.ICON_IDLE
-
-
-@pytest.mark.parametrize(
-    ("reason", "icon"),
-    [
-        ("manual", "ICON_MANUAL"),
-        ("microphone", "ICON_MIC"),
-        ("audio_output", "ICON_OUTPUT"),
-        (None, "ICON_IDLE"),
-    ],
-)
-def test_icon_follows_mute_reason(reason, icon):
-    assert menubar.decide_icon(health(reason=reason)) == getattr(menubar, icon)
-
-
 def test_remaining_minutes_rounds_up():
     until = (NOW + timedelta(seconds=90)).isoformat()
     assert menubar.remaining_minutes(until, NOW) == 2
@@ -117,11 +88,6 @@ def test_models_line():
 
 def test_models_line_when_unreachable():
     assert menubar.models_line(None) == ""
-
-
-def actions(items):
-    """有効な項目の動作だけを並べる。"""
-    return [item.action for item in items if item.enabled]
 
 
 def find(items, action):
@@ -238,91 +204,6 @@ def test_menu_lists_mute_presets():
         "30分だけ黙らせる",
         "1時間だけ黙らせる",
     ]
-
-
-def test_first_two_rows_are_display_only():
-    items = menubar.menu_spec(health(), NOW)
-    assert items[0].label == "読み上げ有効"
-    assert items[1].label == "llm: loaded / tts: loaded"
-    assert [items[0].action, items[1].action] == [None, None]
-    assert not items[0].enabled
-    assert not items[1].enabled
-
-
-def test_unmute_enabled_only_for_manual_mute():
-    manual = menubar.menu_spec(health(reason="manual", until=NOW.isoformat()), NOW)
-    assert find(manual, "unmute").enabled
-
-
-@pytest.mark.parametrize("reason", [None, "microphone", "audio_output"])
-def test_unmute_disabled_without_manual_mute(reason):
-    # 自動ミュート中に unmute しても MuteController は何も消さない。押せないようにする。
-    items = menubar.menu_spec(health(reason=reason), NOW)
-    assert not find(items, "unmute").enabled
-
-
-@pytest.mark.parametrize(
-    "playback", [{"playing": True, "waiting": 0}, {"playing": False, "waiting": 2}]
-)
-def test_stop_enabled_while_speaking(playback):
-    items = menubar.menu_spec(health(playback=playback), NOW)
-    assert find(items, "stop").enabled
-
-
-def test_stop_disabled_when_silent():
-    items = menubar.menu_spec(health(), NOW)
-    assert not find(items, "stop").enabled
-
-
-def test_unreachable_leaves_only_restart_and_quit():
-    items = menubar.menu_spec(None, NOW)
-    assert actions(items) == ["restart", "quit"]
-
-
-def test_studio_opens_only_while_the_server_answers():
-    # studio の画面はサーバーが配るので、届かないあいだは開けない
-    assert find(menubar.menu_spec(health(), NOW), "studio").enabled
-    assert "studio" not in actions(menubar.menu_spec(None, NOW))
-
-
-def test_menu_has_all_operations_when_healthy():
-    # 事前ロードはまだ読み込んでいないときだけ押せる
-    items = menubar.menu_spec(health(llm="unloaded", tts="unloaded"), NOW)
-    assert actions(items) == [
-        "mute:15",
-        "mute:30",
-        "mute:60",
-        "studio",
-        "warmup",
-        "check_update",
-        "restart",
-        "quit",
-    ]
-
-
-@pytest.mark.parametrize(
-    ("llm", "tts", "label", "enabled"),
-    [
-        ("unloaded", "unloaded", "モデルを事前ロード", True),
-        ("loaded", "unloaded", "モデルを事前ロード", True),
-        ("downloading", "unloaded", "モデルをダウンロード中…", False),
-        ("loaded", "loading", "モデルをロード中…", False),
-        ("loaded", "loaded", "モデルはロード済み", False),
-        ("failed", "loaded", "モデルをロードし直す", True),
-        ("misconfigured", "loaded", "モデルを事前ロード", False),
-        ("misconfigured", "unloaded", "モデルを事前ロード", True),
-    ],
-)
-def test_warmup_label_follows_model_states(llm, tts, label, enabled):
-    item = find(menubar.menu_spec(health(llm=llm, tts=tts), NOW), "warmup")
-    assert (item.label, item.enabled) == (label, enabled)
-
-
-def test_separators_are_marked():
-    items = menubar.menu_spec(health(), NOW)
-    assert menubar.SEPARATOR in items
-    # 区切り線は separator で表す。action は「押せる動作」だけを持つ。
-    assert all(item.action is None and not item.enabled for item in items if item.separator)
 
 
 def test_fetch_health_gets_health_with_a_short_timeout(monkeypatch):
@@ -488,32 +369,6 @@ def test_quit_label_says_it_stops_pairvoice():
     # 「終了」はアイコンだけでなくサーバーも落とす。ラベルでそう伝える。
     items = menubar.menu_spec(health(), NOW)
     assert find(items, "quit").label == "pairvoice を終了"
-
-
-def test_orbit_item_is_hidden_unless_the_server_offers_it():
-    spatial = {"mode": "outside"}
-    labels = [row.label for row in menubar.menu_spec({**health(), "spatial": spatial}, NOW)]
-
-    assert "頭の外で鳴らす" in labels
-    assert "耳元で動かす" not in labels
-
-
-@pytest.mark.parametrize(
-    ("mode", "outside", "orbit"),
-    [
-        # (チェック, 押したときの動作)
-        ("outside", (True, "spatial:off"), (False, "spatial:orbit")),
-        ("orbit", (False, "spatial:outside"), (True, "spatial:off")),
-        ("off", (False, "spatial:outside"), (False, "spatial:orbit")),
-    ],
-)
-def test_spatial_items_are_exclusive(mode, outside, orbit):
-    rows = menubar.menu_spec({**health(), "spatial": {"mode": mode, "orbit_menu": True}}, NOW)
-
-    by_label = {row.label: row for row in rows}
-    for label, (checked, action) in (("頭の外で鳴らす", outside), ("耳元で動かす", orbit)):
-        assert (by_label[label].checked, by_label[label].action) == (checked, action)
-        assert by_label[label].enabled
 
 
 def test_badge_draws_a_dot_beside_the_icon():

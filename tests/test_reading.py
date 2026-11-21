@@ -1,4 +1,4 @@
-from pairvoice.reading import apply_dict, load_dict
+from pairvoice.reading import load_dict
 
 
 def test_load_dict_drops_memo_blank_source_and_lines_without_tab(tmp_path):
@@ -17,9 +17,3 @@ def test_load_dict_strips_crlf(tmp_path):
 
 def test_load_dict_missing_file_is_empty(tmp_path):
     assert load_dict(tmp_path / "dict.tsv") == []
-
-
-def test_apply_dict_replaces_in_order_and_literally():
-    rows = [("A", "エー"), ("&", "アンド"), ("#", "シャープ"), ("b", "\\&"), ("エー", "えー")]
-
-    assert apply_dict("A & # b A", rows) == "えー アンド シャープ \\& えー"

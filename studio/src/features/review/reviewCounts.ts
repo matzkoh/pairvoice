@@ -1,10 +1,19 @@
 import type { CorpusItem } from '@/lib/api-types'
 
-export const FILTERS = ['all', 'unreviewed', 'bad', 'archived', 'stale'] as const
-export type Filter = (typeof FILTERS)[number]
+// 型は値の列から導かず、字句で書く（LemmaScript が検証の型に写せるのは字句の union だけ）
+export type Filter = 'all' | 'unreviewed' | 'bad' | 'archived' | 'stale'
+// Record<Filter, …> なので、Filter に足した値をここに書き漏らすと型で落ちる
+//@ skip
+const FILTER_KEYS: Record<Filter, true> = {
+  all: true,
+  unreviewed: true,
+  bad: true,
+  archived: true,
+  stale: true,
+}
 
 export function isFilter(value: unknown): value is Filter {
-  return (FILTERS as readonly unknown[]).includes(value)
+  return typeof value === 'string' && Object.hasOwn(FILTER_KEYS, value)
 }
 
 // 呼び出し側は必ず全件（CorpusResponse.items）を渡すこと。visible で先に絞った
@@ -14,8 +23,10 @@ export function filterReviews(
   filter: Filter,
   q: string,
 ): CorpusItem[] {
+  //@ verify
+  //@ ensures forall(r: CorpusItem, r in \result <==> r in items && (q === '' || r.summary.includes(q) || r.input.includes(q)) && (filter === 'archived' ? r.archived : !r.archived && (filter === 'stale' ? r.stale : !r.stale && (filter !== 'unreviewed' || r.verdict === null) && (filter !== 'bad' || r.verdict === 'bad'))))
   return items.filter((r) => {
-    if (q && !r.summary.includes(q) && !r.input.includes(q)) return false
+    if (q !== '' && !r.summary.includes(q) && !r.input.includes(q)) return false
     if (filter === 'archived') return r.archived
     if (r.archived) return false // アーカイブ以外の絞り込みではアーカイブ済みを表示しない
     if (filter === 'stale') return r.stale
@@ -52,5 +63,7 @@ export function computeReviewCounts(items: readonly CorpusItem[]): ReviewCounts 
 // 一括アーカイブの実際の対象。活性条件と違って stale を問わない。対象を絞ると、
 // 旧プロンプトの評価済みの行がいつまでも残り続ける。
 export function bulkArchiveTargets(items: readonly CorpusItem[]): CorpusItem[] {
+  //@ verify
+  //@ ensures forall(r: CorpusItem, r in \result <==> r in items && !r.archived && r.verdict !== null)
   return items.filter((r) => !r.archived && (r.verdict === 'good' || r.verdict === 'bad'))
 }

@@ -49,6 +49,8 @@ dev = [
     "ruff>=0.17.4",
     # ty はベータで、バージョンが上がると判定が変わる。上げるときは指摘を見直す
     "ty==0.0.98",
+    # verify/check.py が使う。版が変わると経路の辿り方が変わり、網羅しきれる条件が変わる。上げるときは verify/check.py を流す
+    "crosshair-tool==0.0.114",
 ]
 
 [build-system]
