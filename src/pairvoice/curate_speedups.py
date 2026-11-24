@@ -1,4 +1,4 @@
-"""mlx-audio 0.6.4 の音声クリーンアップで繰り返す演算をまとめる。"""
+"""mlx-audio 0.6.8 の音声クリーンアップで繰り返す演算をまとめる。"""
 
 from functools import partial
 

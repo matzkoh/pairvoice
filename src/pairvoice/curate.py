@@ -1125,7 +1125,7 @@ class MlxCurateBackend:
             window = int(config.decode_window * config.sample_rate)
             stride = int(window * 0.75)
             if (length - window) % stride:
-                # mlx-audio 0.6.4 は窓の端数にさらに1窓分を足し、元の音の外まで推論する。
+                # mlx-audio 0.6.8 は窓の端数にさらに1窓分を足し、元の音の外まで推論する。
                 # 2窓目以降は左端を半重複分捨てる。採用範囲が元の音にかかる最後の窓で止める。
                 discard = (window - stride) // 2
                 last_start = ((length - 1 - discard) // stride) * stride
