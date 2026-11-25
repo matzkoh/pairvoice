@@ -110,8 +110,8 @@ export type ProfilesResponse = { items: ProfileItem[]; active: string | null }
 export type FoldStage =
   | 'upload'
   | 'decode'
-  | 'clean'
   | 'diarize'
+  | 'clean'
   | 'dereverb'
   | 'encode'
   | 'summarize'

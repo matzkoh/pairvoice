@@ -18,8 +18,8 @@ export const POLL_MS = 3000
 const STAGE_LABELS: Record<FoldStage, string> = {
   upload: '素材を受け取りました',
   decode: '素材を読み込んでいます',
-  clean: '雑音を除いています',
   diarize: '話者を分けています',
+  clean: '本人の声の雑音を除いています',
   dereverb: '本人の声の響きを除いています',
   encode: '声を話者の表現にしています',
   summarize: '表現を要約しています',

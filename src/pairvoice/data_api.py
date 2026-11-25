@@ -389,7 +389,7 @@ class FoldJobResponse(BaseModel):
     )
     status: Literal["running", "done", "failed"] = Field(description="走っている・できた・失敗した")
     stage: Literal[
-        "upload", "decode", "clean", "diarize", "dereverb", "encode", "summarize", "save"
+        "upload", "decode", "diarize", "clean", "dereverb", "encode", "summarize", "save"
     ] = Field(
         description="いまの段階。長いのは clean（雑音を除く）と dereverb（本人の声の響きを除く）。"
         "dereverb は、響きを除かない設定なら通らない"
@@ -1028,7 +1028,7 @@ def data_router(
         """`files` に音声・動画のファイルをいくつでも送る。区間を選ばず、素材全体の平均の声を作る。
 
         声の名前 `name` は本文ではなくクエリに付ける（`POST /profiles/fold?name=...`）。
-        素材の雑音を除いてから話者を分け、いちばん多く話す人の声を全部、響きを除いて話者の
+        素材の話者を分け、いちばん多く話す人の区間の雑音を除く。その声をつなぎ、響きを除いて話者の
         表現にして 180 トークンに要約する。素材が長いほど選び方で声がぶれない（数十分〜数時間が目安）。
         受け付けたらすぐ返すので、`GET /profiles/fold/{job_id}` で終わるまで問い合わせる。
         途中でやめるなら `DELETE /profiles/fold/{job_id}`。処理中も読み上げは合間に割り込む。

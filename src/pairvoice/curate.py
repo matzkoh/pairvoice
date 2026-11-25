@@ -559,15 +559,11 @@ def clipped(samples: np.ndarray) -> bool:
 
 def louder_channel(frames: np.ndarray) -> np.ndarray:
     """フレーム × チャンネルのうち、声の大きいチャンネル。左右を混ぜるとこもる。"""
-    first = frames[:, 0]
     if frames.shape[1] == 1:
-        return first
-    if frames.shape[1] == 2:
-        other = frames[:, 1]
-        # モノラルのデコード結果は両側が同じ。通常のステレオは間引いた比較で先に判別する。
-        if np.array_equal(first[::1024], other[::1024]) and np.array_equal(first, other):
-            return first
-    return frames[:, int(np.argmax((frames**2).sum(axis=0)))]
+        return frames[:, 0]
+    # 長い memmap でも二乗した配列を作らず、区切りをまたいで同じ側を使う。
+    energy = np.einsum("ij,ij->j", frames, frames, dtype=np.float64)
+    return frames[:, int(energy.argmax())]
 
 
 def residual_snr(original: np.ndarray, enhanced: np.ndarray) -> float:

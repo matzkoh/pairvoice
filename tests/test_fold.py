@@ -57,26 +57,72 @@ def test_summarize_leads_with_the_most_central_first_token():
     assert 0 <= center < len(states)
 
 
-async def test_clean_stitches_spans_back_to_the_full_length(tmp_path, monkeypatch):
-    import wave
+async def test_clean_merges_context_and_only_emits_speech_from_each_source():
+    from pairvoice import curate
+    from tests.test_curate import offload
 
-    from pairvoice.curate import Material, Source
+    # 前後2秒が重なる・接する3区間、離れた1区間、次のファイルの先頭の1区間。
+    intervals = [(0, 1), (2, 3), (7, 8), (14, 15), (16, 17)]
+    pieces = [curate.Piece(a, b, 0) for a, b in intervals]
+    audio = np.linspace(0.1, 0.9, 18 * RATE, dtype=np.float32)
+    material = curate.Material(
+        np.empty(0),
+        np.stack([audio * 0.5, audio], axis=1),
+        [curate.Source("a", 0, 15), curate.Source("b", 16, 2)],
+    )
+    analysis = curate.Analysis(material, np.empty(0), [], {}, 0, pieces, [])
+    inputs = []
+    stages = []
 
-    monkeypatch.setattr(fold, "SPAN_SECONDS", 2.0)
-    monkeypatch.setattr(fold, "ENHANCE_SECONDS", 0.7)
-    x = tone(5.3, amp=0.3)
-    material = Material(np.zeros(1), np.stack([x, x * 0.5], axis=1), [Source("a", 0.0, 5.3)])
+    async def enhance(samples):
+        inputs.append(samples)
+        return -samples
 
-    async def same(samples):
-        return samples
+    speech = await fold.clean_pieces(analysis, enhance, offload, lambda *args: stages.append(args))
+    for x, (a, b) in zip(inputs, [(0, 10), (12, 15), (16, 18)], strict=True):
+        np.testing.assert_array_equal(x, audio[a * RATE : b * RATE])
+    for x, (a, b) in zip(speech, intervals, strict=True):
+        np.testing.assert_array_equal(x, -audio[a * RATE : b * RATE])
+    assert stages == [("clean", 0), ("clean", 10 / 15), ("clean", 13 / 15), ("clean", 1)]
 
-    [(name, path)] = await fold.clean(material, tmp_path, same, lambda *_: None)
 
-    with wave.open(str(path)) as reader:
-        out = np.frombuffer(reader.readframes(reader.getnframes()), "<i2") / 32767.0
-    # 区切りの前後の文脈は捨てて、元と同じ長さ・同じ音に戻る（大きい方のチャンネルを使う）
-    assert name == "a"
-    np.testing.assert_allclose(out, x, atol=1e-4)
+async def test_long_clean_span_limits_each_call_and_discards_context_at_seams():
+    from pairvoice import curate
+    from tests.test_curate import offload
+
+    # 18秒と34秒の継ぎ目が本人区間の途中に入り、最後は短い窓になる。
+    intervals = [(0, 11), (11, 22), (21, 32), (32, 43), (43, 54)]
+    audio = np.linspace(0.2, 0.8, 54 * RATE, dtype=np.float32)
+    other = np.zeros_like(audio)
+    other[: 20 * RATE] = audio[: 20 * RATE] * 1.1
+    material = curate.Material(
+        np.empty(0), np.column_stack((audio, other)), [curate.Source("a", 0, 54)]
+    )
+    pieces = [curate.Piece(a, b, 0) for a, b in intervals]
+    analysis = curate.Analysis(material, np.empty(0), [], {}, 0, pieces, [])
+    bounds = []
+    context = round(curate.ENHANCE_CONTEXT_SECONDS * RATE)
+
+    async def enhance(samples):
+        start = int(audio.searchsorted(samples[0]))
+        end = start + len(samples)
+        bounds.append((start, end))
+        np.testing.assert_array_equal(samples, audio[start:end])
+        out = -samples
+        # 人工的に窓の端を壊す。前後の文脈を捨てた結果にこの値が残ってはいけない。
+        if start:
+            out[:context] = 1
+        if end != len(audio):
+            out[-context:] = 1
+        return out
+
+    progress = []
+    speech = await fold.clean_pieces(analysis, enhance, offload, lambda _, f: progress.append(f))
+    assert bounds == [(a * RATE, b * RATE) for a, b in [(0, 20), (16, 36), (32, 52), (48, 54)]]
+    assert max(b - a for a, b in bounds) <= fold.ENHANCE_SECONDS * RATE
+    assert progress == pytest.approx([0, 18 / 54, 34 / 54, 50 / 54, 1])
+    for out, (a, b) in zip(speech, intervals, strict=True):
+        np.testing.assert_array_equal(out, -audio[a * RATE : b * RATE])
 
 
 async def test_remove_reverb_crossfades_windows_and_splits_back_into_pieces(monkeypatch):
@@ -111,15 +157,73 @@ async def test_remove_reverb_crossfades_windows_and_splits_back_into_pieces(monk
 
 async def test_speech_blocks_level_the_voice_like_a_reference():
     from pairvoice.postprocess import TARGET_RMS_DB, voiced_rms_db
-    from tests.test_curate import material, run_analyze
+    from tests.test_curate import material, offload, run_analyze
 
     # 素材のままの大きさ（-9 dB ほど）ではなく、ふだんの参照音声の大きさにそろえて符号化する
     analysis = await run_analyze(material([(1, 12, 0.5, 220), (13, 30, 0.5, 220)]))
 
-    blocks = fold.speech_blocks(fold.speech_pieces(analysis))
+    async def enhance(samples):
+        return samples
+
+    blocks = fold.speech_blocks(
+        await fold.clean_pieces(analysis, enhance, offload, lambda *_: None)
+    )
 
     assert len(blocks) == 1
     assert voiced_rms_db(blocks[0], RATE) == pytest.approx(TARGET_RMS_DB, abs=1.0)
+
+
+async def test_fold_diarizes_raw_audio_before_cleaning(tmp_path, monkeypatch):
+    from itertools import groupby
+
+    from pairvoice import curate
+    from tests.test_curate import FakeCurate, material, offload
+
+    source = material([(1, 12, 0.5, 220), (13, 30, 0.5, 220)])
+
+    def decode(files, directory):
+        assert directory == tmp_path / "raw"
+        return source
+
+    monkeypatch.setattr(curate, "decode", decode)
+    stages = []
+
+    async def diarize(chunk):
+        np.testing.assert_array_equal(chunk, source.audio16)
+        return FakeCurate().diarize(chunk, None)[0]
+
+    async def enhance(samples):
+        assert stages[-1] == "clean"
+        return samples
+
+    async def dereverb(samples):
+        assert stages[-1] == "dereverb"
+        return samples
+
+    async def encode(samples):
+        assert stages[-1] == "encode"
+        return np.ones((4, 8), np.float32)
+
+    result = await fold.fold(
+        [],
+        tmp_path,
+        enhance=enhance,
+        diarize=diarize,
+        dereverb=dereverb,
+        encode=encode,
+        model="test",
+        offload=offload,
+        progress=lambda stage, _: stages.append(stage),
+    )
+    assert [stage for stage, _ in groupby(stages)] == [
+        "decode",
+        "diarize",
+        "clean",
+        "dereverb",
+        "encode",
+        "summarize",
+    ]
+    assert result.report["blocks"] == 1
 
 
 async def test_stopping_while_saving_lets_the_save_finish():
