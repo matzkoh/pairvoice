@@ -520,35 +520,30 @@ def test_score_deviation_skips_pieces_with_hardly_any_voice():
 
 
 @pytest.mark.parametrize(
-    ("length", "padded", "chunked"),
-    [
-        (2000, 2000, False),
-        (2200, 2200, False),
-        (2400, 2500, False),
-        (2451, 2800, False),
-        (5990, 6100, False),
-        (6000, 6000, True),
-    ],
+    ("length", "expected_chunks"), [(384000, 1), (384001, 2), (672000, 2), (672001, 3), (800019, 3)]
 )
-def test_mossformer_keeps_only_contributing_windows(length, padded, chunked, monkeypatch):
-    from types import SimpleNamespace
-
-    from pairvoice.config import CurateConfig
+def test_isolator_crossfades_cover_the_whole_clip(length, expected_chunks, monkeypatch):
+    from pairvoice.voice_isolator import CHUNK, VoiceIsolator
 
     samples = np.linspace(-1, 1, length, dtype=np.float32)
+    chunks = []
 
-    def enhance(audio, **kwargs):
-        assert len(audio) == padded
-        assert kwargs["chunked"] is chunked
-        assert not audio[length:].any()
+    def render(self, audio):
+        chunks.append(audio.shape)
         return audio
 
-    backend = curate.MlxCurateBackend(CurateConfig())
-    enhancer = SimpleNamespace(
-        enhance=enhance,
-        config=SimpleNamespace(
-            sample_rate=100, decode_window=4, one_time_decode_length=20, auto_chunk_threshold=60
-        ),
-    )
-    monkeypatch.setattr(backend, "_enhancer", enhancer)
-    np.testing.assert_array_equal(backend.enhance(samples), samples)
+    monkeypatch.setattr(VoiceIsolator, "_chunk", render)
+    model = object.__new__(VoiceIsolator)
+    np.testing.assert_allclose(model.enhance(samples), samples, atol=2e-7)
+    assert chunks == [(CHUNK,)] * expected_chunks
+
+
+@pytest.mark.parametrize("length", [1, 479, 1024, 1025, 48019])
+def test_isolator_stft_reconstructs_edges_and_partial_frames(length, monkeypatch):
+    from pairvoice.voice_isolator import VoiceIsolator
+
+    samples = np.random.default_rng(4).standard_normal(length).astype(np.float32)
+    # 入力と同じスペクトルを補正として返すと、逆変換して加えた結果は入力の2倍になる。
+    monkeypatch.setattr(VoiceIsolator, "_correction", lambda self, spectrum: spectrum)
+    model = object.__new__(VoiceIsolator)
+    np.testing.assert_allclose(model.enhance(samples), 2 * samples, atol=2e-6)

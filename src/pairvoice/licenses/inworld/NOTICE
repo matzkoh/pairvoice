@@ -1,0 +1,21 @@
+Inworld Voice Isolator
+Copyright 2026 Inworld AI
+
+The model weights were trained on Inworld's first-party data, including data
+purchased from vendors under private terms, and on these third-party datasets:
+
+- VocalSet — CC BY 4.0, https://zenodo.org/records/1442513
+- IndicVoices-R — CC BY 4.0,
+  https://huggingface.co/datasets/ai4bharat/indicvoices_r
+- VCTK — ODC-By 1.0, https://datashare.ed.ac.uk/handle/10283/2119
+
+This product optionally downloads and uses, at runtime, third-party models and
+libraries that remain under their own licenses:
+
+- Mamba selective-scan kernels (mamba-ssm, causal-conv1d) — Apache-2.0,
+  https://github.com/state-spaces/mamba (optional [fast] extra; without it
+  the same scan runs in plain PyTorch).
+
+The golden parity fixtures include a modified LibriSpeech recording under
+CC BY 4.0; see tests/fixtures/README.md. They are not included in the Python
+package.

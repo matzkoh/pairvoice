@@ -44,7 +44,6 @@ RESTART_FIELDS = (
     "tts.model",
     "stt.model",
     "curate.diarize_model",
-    "curate.enhance_model",
     "curate.dereverb_model",
 )
 PRUNE_INTERVAL_SECONDS = 86400.0

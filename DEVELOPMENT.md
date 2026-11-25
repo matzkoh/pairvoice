@@ -57,6 +57,11 @@ uv run ruff check && uv run ruff format --check && uv run ty check
 cd studio && pnpm test && pnpm typecheck && pnpm lint && pnpm format:check
 ```
 
+雑音除去の移植を確かめるときは、公式の `inworld-voice-isolation` を別の環境で動かす。
+同じ 48 kHz モノラルの float32 波形をオフライン v1 と `VoiceIsolator.enhance` に渡し、
+出力長、最大絶対誤差、波形の RMS 誤差を比べる。8 秒を超える入力では末尾の重ね合わせも比較する。
+品質の比較には雑音を足す前の声を基準とした SI-SDR を使い、時間はモデルのロードを除いて測る。
+
 ## 形式検証
 
 状態遷移と純関数の性質は、例を並べるテストでなく形式検証で確かめる。

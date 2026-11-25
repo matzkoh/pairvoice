@@ -279,19 +279,6 @@ def test_encode_matches_before_and_after_speaker_speedups(installed):
     np.testing.assert_allclose(dac.encode(audio), before, atol=1e-5)
 
 
-@pytest.mark.parametrize("frames", [1, 7, 499])
-@pytest.mark.parametrize("mode", ["edge", "constant"])
-def test_batched_deltas_match_mossformer_features(frames, mode):
-    from mlx_audio.dsp import compute_deltas_kaldi
-
-    from pairvoice.curate_speedups import kaldi_deltas
-
-    x = mx.array(np.random.default_rng(0).normal(size=(frames, 8)).astype(np.float32)).T
-    np.testing.assert_allclose(
-        kaldi_deltas(x, mode=mode), compute_deltas_kaldi(x, mode=mode), atol=1e-6
-    )
-
-
 def test_fused_attention_preserves_roformer_heads_and_rotations():
     from mlx_audio.sts.models.mel_roformer.model import RoFormerAttention
 

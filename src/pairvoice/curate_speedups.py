@@ -5,22 +5,6 @@ from functools import partial
 import mlx.core as mx
 
 
-def kaldi_deltas(specgram: mx.array, win_length: int = 5, mode: str = "edge") -> mx.array:
-    """前後のフレームから時間差分を取る。すべての窓を1回の和で計算する。"""
-    if win_length < 3:
-        raise ValueError("win_length must be at least 3")
-    radius = (win_length - 1) // 2
-    width = radius * 2 + 1
-    weights = mx.arange(-radius, radius + 1, dtype=specgram.dtype)
-    frames = specgram.reshape(-1, specgram.shape[-1])
-    padded = mx.contiguous(
-        mx.pad(frames, [(0, 0), (radius, radius)], mode="edge" if mode == "edge" else "constant")
-    )
-    windows = mx.as_strided(padded, shape=(*frames.shape, width), strides=(padded.shape[1], 1, 1))
-    denominator = radius * (radius + 1) * (2 * radius + 1) / 3
-    return (mx.sum(windows * weights, axis=-1) / denominator).reshape(specgram.shape)
-
-
 @partial(mx.compile, shapeless=True)
 def _rms_norm(x, weight, scale):
     length = mx.sqrt(mx.sum(x * x, axis=-1, keepdims=True))

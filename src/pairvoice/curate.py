@@ -10,7 +10,7 @@
 3. いちばん多く話す人だけが話している区間を切り出し、話していない隙間の音と比べて採点する。
    同じ人の発話は、間が短くほかの人を挟まなければ1つの区間にし、息継ぎの間も残す
 4. 区間ごとに声の大きさ・高さ・明るさを測り、その人のふだんの声に近い順に並べる（analyze）
-5. 並べた順か、利用者が選んだ区間から MossFormer2 で雑音を除き、除いた量でも採点する
+5. 並べた順か、利用者が選んだ区間から Inworld Voice Isolator v1 で雑音を除き、除いた量でも採点する
 6. 雑音を除いた音で、区間の頭と末尾を近くの静かな所（話の切れ目）へずらす。話者分離の
    境目は粗く、そのまま切ると言葉の途中から始まり、途中で終わる
 7. TARGET_SECONDS ぶん集めて雑音を除いた音をつなぎ、全体の響きを除く（render）
@@ -22,15 +22,19 @@ S/N だけで選ぶと、張り上げた声（怒鳴る・叫ぶ）ほど背景�
 
 参照音声に残った BGM や雑音は、Irodori-TTS が声と一緒に真似る（合成した声にも乗る）。
 きれいに聞こえる素材にも小さな効果音や雑音がうっすら乗るので、どの区間も雑音を除く。
-除去のモデルは、きれいな声と足したノイズで測って選んだ。DeepFilterNet は音楽の BGM を
-ほとんど消せず（S/N 10 dB の音楽で SI-SDR 10 → 11.5）、除いた声もこもって聞こえた。
-MossFormer2 は 20.4 まで戻し、ノイズの無い声も崩しにくい（同 26.0 と 32.8）。
-除去は和音のような BGM を消しきれず、消せなかった分は除いた量に映らないので、隙間の音でも測る。
+雑音除去には Inworld Voice Isolator v1 のオフライン版を使う。合成音声12本に雑音3種を
+S/N 0・5・10 dB で加えた108本と無加工の12本で、公式 torch 版は旧 MossFormer2 を117本で
+上回った（SI-SDR の差の中央値 +6.9 dB）。S/N 5 dB での平均は、和音 13.6 → 21.6 dB、
+オルゴール 20.0 → 27.0 dB、ピンクノイズ 15.3 → 17.7 dB。雑音なしは 40.8 → 56.1 dB。
+FP32 の MLX 版は1チャンクずつ推論し、15分ぶんの処理に139.7秒（MossFormer2 は19秒）、
+ピークメモリは4.55 GiB。torch 版との SI-SDR 差は条件平均で最大0.0004 dB だった。
+FP16 は出力に NaN が生じ、BF16 はピンクノイズの 8 kHz 以上で SI-SDR が4.86 dB ずれたため FP32 を使う。
+消し残した音は除いた量に映らないので、隙間の音でも測る。
 
 ステレオの素材は左右を混ぜず、区間ごとに声の大きい方のチャンネルを使う。左右で位相の
 違う成分（残響や広がり）が打ち消し合い、混ぜるとこもる。
 
-宅録の部屋の響きは MossFormer2 では消えず、合成した声にも乗る。残響除去は anvuew の
+宅録の部屋の響きも、参照音声に残ると合成した声に乗る。残響除去は anvuew の
 Mel-Band-RoFormer（モノラル版）が、声の似かたを保ったまま（話者ベクトルのコサイン類似度 0.985 以上）
 響きの尾を 20 dB ほど縮めた。重みが GPL-3.0 なので pairvoice は同梱も再配布もせず、利用者の
 手元で配布元から落とす。重みは torch の pickle なので、torch を入れずに ckpt.py で読む。
@@ -1005,16 +1009,19 @@ def _report(analysis: Analysis, chosen: list[Piece]) -> dict:
     }
 
 
-# MossFormer2 の重み。配布元は精度ごとのファイルを並べていて、mlx-audio の from_pretrained が
-# 探す config.json と model.safetensors が無い。ほかの精度は使わないので、この1つだけを落とす
-ENHANCE_WEIGHTS = "model_fp32.safetensors"
+# オフライン版だけを落とす。同じリポジトリにストリーミング用の別の重みもある。
+ENHANCE_CHECKPOINT = (
+    "inworld/voice-isolator",
+    "denoiser.safetensors",
+    "9b0285b3fe8403aa8e2f1dbb2165a80a4294c970",
+)
 # 残響除去の重み。配布元（anvuew/dereverb_mel_band_roformer）のステレオ版は左右の扱いが
 # 崩れていてほとんど効かず、モノラル版だけが効いた
 DEREVERB_WEIGHTS = "dereverb_mel_band_roformer_mono_anvuew_sdr_20.4029.ckpt"
 
 
 class MlxCurateBackend:
-    """話者分離（Sortformer）と雑音除去（MossFormer2）と残響除去（Mel-Band-RoFormer）。
+    """話者分離（Sortformer）と雑音除去（Inworld Voice Isolator v1）と残響除去（Mel-Band-RoFormer）。
     lifecycle からは1つのモデルに見える。"""
 
     name = "curate"
@@ -1043,44 +1050,30 @@ class MlxCurateBackend:
         if not hub.is_downloaded(self._config.diarize_model):
             return False
         try:
-            for repo, filename in self._weight_files():
-                _weights(repo, filename, local_files_only=True)
+            for checkpoint in self._weight_files():
+                _weights(*checkpoint, local_files_only=True)
         except (LocalEntryNotFoundError, OSError):
             return False
         return True
 
     def download(self) -> None:
         hub.download(self._config.diarize_model)
-        for repo, filename in self._weight_files():
-            _weights(repo, filename)
+        for checkpoint in self._weight_files():
+            _weights(*checkpoint)
 
-    def _weight_files(self) -> list[tuple[str, str]]:
-        files = [(self._config.enhance_model, ENHANCE_WEIGHTS)]
+    def _weight_files(self) -> list[tuple[str, str, str | None]]:
+        files: list[tuple[str, str, str | None]] = [ENHANCE_CHECKPOINT]
         if self.dereverbs:
-            files.append((self._config.dereverb_model, DEREVERB_WEIGHTS))
+            files.append((self._config.dereverb_model, DEREVERB_WEIGHTS, None))
         return files
 
     def load(self) -> None:
-        import mlx.core as mx
-        from mlx.utils import tree_unflatten
-        from mlx_audio.sts.models.mossformer2_se import model as mossformer
-        from mlx_audio.sts.models.mossformer2_se.config import MossFormer2SEConfig
-        from mlx_audio.sts.models.mossformer2_se.model import MossFormer2SEModel
-        from mlx_audio.sts.models.mossformer2_se.mossformer2_se_wrapper import MossFormer2SE
         from mlx_audio.vad import load
 
-        from . import curate_speedups
+        from .voice_isolator import VoiceIsolator
 
-        mossformer.compute_deltas_kaldi = curate_speedups.kaldi_deltas  # ty: ignore[invalid-assignment]
         self._diarizer = load(self._config.diarize_model)
-        # from_pretrained と同じ組み立てを、設定は既定のまま行う。MossFormer2SEModel は作るときに
-        # nn.LayerNorm を mx.fast.layer_norm に差し替える（プロセス全体に効くが、計算は同じ）
-        config = MossFormer2SEConfig()
-        network = MossFormer2SE(config)
-        weights = mx.load(_weights(self._config.enhance_model, ENHANCE_WEIGHTS))
-        assert isinstance(weights, dict)  # safetensors は名前つきの辞書で返る
-        network.update(tree_unflatten(list(weights.items())))
-        self._enhancer = MossFormer2SEModel(config=config, model=network)
+        self._enhancer = VoiceIsolator(_weights(*ENHANCE_CHECKPOINT))
         if self.dereverbs:
             path = _weights(self._config.dereverb_model, DEREVERB_WEIGHTS)
             self._dereverber = _load_dereverber(Path(path))
@@ -1117,22 +1110,7 @@ class MlxCurateBackend:
     def enhance(self, samples: np.ndarray) -> np.ndarray:
         if self._enhancer is None:
             raise RuntimeError("curate model is not loaded")
-        model = self._enhancer
-        config = model.config
-        length = len(samples)
-        chunked = length >= config.auto_chunk_threshold * config.sample_rate
-        if not chunked and length > config.one_time_decode_length * config.sample_rate:
-            window = int(config.decode_window * config.sample_rate)
-            stride = int(window * 0.75)
-            if (length - window) % stride:
-                # mlx-audio 0.6.8 は窓の端数にさらに1窓分を足し、元の音の外まで推論する。
-                # 2窓目以降は左端を半重複分捨てる。採用範囲が元の音にかかる最後の窓で止める。
-                discard = (window - stride) // 2
-                last_start = ((length - 1 - discard) // stride) * stride
-                samples = np.pad(samples, (0, last_start + window - length))
-        # 詰め物が境界を越えても、モードは元の長さで選ぶ。
-        out = np.asarray(model.enhance(samples, chunked=chunked), dtype=np.float32).reshape(-1)
-        return _fit(out, length)
+        return self._enhancer.enhance(samples)
 
     def dereverb(self, chunk: np.ndarray) -> np.ndarray:
         """44.1kHz モノラルの1チャンクの響きを除く。左右に同じ音を入れ、出た左右を混ぜる。"""
@@ -1151,10 +1129,12 @@ def _fit(samples: np.ndarray, length: int) -> np.ndarray:
     return np.pad(samples, (0, length - len(samples)))
 
 
-def _weights(repo: str, filename: str, *, local_files_only: bool = False) -> str:
+def _weights(
+    repo: str, filename: str, revision: str | None = None, *, local_files_only: bool = False
+) -> str:
     from huggingface_hub import hf_hub_download
 
-    return hf_hub_download(repo, filename, local_files_only=local_files_only)
+    return hf_hub_download(repo, filename, revision=revision, local_files_only=local_files_only)
 
 
 def _load_dereverber(path: Path):
