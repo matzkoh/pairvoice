@@ -856,6 +856,54 @@ def test_mix_saves_mixed_tokens_and_reads_references_in_that_voice(tmp_path):
     assert '"speaker_model": "fake/tts"' in (directory / "profile.json").read_text()
 
 
+def test_mix_keeps_tokens_of_synthesized_audio_without_recipe(tmp_path):
+    # studio の「2択で絞り込む」は、合成した音声を混ぜた声をそのまま残す。音声は日が経つと
+    # 消えるので作り方は残さず、表現だけで読む
+    import numpy as np
+
+    tts = TakeWritingTTS(tmp_path)
+    _, client = build(tts=tts, data_root=tmp_path)
+    (tmp_path / "generations").mkdir()
+    for name in ("a.wav", "b.wav"):
+        (tmp_path / "generations" / name).write_bytes(make_wav(bytes(4)))
+
+    response = client.post(
+        "/profiles/mix",
+        json={
+            "name": "見つけた声",
+            "voices": [
+                {"audio": "generations/a.wav", "weight": 0.6},
+                {"audio": "generations/b.wav", "weight": 0.4},
+            ],
+            "rng_seed": 7,
+        },
+    )
+
+    assert response.status_code == 201
+    created = response.json()
+    assert (created["source"], created["caption"], created["mix"], created["folded"]) == (
+        "mix",
+        "",
+        [],
+        False,
+    )
+    mix = [
+        ((tmp_path / "generations" / "a.wav").resolve(), 0.6),
+        ((tmp_path / "generations" / "b.wav").resolve(), 0.4),
+    ]
+    first, *reads = tts.calls
+    assert first == {"mix_tokens": mix}
+    assert all(call["mix"] == mix for call in reads)
+    assert (tmp_path / "profiles" / created["id"] / "speaker.npy").is_file()
+    assert np.load(tmp_path / "profiles" / created["id"] / "speaker.npy").shape == (3, 2)
+
+
+def test_mix_rejects_part_with_both_or_neither_source(client):
+    for part in ({"weight": 1}, {"voice": "a", "audio": "generations/a.wav", "weight": 1}):
+        response = client.post("/profiles/mix", json={"name": "x", "voices": [part]})
+        assert response.status_code == 422
+
+
 def test_mix_reports_unknown_voice_before_synthesizing(tmp_path):
     tts = TakeWritingTTS(tmp_path)
     _, client = build(tts=tts, data_root=tmp_path)

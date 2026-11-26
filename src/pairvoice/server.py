@@ -25,12 +25,11 @@ from .audio_state import AudioProbe
 from .config import API_PREFIX, Config
 from .corpus_api import corpus_router
 from .curate import MlxCurateBackend
-from .data_api import data_router, read_wav_body
+from .data_api import DataAudioPath, MixPart, data_router, read_wav_body
 from .lifecycle import Engine, ModelUnavailable, MutedError, limit_mlx_cache
 from .llm import MlxLmBackend
 from .mute import MAX_MINUTES, MIN_MINUTES, InvalidMinutes, MuteController
 from .narration import NarrateResponse, narrate
-from .profiles import MixVoice
 from .prompt import SummaryPrompt
 from .stt import MlxSttBackend
 from .studio_web import mount_studio, open_studio
@@ -123,7 +122,6 @@ Group = Annotated[
         "（`shuffle` なら、ほかの値と別の声を選ぶ）。省くと毎回選ぶ。ランダムでない声では見ない"
     ),
 ]
-DataAudioPath = Annotated[str, Field(description="データの置き場所からの相対パス（wav）")]
 
 
 _MODEL_UNAVAILABLE = _error(
@@ -246,30 +244,6 @@ class SamplerOverrides(BaseModel):
     )
     rescale_k: float | None = Field(default=None, description="スコア再スケールの係数")
     rescale_sigma: float | None = Field(default=None, description="スコア再スケールの幅")
-
-
-class MixPart(BaseModel):
-    audio: DataAudioPath | None = Field(
-        default=None, description="混ぜる音声（データの置き場所からの相対パスの wav）"
-    )
-    voice: str | None = Field(
-        default=None,
-        description="混ぜる声（プロファイル）の名前か ID。読み上げと同じ表現で混ぜる。ランダムの声は混ぜられない",
-    )
-    # 伸ばしすぎると声が崩れるので、2択が使う幅（負の重みの合計 0.5 まで）に余裕を
-    # 持たせた範囲に絞る
-    weight: float = Field(
-        ge=-1, le=2, description="重み。負の値はその声から遠ざかる向きへ伸ばす（外挿）"
-    )
-
-    @model_validator(mode="after")
-    def _one_source(self):
-        if (self.audio is None) == (self.voice is None):
-            raise ValueError("exactly one of audio or voice is required")
-        return self
-
-    def source(self) -> str | MixVoice:
-        return self.audio if self.audio is not None else MixVoice(self.voice or "")
 
 
 class SynthesisRequest(BaseModel):

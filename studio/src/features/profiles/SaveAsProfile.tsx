@@ -4,7 +4,7 @@ import { useState, useTransition } from 'react'
 
 import { Button } from '@/components/ui/button'
 import { Input } from '@/components/ui/input'
-import { apiSend, toErrorMessage } from '@/lib/api'
+import { toErrorMessage } from '@/lib/api'
 import type { ProfileItem } from '@/lib/api-types'
 import { isImeConfirm } from '@/lib/hotkeys'
 
@@ -14,10 +14,8 @@ import { invalidateProfiles, type ProfileStatus } from './queries'
 type Props = {
   // 名前欄の読み上げ名（「候補 #1」など）
   label: string
-  caption: string
-  // 参照音声のテイクを作る（同じ声で別の文も読ませ、サーバーでつないで1本にする）。
-  // 作った wav（データの置き場所からの相対パス）を返す
-  record: (progress: (done: number, total: number) => void) => Promise<string[]>
+  // 名前を付けた声を作る。参照音声を1本ずつ作るなら、その進み具合を progress で知らせる
+  create: (name: string, progress: (done: number, total: number) => void) => Promise<ProfileItem>
   // 名前の欄を開くボタンの文言。prominent なら塗りつぶしの主ボタンにする
   openLabel?: string
   prominent?: boolean
@@ -29,8 +27,7 @@ type Props = {
 // 決めたときだけ開く
 export function SaveAsProfile({
   label,
-  caption,
-  record,
+  create,
   openLabel = '保存',
   prominent = false,
   onStatus,
@@ -48,13 +45,7 @@ export function SaveAsProfile({
     if (name.trim() === '') return
     startSave(async () => {
       try {
-        const takes = await record((done, total) => setProgress({ done, total }))
-        setProgress({ done: takes.length, total: takes.length })
-        const created = await apiSend<ProfileItem>('/profiles', 'POST', {
-          name: name.trim(),
-          caption,
-          takes,
-        })
+        const created = await create(name.trim(), (done, total) => setProgress({ done, total }))
         await invalidateProfiles(queryClient)
         setSaved(true)
         onStatus({ message: `「${created.name}」を保存しました`, isError: false })

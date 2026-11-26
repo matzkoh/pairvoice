@@ -5,7 +5,6 @@ import { afterEach, beforeEach, expect, it, vi } from 'vitest'
 
 import { apiSend, isRecord } from '@/lib/api'
 
-import { REFERENCE_TEXTS } from './mixSynth'
 import { FIRST_VOICES, PickProfile } from './PickProfile'
 
 vi.mock('@/lib/api', async (importOriginal) => {
@@ -220,7 +219,7 @@ it('A と B を聞いている間に、手持ちの声を増やしておく', as
   await waitFor(() => expect(designCalls().length).toBeGreaterThan(FIRST_VOICES))
 })
 
-it('見つけた声に決めると、同じ混ぜ具合で合成の段数を増やし、別の文も読ませて参照音声にする', async () => {
+it('見つけた声に決めると、その混ぜ具合をそのまま声として残す', async () => {
   await startPicking()
   // A と B はわざと理想から外した声なので、保存できるのは見つけた声だけ
   expect(screen.queryByRole('button', { name: 'A を保存' })).toBeNull()
@@ -234,22 +233,20 @@ it('見つけた声に決めると、同じ混ぜ具合で合成の段数を増�
   })
 
   await waitFor(() =>
-    expect(vi.mocked(apiSend).mock.calls.some(([p]) => p === '/profiles')).toBe(true),
+    expect(vi.mocked(apiSend).mock.calls.some(([p]) => p === '/profiles/mix')).toBe(true),
   )
-  const remastered = speakCalls().filter((call) => call.steps === 80)
-  expect(remastered.map((call) => call.text)).toEqual(['読ませる文です。', ...REFERENCE_TEXTS])
-  // 見つけた声（はじめは3人の混ぜ合わせ）のまま読ませる
-  for (const call of remastered) {
-    expect(call.mix!.map((part) => part.audio)).toEqual([wav(1), wav(2), wav(3)])
-    expect(call.mix).toEqual(remastered[0]!.mix)
-  }
-  const saved = vi.mocked(apiSend).mock.calls.find(([p]) => p === '/profiles')![2]
-  // 作り直した音声（試聴の A の wav ではない）をつないで参照音声にする
-  // 声は参照音声が決めるので、caption は空
+  // 合成した音声から作り直さない（参照音声はサーバーが同じ声で読ませて作る）
+  expect(speakCalls().filter((call) => call.steps === 80)).toEqual([])
+  const saved = vi.mocked(apiSend).mock.calls.find(([p]) => p === '/profiles/mix')![2]
+  // 声は話者の表現が決めるので、caption は空
   expect(saved).toMatchObject({ name: '見つけた声', caption: '' })
-  const takes = isRecord(saved) && Array.isArray(saved.takes) ? saved.takes : []
-  expect(takes).toHaveLength(REFERENCE_TEXTS.length + 1)
-  expect(takes).not.toContain(wav(FIRST_VOICES + 1))
+  // 見つけた声（はじめは3人の混ぜ合わせ）のまま
+  const voices = isRecord(saved) && Array.isArray(saved.voices) ? saved.voices : []
+  expect(voices.map((part) => (isRecord(part) ? part.audio : null))).toEqual([
+    wav(1),
+    wav(2),
+    wav(3),
+  ])
 })
 
 it('見つけた声は、聴くと決めたときだけ合成して鳴らす', async () => {

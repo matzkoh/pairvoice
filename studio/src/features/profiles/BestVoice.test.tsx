@@ -44,15 +44,8 @@ it('候補の範囲が狭まるまでは控えめで、狭まったら「この�
   expect(screen.getByText('絞り込み 60%')).toBeTruthy()
 })
 
-it('保存している間は、そのボタンの場所に参照音声の進み具合を出す', async () => {
-  // 2本目の合成で止めておく
-  const held = Promise.withResolvers<void>()
-  let calls = 0
-  vi.mocked(apiSend).mockImplementation(async () => {
-    calls++
-    if (calls === 2) await held.promise
-    return { relative_path: `generations/${calls}.wav`, duration: 7 }
-  })
+it('この声に決めると、混ぜた声をそのまま /profiles/mix で残す', async () => {
+  vi.mocked(apiSend).mockResolvedValue({ id: 'p1', name: '決めた声' })
   fireEvent.click(renderAt(0.6))
   fireEvent.change(screen.getByRole('textbox', { name: '見つけた声 の名前' }), {
     target: { value: '決めた声' },
@@ -60,6 +53,12 @@ it('保存している間は、そのボタンの場所に参照音声の進み�
   await act(async () => {
     fireEvent.click(screen.getByRole('button', { name: 'この声で作る' }))
   })
-  expect(screen.getByRole('status').textContent).toContain('参照音声を作っています 1/4')
-  await act(async () => held.resolve())
+  // 合成した音声から作り直さない（聞いた声からずれる）
+  expect(apiSend).toHaveBeenCalledTimes(1)
+  expect(apiSend).toHaveBeenCalledWith('/profiles/mix', 'POST', {
+    name: '決めた声',
+    caption: '',
+    voices: [{ audio: 'generations/1.wav', weight: 1 }],
+    rng_seed: 1,
+  })
 })

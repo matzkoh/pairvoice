@@ -7,7 +7,7 @@ import { Button } from '@/components/ui/button'
 import { toErrorMessage } from '@/lib/api'
 import { audioFileUrl } from '@/lib/speak'
 
-import { MASTER_STEPS, mixQueryOptions, recordTakes, REFERENCE_TEXTS, synth } from './mixSynth'
+import { createFromMix, mixQueryOptions } from './mixSynth'
 import { ProgressBar } from './ProgressBar'
 import type { ProfileStatus } from './queries'
 import { RetryNote } from './RetryNote'
@@ -93,18 +93,9 @@ export function BestVoice({
         </Button>
         <SaveAsProfile
           label="見つけた声"
-          // 声は参照音声が決めるので、プロファイルの caption は空にする（事前の質問から作った
-          // 「女性の声。」のような caption は声を言い直すだけ。話し方を足したければ後で書ける）
-          caption=""
           openLabel="この声に決める"
           prominent={stage === 'ready'}
-          record={(progress) =>
-            recordTakes(
-              [text, ...REFERENCE_TEXTS],
-              (t) => synth(t, caption, seed, mix, MASTER_STEPS),
-              progress,
-            )
-          }
+          create={(name) => createFromMix(name, mix, seed)}
           onStatus={onStatus}
           onCreated={onCreated}
         />

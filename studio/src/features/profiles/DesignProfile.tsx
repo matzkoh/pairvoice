@@ -8,7 +8,7 @@ import type { SamplerOverrides } from '@/lib/api-types'
 import { audioFileUrl } from '@/lib/speak'
 
 import { Field } from './Field'
-import { MASTER_STEPS, recordTakes, REFERENCE_TEXTS, synth } from './mixSynth'
+import { createFromTakes, MASTER_STEPS, recordTakes, REFERENCE_TEXTS, synth } from './mixSynth'
 import type { ProfileStatus } from './queries'
 import { initialValues, MAX_CANDIDATES } from './samplerKnobs'
 import { SaveAsProfile } from './SaveAsProfile'
@@ -167,24 +167,24 @@ function CandidateRow({ take, onPlay, onStatus, onCreated }: RowProps) {
         <div className="ml-auto">
           <SaveAsProfile
             label={`候補 #${take.id}`}
-            // 声は参照音声が決めるので、プロファイルの caption は空にする（声を作るための
-            // 描写は、読み上げでは声を言い直すだけ。話し方を足したければ後で書ける）
-            caption=""
             // 選んだテイクを参照にして、同じ声で別の文も読ませる（テイクを複製した声なので、
             // テイクそのものとはわずかに違う）
-            record={(progress) =>
-              recordTakes(
-                REFERENCE_TEXTS,
-                (text) =>
-                  synth(
-                    text,
-                    take.input.caption,
-                    take.seed,
-                    [{ audio: relativePath, weight: 1 }],
-                    MASTER_STEPS,
-                  ),
-                progress,
-                [relativePath],
+            create={async (name, progress) =>
+              createFromTakes(
+                name,
+                await recordTakes(
+                  REFERENCE_TEXTS,
+                  (text) =>
+                    synth(
+                      text,
+                      take.input.caption,
+                      take.seed,
+                      [{ audio: relativePath, weight: 1 }],
+                      MASTER_STEPS,
+                    ),
+                  progress,
+                  [relativePath],
+                ),
               )
             }
             onStatus={onStatus}

@@ -1,5 +1,7 @@
 import { queryOptions } from '@tanstack/react-query'
 
+import { apiSend } from '@/lib/api'
+import type { ProfileItem } from '@/lib/api-types'
 import { type MixSource, speakOnce } from '@/lib/speak'
 
 // 保存する声の合成の段数（読み上げの既定は 10）。増やすほど丁寧で遅い
@@ -65,5 +67,25 @@ export async function recordTakes(
     progress(takes.length, total)
     takes.push(await speak(text))
   }
+  progress(takes.length, total)
   return takes
+}
+
+// 作った声の caption は空にする（声を作るための描写は、読み上げでは声を言い直すだけ。
+// 話し方を足したければ後で書ける）
+
+// テイクをつないだ参照音声で声を作る
+export function createFromTakes(name: string, takes: readonly string[]) {
+  return apiSend<ProfileItem>('/profiles', 'POST', { name, caption: '', takes })
+}
+
+// 混ぜた話者の表現をそのまま声として残す（合成した音声から作り直すと、聞いた声からずれる）。
+// 参照音声はサーバーが同じ声で決まった文を読ませて作る
+export function createFromMix(name: string, mix: readonly MixSource[], seed: number) {
+  return apiSend<ProfileItem>('/profiles/mix', 'POST', {
+    name,
+    caption: '',
+    voices: mix,
+    rng_seed: seed,
+  })
 }

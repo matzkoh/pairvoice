@@ -207,6 +207,7 @@ _DESIGN_EXAMPLES: dict[str, Example] = {
 NonBlank = Annotated[str, StringConstraints(strip_whitespace=True, min_length=1)]
 ProfileName = NonBlank
 Caption = Annotated[str, StringConstraints(strip_whitespace=True)]
+DataAudioPath = Annotated[str, Field(description="データの置き場所からの相対パス（wav）")]
 
 
 class ToneBody(BaseModel):
@@ -327,7 +328,7 @@ class ProfileItem(BaseModel):
     source: Literal["design", "upload", "curate", "auto", "import", "random", "mix"] = Field(
         description="作り方。`curate` は雑多な音声ファイルから選り分けた。"
         "`random` は参照音声を持たず、要約・合成のたびに `members` から1つを選んで読む。"
-        "`mix` はほかの声を混ぜた（`POST /profiles/mix`）"
+        "`mix` はほかの声や合成した音声を混ぜた（`POST /profiles/mix`）"
     )
     created_at: str = Field(description="作った日時（ISO 8601）")
     tone: str = Field(description="要約の口調。空なら既定の口調（`GET /tone`）で読む")
@@ -338,7 +339,8 @@ class ProfileItem(BaseModel):
         "参照音声（`GET /profiles/{id}/audio`）はその中心に近い 26 秒の素材で、鳴る声とは少し違う"
     )
     mix: list[MixRecipePart] = Field(
-        description="`mix` の声の作り方（もとの声と重み）。もとの声を消しても読める。ほかの声は空"
+        description="`mix` の声の作り方（もとの声と重み）。もとの声を消しても読める。"
+        "合成した音声を混ぜた声とほかの声は空"
     )
 
 
@@ -594,8 +596,32 @@ class DesignProfileBody(BaseModel):
     )
 
 
-class MixVoicePart(BaseModel):
-    voice: str = Field(description="混ぜる声の名前か ID。ランダムの声は混ぜられない")
+class MixPart(BaseModel):
+    audio: DataAudioPath | None = Field(
+        default=None, description="混ぜる音声（データの置き場所からの相対パスの wav）"
+    )
+    voice: str | None = Field(
+        default=None,
+        description="混ぜる声（プロファイル）の名前か ID。読み上げと同じ表現で混ぜる。ランダムの声は混ぜられない",
+    )
+    # 伸ばしすぎると声が崩れるので、2択が使う幅（負の重みの合計 0.5 まで）に余裕を
+    # 持たせた範囲に絞る
+    weight: float = Field(
+        ge=-1, le=2, description="重み。負の値はその声から遠ざかる向きへ伸ばす（外挿）"
+    )
+
+    @model_validator(mode="after")
+    def _one_source(self):
+        if (self.audio is None) == (self.voice is None):
+            raise ValueError("exactly one of audio or voice is required")
+        return self
+
+    def source(self) -> str | MixVoice:
+        return self.audio if self.audio is not None else MixVoice(self.voice or "")
+
+
+class MixVoicePart(MixPart):
+    # 声として残すので、外挿（負の重み）はしない
     weight: float = Field(ge=0, le=1, description="重み。足して1に直して混ぜる")
 
 
@@ -605,7 +631,8 @@ class MixProfileBody(BaseModel):
         default="",
         description="話し方の指示。試聴した caption と同じにすると、聞いた声のままになる",
     )
-    voices: list[MixVoicePart] = Field(min_length=2, max_length=8, description="混ぜる声")
+    # 2択で絞り込んだ声は、1つの音声に寄り切ることもある
+    voices: list[MixVoicePart] = Field(min_length=1, max_length=8, description="混ぜる声")
     rng_seed: int | None = Field(
         default=None,
         description="参照音声を読ませるときの乱数の種。省くと config.toml の値",
@@ -896,35 +923,41 @@ def data_router(
         tags=["声"],
         responses={
             400: _error("`invalid_profile`（ランダムの声を混ぜようとした）"),
-            404: _error("`profile_not_found`"),
+            404: _error("`profile_not_found`、`audio_not_found`（`audio` の wav が無い）"),
             503: _error("`model_load_failed` など（モデルを使えない）"),
         },
     )
     async def mix_profile(body: MixProfileBody):
         """声たちの話者の表現を重みで混ぜ、そのまま声の表現として保存する。
 
-        `/synthesize` の `mix` に同じ声・重みを `voice` で渡して試聴した声と同じ声で読む。
+        `/synthesize` の `mix` に同じ声・音声・重みを渡して試聴した声と同じ声で読む。
         合成モデルを替えたときのために、混ぜた声で決まった文を3つ読ませて参照音声にもする
         （合成を3回するので 30 秒ほどかかる）。使用中の声がまだ無ければ、作った声を使用中にする。
+        作り方（`mix`）は声だけを混ぜたときに残す（合成した音声は日が経つと消える）。
         """
-        # 名前は後から変わりうるので、作り方には ID を残す
-        parts = []
+        mix: list[tuple[str | MixVoice, float]] = []
         for part in body.voices:
-            found = profiles.find(part.voice)
-            if found is None:
-                raise ProfileNotFound(part.voice)
-            parts.append((found.id, part.weight))
-        mix: list[tuple[str | MixVoice, float]] = [(MixVoice(i), w) for i, w in parts]
+            source = part.source()
+            if isinstance(source, MixVoice):
+                found = profiles.find(source.key)
+                if found is None:
+                    raise ProfileNotFound(source.key)
+                # 名前は後から変わりうるので、作り方には ID を残す
+                source = MixVoice(found.id)
+            mix.append((source, part.weight))
         tokens, model = await mix_tokens(mix)
         takes = await read_references(mix, body.caption, master_sampler(body.rng_seed))
-        total = sum(w for _, w in parts)
+        total = sum(w for _, w in mix)
+        voices_only = all(isinstance(s, MixVoice) for s, _ in mix)
         return await save_design(
             body.name,
             body.caption,
             takes,
             source=MIX_SOURCE,
             speaker=SpeakerTokens(lambda path: np.save(path, tokens), model),
-            mix=[(i, w / total) for i, w in parts],
+            mix=[(s.key, w / total) for s, w in mix if isinstance(s, MixVoice)]
+            if voices_only
+            else [],
         )
 
     @router.post(

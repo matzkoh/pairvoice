@@ -126,8 +126,8 @@ class Profile:
             "tone": self.tone,
             "members": list(self.members),
             "order": self.order,
-            # 混ぜた声も表現を持つが、素材から畳み込んだ声ではない
-            "folded": self.speaker is not None and not self.mix,
+            # 混ぜた声も表現を持つが、素材から畳み込んだ声ではない（作り方が残らないこともある）
+            "folded": self.speaker is not None and self.source != MIX_SOURCE,
             "mix": [{"id": voice, "weight": weight} for voice, weight in self.mix],
         }
 
