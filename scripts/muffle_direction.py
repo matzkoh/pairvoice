@@ -1,12 +1,11 @@
-"""こもりの向き（src/pairvoice/muffle/<モデル>.npz）を作る。合成モデルを替えたら作り直す。
+"""こもりの向き（src/pairvoice/muffle/<モデル>.npy）を作る。合成モデルを替えたら作り直す。
 
-caption だけで作る声は seed しだいで 10〜12kHz より上が切れ、低音が膨らんだ、こもった音になり、
-混ぜた声にもそのまま移る。こもっていないテイクと、それを加工した音の組は、声が同じで録音の
-具合だけが違う。組ごとの話者の表現（時間平均）の差を平均すると、その具合だけを動かす向きになる。
+caption だけで作る声は seed しだいで 10〜12kHz より上が切れた、こもった音になり、混ぜた声にも
+そのまま移る。こもっていないテイクと、それを 12kHz で切った音の組は、声が同じで帯域だけが違う。
+組ごとの話者の表現（時間平均）の差を平均すると、上の帯域だけを戻す向きになる。
 
-- high: もとの音 − 10kHz で切った音。足すと上の帯域が戻る（12kHz で切った組より、10kHz から
-  切れた声まで埋まる）
-- boom: 200Hz より下を 10dB 持ち上げた音 − もとの音。引くと低音の膨らみが減る
+10kHz で切った組から作ると 2〜4kHz の張りまで削れ、低音の膨らみを減らす向きを足すと声が痩せて、
+どちらも耳では澄んで聞こえなかった。
 
 caption と seed を固定するので、同じモデルなら同じ向きになる。利用者の声は使わない
 （実在の人の声から取った数値を配らない）。
@@ -41,11 +40,8 @@ CAPTIONS = (
     "男性の声。声は高め、張りのある力強い声。明るい調子で話す。",
 )
 SEEDS = range(1, 7)
-CUTOFF_HZ = 10000.0
+CUTOFF_HZ = 12000.0
 TAPER_HZ = 300.0
-BOOM_BELOW_HZ = 200.0
-BOOM_WIDTH_HZ = 150.0
-BOOM_GAIN_DB = 10.0
 
 
 def lowpass(samples: np.ndarray, sample_rate: int) -> np.ndarray:
@@ -53,14 +49,6 @@ def lowpass(samples: np.ndarray, sample_rate: int) -> np.ndarray:
     freqs = np.fft.rfftfreq(len(samples), 1 / sample_rate)
     gain = np.clip((CUTOFF_HZ - freqs) / TAPER_HZ, 0, 1)
     return np.fft.irfft(np.fft.rfft(samples) * gain, len(samples))
-
-
-def boom(samples: np.ndarray, sample_rate: int) -> np.ndarray:
-    """BOOM_BELOW_HZ より下をなだらかに持ち上げる（はみ出さないよう大きさをそろえる）。"""
-    freqs = np.fft.rfftfreq(len(samples), 1 / sample_rate)
-    ramp = np.clip((BOOM_BELOW_HZ + BOOM_WIDTH_HZ - freqs) / (2 * BOOM_WIDTH_HZ), 0, 1)
-    out = np.fft.irfft(np.fft.rfft(samples) * 10 ** (BOOM_GAIN_DB * ramp / 20), len(samples))
-    return out / max(1.0, float(np.abs(out).max()))
 
 
 def main() -> int:
@@ -73,23 +61,17 @@ def main() -> int:
         def mean_tokens(samples: np.ndarray) -> np.ndarray:
             return backend.speaker_tokens(np.clip(samples, -1, 1)).mean(axis=0)
 
-        high, booms = [], []
+        diffs = []
         for caption, seed in itertools.product(CAPTIONS, SEEDS):
             result = backend.speak(TEXT, caption=caption, sampler={"rng_seed": seed}, design=True)
             samples, rate = read_mono(result.path)
             if band_limited(samples, rate):
                 continue
-            plain = mean_tokens(samples)
-            high.append(plain - mean_tokens(lowpass(samples, rate)))
-            booms.append(mean_tokens(boom(samples, rate)) - plain)
+            diffs.append(mean_tokens(samples) - mean_tokens(lowpass(samples, rate)))
     out = muffle_direction_path(tts.model)
     out.parent.mkdir(parents=True, exist_ok=True)
-    np.savez(
-        out,
-        high=np.mean(high, axis=0).astype(np.float32),
-        boom=np.mean(booms, axis=0).astype(np.float32),
-    )
-    print(f"{out}: {len(high)} 本のテイクから作った")
+    np.save(out, np.mean(diffs, axis=0).astype(np.float32))
+    print(f"{out}: {len(diffs)} 本のテイクから作った")
     return 0
 
 

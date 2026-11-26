@@ -91,7 +91,7 @@ cd studio && pnpm verify                        # studio。Dafny 4.x が要る�
 wheel には studio（ビルド済みの `dist` を含む）・`examples/` を同梱する（`pyproject.toml` の
 `force-include`）。`dist` は git で追跡しないので、ビルドを忘れると wheel のビルドが失敗する。
 
-こもった声を直す向き（`src/pairvoice/muffle/<合成モデル>.npz`）は合成モデルごとに作る。合成モデルを
+こもった声を直す向き（`src/pairvoice/muffle/<合成モデル>.npy`）は合成モデルごとに作る。合成モデルを
 替えたら `uv run python scripts/muffle_direction.py` で作り直す（無いモデルでは直す操作が出ない）。
 
 ## 要約の評価（`pairvoice eval`）

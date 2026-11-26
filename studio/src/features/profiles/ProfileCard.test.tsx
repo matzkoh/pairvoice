@@ -276,7 +276,7 @@ it('こもった声は強さを選んで前後を聴き比べ、元の声を残�
       if (!isRecord(body)) throw new Error('unexpected body')
       return body
     })
-  expect(previews.map((body) => body.unmuffle)).toEqual([0, 2.5, 3])
+  expect(previews.map((body) => body.unmuffle)).toEqual([0, 3, 4])
   expect(
     new Set(previews.map((body) => JSON.stringify([body.mix, body.sampler, body.text]))).size,
   ).toBe(1)
@@ -285,7 +285,7 @@ it('こもった声は強さを選んで前後を聴き比べ、元の声を残�
     name: '直した声',
     caption: MUFFLED.caption,
     voices: [{ voice: MUFFLED.id, weight: 1 }],
-    unmuffle: 3,
+    unmuffle: 4,
   })
   expect(vi.mocked(apiSend).mock.calls.some(([, method]) => method === 'PATCH')).toBe(false)
   expect(onCreated).toHaveBeenCalledWith('p-new')

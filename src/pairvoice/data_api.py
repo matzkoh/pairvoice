@@ -674,8 +674,8 @@ class MixProfileBody(BaseModel):
     )
     unmuffle: UnmuffleAmount = Field(
         default=0.0,
-        description="こもった声を直す強さ（上の帯域を戻し、低音の膨らみを減らす）。こもった声1つを"
-        "重み1で `voices` に渡す。どれだけで澄んで聞こえるかは声による（studio は 1.5・2.5・3 から"
+        description="こもった声を直す強さ（上の帯域を戻す）。こもった声1つを"
+        "重み1で `voices` に渡す。どれだけで澄んで聞こえるかは声による（studio は 2・3・4 から"
         "前後を聴いて選ばせる）。強いほど声も変わる",
     )
 

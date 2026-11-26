@@ -12,11 +12,11 @@ import { audioFileUrl, speakOnce } from '@/lib/speak'
 import { createdStatus, invalidateProfiles, type ProfileStatus } from './queries'
 
 // どれだけ足せば澄んで聞こえるかは声によるので、前後を聴いて選んでもらう。標準は、こもった声で
-// 耳で選んだ強さ。強いほど声も変わる（上限はサーバーが 3 で止める）
+// 耳で選んだ強さ。強いほど声も変わる（上限はサーバーが 4 で止める）
 const STRENGTHS = [
-  { label: '弱め', amount: 1.5 },
-  { label: '標準', amount: 2.5 },
-  { label: '強め', amount: 3 },
+  { label: '弱め', amount: 2 },
+  { label: '標準', amount: 3 },
+  { label: '強め', amount: 4 },
 ] as const
 // こもりやすい文で聴き比べる
 const PREVIEW_TEXT = '設定ファイルを読み直したので、次の読み上げから新しい声に切り替わります。'
@@ -55,7 +55,7 @@ type Props = {
   onCreated: (id: string) => void
 }
 
-// こもった声（上の帯域が欠け、低音が膨らんだ声）の知らせと、直した声を別の声として保存する操作。
+// こもった声（上の帯域が欠けた声）の知らせと、直した声を別の声として保存する操作。
 // 元の声は書き換えない（直した声が気に入らなければ、元の声のまま使い続けられる）
 export function Unmuffle({ item, available, onPlay, onStatus, onCreated }: Props) {
   const queryClient = useQueryClient()
@@ -92,7 +92,7 @@ export function Unmuffle({ item, available, onPlay, onStatus, onCreated }: Props
       <div>
         <p className="font-medium text-destructive">こもった音です</p>
         <p className="text-xs text-muted-foreground">
-          上の帯域が欠け、低音が膨らんでいます。こもりを取った声を別の声として保存できます（元の声はそのまま残ります）。
+          上の帯域が欠けています。こもりを取った声を別の声として保存できます（元の声はそのまま残ります）。
           {!available && 'いまの合成モデルでは直せません。'}
         </p>
       </div>

@@ -20,11 +20,11 @@ curl -sf "$(pairvoice url)/openapi.json" | jq '.paths["/api/speak"], .components
 
 ## こもった声を直す
 
-声の一覧（`GET /profiles`）で `muffled` が true の声は、上の帯域が欠けて低音が膨らんだ、こもった音で読む。その声1つを重み1で `mix` に渡し、`unmuffle`（0〜3、目安は 2.5）を付けて `POST /synthesize` で試聴し、同じ値を `POST /profiles/mix` の `unmuffle` に渡すと、直した声を別の声として保存する。元の声は書き換えない。どれだけで澄んで聞こえるかは声によるので、利用者に前後を聴いて選んでもらう。強いほど声も少し変わる。
+声の一覧（`GET /profiles`）で `muffled` が true の声は、上の帯域が欠けた、こもった音で読む。その声1つを重み1で `mix` に渡し、`unmuffle`（0〜4、目安は 3）を付けて `POST /synthesize` で試聴し、同じ値を `POST /profiles/mix` の `unmuffle` に渡すと、直した声を別の声として保存する。元の声は書き換えない。どれだけで澄んで聞こえるかは声によるので、利用者に前後を聴いて選んでもらう。強いほど声も少し変わる。
 
 ```bash
 base="$(pairvoice url)/api"
-jq -n --arg id "$id" '{name: "直した声", voices: [{voice: $id, weight: 1}], unmuffle: 2.5}' |
+jq -n --arg id "$id" '{name: "直した声", voices: [{voice: $id, weight: 1}], unmuffle: 3}' |
   curl -sf -X POST "$base/profiles/mix" -H 'content-type: application/json' -d @-
 ```
 
