@@ -634,11 +634,6 @@ class MixPart(BaseModel):
         return self.audio if self.audio is not None else MixVoice(self.voice or "")
 
 
-class MixVoicePart(MixPart):
-    # 声として残すので、外挿（負の重み）はしない
-    weight: float = Field(ge=0, le=1, description="重み。足して1に直して混ぜる")
-
-
 class MixProfileBody(BaseModel):
     name: ProfileName = Field(description="声の名前")
     caption: Caption = Field(
@@ -647,7 +642,8 @@ class MixProfileBody(BaseModel):
     )
     # 2択で絞り込んだ声は、1つの音声に寄り切ることも、手持ちの声（最大 24）の多くを混ぜる
     # こともある。試聴（`/synthesize` の `mix`）と同じく数は絞らない
-    voices: list[MixVoicePart] = Field(min_length=1, description="混ぜる声")
+    # 2択で絞り込んだ声は外挿（負の重み）を含むので、試聴と同じ幅を受ける。足して1に直して混ぜる
+    voices: list[MixPart] = Field(min_length=1, description="混ぜる声")
     rng_seed: int | None = Field(
         default=None,
         description="参照音声を読ませるときの乱数の種。省くと config.toml の値",

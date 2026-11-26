@@ -915,6 +915,28 @@ def test_mix_takes_as_many_audio_parts_as_picking_uses(tmp_path):
     assert response.status_code == 201
 
 
+def test_mix_keeps_extrapolated_weights_that_picking_auditioned(tmp_path):
+    # 2択は手持ちの声の外側（負の重み）にも届く。試聴した声をそのまま残せるよう、同じ幅を受ける
+    tts = TakeWritingTTS(tmp_path)
+    _, client = build(tts=tts, data_root=tmp_path)
+    (tmp_path / "generations").mkdir()
+    weights = {"a.wav": 1.084, "b.wav": -0.035, "c.wav": -0.049}
+    for name in weights:
+        (tmp_path / "generations" / name).write_bytes(make_wav(bytes(4)))
+
+    response = client.post(
+        "/profiles/mix",
+        json={
+            "name": "外の声",
+            "voices": [{"audio": f"generations/{n}", "weight": w} for n, w in weights.items()],
+        },
+    )
+
+    assert response.status_code == 201
+    first, *_ = tts.calls
+    assert [w for _, w in first["mix_tokens"]] == list(weights.values())
+
+
 def test_voice_saved_for_another_model_reads_from_reference(tmp_path):
     # 表現は作ったモデルの空間のものなので、モデルを替えると参照音声から写して読む
     import numpy as np
