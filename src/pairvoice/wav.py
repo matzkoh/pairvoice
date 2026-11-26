@@ -89,7 +89,7 @@ _SPEECH_RANGE_DB = 30.0
 _BAND_DROP_DB = -40.0
 
 
-def high_band_drop_db(samples: np.ndarray, sample_rate: int) -> float | None:
+def _high_band_drop_db(samples: np.ndarray, sample_rate: int) -> float | None:
     """声のある所で、8〜10kHz に比べて 12.5〜16kHz が何 dB 落ちているか。声が無ければ None。
 
     16kHz まで録れないサンプルレートなら -inf（上が無い）。
@@ -113,5 +113,5 @@ def high_band_drop_db(samples: np.ndarray, sample_rate: int) -> float | None:
 
 def band_limited(samples: np.ndarray, sample_rate: int) -> bool:
     """上の帯域が切れた、こもった音か。声が無ければ切れていないとする。"""
-    drop = high_band_drop_db(samples, sample_rate)
+    drop = _high_band_drop_db(samples, sample_rate)
     return drop is not None and drop < _BAND_DROP_DB

@@ -66,6 +66,7 @@ from .profiles import (
 )
 from .reading import DICT_FILENAME, apply_dict, load_dict
 from .styles import STYLES_FILENAME, StyleStore
+from .unmuffle import unmuffle_direction
 from .wav import band_limited, concat_wavs, read_mono, write_mono
 
 DEFAULT_SAMPLE_RATE = 48000
@@ -107,12 +108,12 @@ class AudioNotFound(Exception):
 
 
 class UnmuffleUnsupported(Exception):
-    """いまの合成モデルには、こもりの向き（muffle/<モデル>.npy）が無い。"""
+    """いまの合成モデルには、こもりの向き（muffle/<モデル>.npz）が無い。"""
 
 
 def muffle_direction_path(model: str) -> Path:
-    """合成モデルごとの、こもりの向き。scripts/muffle_direction.py が作る。"""
-    return Path(__file__).parent / "muffle" / f"{model.replace('/', '--')}.npy"
+    """合成モデルごとの、こもりの向き（high と boom）。scripts/muffle_direction.py が作る。"""
+    return Path(__file__).parent / "muffle" / f"{model.replace('/', '--')}.npz"
 
 
 def resolve_data_audio(data_dir: Path, relative: str) -> Path:
@@ -461,7 +462,11 @@ class MlxAudioBackend:
         # モデルは起動中に替わらない（替えるなら再起動する）ので、1回だけ読む
         if self._muffle is None:
             path = muffle_direction_path(str(self.model))
-            self._muffle = np.load(path).astype(np.float32) if path.is_file() else False
+            if path.is_file():
+                with np.load(path) as saved:
+                    self._muffle = unmuffle_direction(saved["high"], saved["boom"])
+            else:
+                self._muffle = False
         return self._muffle if isinstance(self._muffle, np.ndarray) else None
 
     def _mix_parts(
@@ -513,7 +518,7 @@ class MlxAudioBackend:
         for (_, weight), state in zip(mix, states, strict=True):
             mixed = mixed + (weight / total) * state[:, :length]
         if unmuffle:
-            # こもりの向きを全フレームに足す（12kHz より上が欠けた声に上を戻す。多く足すほど声も変わる）
+            # こもりの向きを全フレームに足す（上の帯域を戻し、低音の膨らみを減らす。多く足すほど声も変わる）
             direction = self._muffle_direction()
             if direction is None:
                 raise UnmuffleUnsupported(str(self.model))

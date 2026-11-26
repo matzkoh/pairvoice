@@ -1,9 +1,9 @@
 /** @vitest-environment jsdom */
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query'
-import { act, cleanup, fireEvent, render, screen } from '@testing-library/react'
+import { act, cleanup, fireEvent, render, screen, waitFor } from '@testing-library/react'
 import { afterEach, expect, it, vi } from 'vitest'
 
-import { apiSend } from '@/lib/api'
+import { apiSend, isRecord } from '@/lib/api'
 import type { ProfileItem } from '@/lib/api-types'
 
 import { ProfileCard } from './ProfileCard'
@@ -245,16 +245,10 @@ it('こもっていない声には、こもりの知らせも直す操作も出�
   expect(screen.queryByRole('button', { name: 'こもりを取る' })).toBeNull()
 })
 
-it('こもった声は量を探して前後を聴かせ、元の声を残したまま別の声として保存する', async () => {
+it('こもった声は強さを選んで前後を聴き比べ、元の声を残したまま別の声として保存する', async () => {
+  let made = 0
   vi.mocked(apiSend).mockImplementation(async (path: string) => {
-    if (path.endsWith('/unmuffle')) {
-      return {
-        status: 'fixed',
-        amount: 2.5,
-        before: { audio: 'generations/before.wav', worst_db: -60 },
-        after: { audio: 'generations/after.wav', worst_db: -20 },
-      }
-    }
+    if (path === '/synthesize') return { relative_path: `generations/${++made}.wav`, duration: 3 }
     return { ...MUFFLED, id: 'p-new', name: '直した声', muffled: false }
   })
   const { onPlay, onStatus, onCreated } = renderCard(false, MUFFLED)
@@ -262,20 +256,36 @@ it('こもった声は量を探して前後を聴かせ、元の声を残した�
   await act(async () => {
     fireEvent.click(screen.getByRole('button', { name: 'こもりを取る' }))
   })
-  fireEvent.click(screen.getByRole('button', { name: '直した後を再生' }))
-  expect(String(onPlay.mock.calls[0]![0])).toContain('after.wav')
+  await waitFor(() => expect(screen.getByRole('button', { name: '後を再生' })).toBeTruthy())
+  await act(async () => {
+    fireEvent.click(screen.getByRole('radio', { name: '強め' }))
+  })
+  await waitFor(() => expect(made).toBe(3))
+  fireEvent.click(screen.getByRole('button', { name: '後を再生' }))
+  expect(String(onPlay.mock.calls[0]![0])).toContain('3.wav')
   fireEvent.change(screen.getByLabelText('直した声の名前'), { target: { value: '直した声' } })
   await act(async () => {
     fireEvent.click(screen.getByRole('button', { name: '別の声として保存' }))
   })
 
-  expect(apiSend).toHaveBeenCalledWith(`/profiles/${MUFFLED.id}/unmuffle`, 'POST')
-  // 元の声1つを重み1で、探した量だけ直す。元の声は書き換えない
+  // 前（足さない）と、選んだ強さを、同じ文・同じ種でこの声1つを混ぜて読ませる
+  const previews = vi
+    .mocked(apiSend)
+    .mock.calls.filter(([path]) => path === '/synthesize')
+    .map(([, , body]) => {
+      if (!isRecord(body)) throw new Error('unexpected body')
+      return body
+    })
+  expect(previews.map((body) => body.unmuffle)).toEqual([0, 2.5, 3])
+  expect(
+    new Set(previews.map((body) => JSON.stringify([body.mix, body.sampler, body.text]))).size,
+  ).toBe(1)
+  // 元の声は書き換えず、選んだ強さで別の声を作る
   expect(apiSend).toHaveBeenCalledWith('/profiles/mix', 'POST', {
     name: '直した声',
     caption: MUFFLED.caption,
     voices: [{ voice: MUFFLED.id, weight: 1 }],
-    unmuffle: 2.5,
+    unmuffle: 3,
   })
   expect(vi.mocked(apiSend).mock.calls.some(([, method]) => method === 'PATCH')).toBe(false)
   expect(onCreated).toHaveBeenCalledWith('p-new')
@@ -283,23 +293,6 @@ it('こもった声は量を探して前後を聴かせ、元の声を残した�
     message: '「直した声」を保存しました',
     isError: false,
   })
-})
-
-it('直せなかったときと、直す必要がなかったときは、そう伝えて保存させない', async () => {
-  vi.mocked(apiSend).mockResolvedValueOnce({
-    status: 'unfixable',
-    amount: null,
-    before: { audio: 'generations/before.wav', worst_db: -70 },
-    after: null,
-  })
-  renderCard(false, MUFFLED)
-
-  await act(async () => {
-    fireEvent.click(screen.getByRole('button', { name: 'こもりを取る' }))
-  })
-
-  expect(screen.getByText(/上限でも、こもりが取れませんでした/)).toBeTruthy()
-  expect(screen.queryByRole('button', { name: '別の声として保存' })).toBeNull()
 })
 
 it('いまの合成モデルで直せないときは、知らせだけ出してボタンを出さない', () => {

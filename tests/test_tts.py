@@ -22,6 +22,7 @@ from pairvoice.tts import (
     MlxAudioBackend,
     UnmuffleUnsupported,
 )
+from pairvoice.unmuffle import BOOM_RATIO
 
 
 class FakeResult:
@@ -1027,14 +1028,18 @@ def test_unmuffle_adds_the_muffle_direction_to_every_frame(no_ref_config, tmp_pa
     backend = make_backend(no_ref_config, MixModel(None), tmp_path, monkeypatch)
     _mix_material(tmp_path, "a")
     monkeypatch.setattr(backend, "_reference_state", lambda path: mx.zeros((1, 3, 2)))
-    direction = tmp_path / "muffle.npy"
-    np.save(direction, np.array([1.0, -2.0], np.float32))
+    direction = tmp_path / "muffle.npz"
+    np.savez(
+        direction, high=np.array([1.0, -2.0], np.float32), boom=np.array([0.5, 0.0], np.float32)
+    )
     monkeypatch.setattr("pairvoice.tts.muffle_direction_path", lambda model: direction)
 
     tokens = backend.mix_tokens([(MixVoice("a"), 1.0)], unmuffle=1.5)
 
     assert backend.can_unmuffle
-    np.testing.assert_allclose(tokens, np.tile([1.5, -3.0], (3, 1)))
+    # 上の帯域を戻す向きを足し、低音の膨らみの向きを BOOM_RATIO 倍だけ引く
+    expected = 1.5 * (np.array([1.0, -2.0]) - BOOM_RATIO * np.array([0.5, 0.0]))
+    np.testing.assert_allclose(tokens, np.tile(expected, (3, 1)), rtol=1e-6)
 
 
 def test_unmuffle_refuses_model_without_direction(no_ref_config, tmp_path, monkeypatch):
@@ -1043,7 +1048,7 @@ def test_unmuffle_refuses_model_without_direction(no_ref_config, tmp_path, monke
     backend = make_backend(no_ref_config, MixModel(None), tmp_path, monkeypatch)
     _mix_material(tmp_path, "a")
     monkeypatch.setattr(backend, "_reference_state", lambda path: mx.zeros((1, 3, 2)))
-    monkeypatch.setattr("pairvoice.tts.muffle_direction_path", lambda model: tmp_path / "無い.npy")
+    monkeypatch.setattr("pairvoice.tts.muffle_direction_path", lambda model: tmp_path / "無い.npz")
 
     assert not backend.can_unmuffle
     with pytest.raises(UnmuffleUnsupported):

@@ -117,16 +117,6 @@ export type ProfilesResponse = {
   unmuffle_available: boolean
 }
 
-// POST /profiles/{id}/unmuffle の応答。直す量を探した結果
-export type UnmuffleTake = { audio: string; worst_db: number | null }
-export type UnmuffleResponse = {
-  status: 'not_needed' | 'fixed' | 'unfixable'
-  // POST /profiles/mix の unmuffle に渡す量。fixed のときだけ
-  amount: number | null
-  before: UnmuffleTake
-  after: UnmuffleTake | null
-}
-
 // POST /profiles/fold・GET /profiles/fold/{job_id} の応答。後ろで走る畳み込みの仕事
 export type FoldStage =
   | 'upload'

@@ -9,10 +9,9 @@ from pathlib import Path
 import numpy as np
 import pytest
 
-from pairvoice.data_api import MASTER_STEPS, REFERENCE_TEXTS, TAKE_GAP_SECONDS, UNMUFFLE_SEED
+from pairvoice.data_api import MASTER_STEPS, REFERENCE_TEXTS, TAKE_GAP_SECONDS
 from pairvoice.profiles import MixVoice
 from pairvoice.tts import ANCHOR_TEXT, SpeechResult, resolve_data_audio
-from pairvoice.unmuffle import AMOUNTS, CALIBRATION_TEXTS
 from pairvoice.wav import pcm_wav, write_mono
 from tests.fakes import FakeCurate
 from tests.test_curate import heads, needs_ffmpeg, synth
@@ -1086,62 +1085,11 @@ def test_default_voice_made_from_caption_reports_muffled_reference(tmp_path):
     assert listed["muffled"] is True
 
 
-def test_unmuffle_finds_the_smallest_amount_that_clears_every_calibration_text(tmp_path):
+def test_profiles_report_whether_muffled_voices_can_be_fixed(tmp_path):
     tts, client = band_client(tmp_path, fixed_at=None)
-    profile = made_voice(client)
-    tts.fixed_at = 1.5
-    tts.calls.clear()
-
-    response = client.post(f"/profiles/{profile['id']}/unmuffle")
-
-    assert response.status_code == 200
-    body = response.json()
-    assert (body["status"], body["amount"]) == ("fixed", 1.5)
-    assert body["before"]["worst_db"] < -40 <= -30 <= body["after"]["worst_db"]
-    # 届かない量は1文目で打ち切り、届いた量だけ校正の文を全部読ませる
-    assert unmuffle_amounts(tts) == [0.0, 0.5, 1.0, 1.5, 1.5, 1.5]
-    reads = [call for call in tts.calls if "text" in call]
-    assert [call["text"] for call in reads[-3:]] == list(CALIBRATION_TEXTS)
-    assert all(call["mix"] == [(MixVoice(profile["id"]), 1.0)] for call in reads)
-    assert {call["sampler"]["rng_seed"] for call in reads} == {UNMUFFLE_SEED}
-    # 前後の試聴は、それぞれの量で読ませた校正の1文目
-    assert body["before"]["audio"] == "generations/band-1.wav"
-    assert body["after"]["audio"] == "generations/band-4.wav"
-
-
-def test_unmuffle_reports_voice_that_is_not_muffled(tmp_path):
-    tts, client = band_client(tmp_path, fixed_at=0.0)
-    profile = made_voice(client, "澄んだ声")
-    tts.calls.clear()
-
-    body = client.post(f"/profiles/{profile['id']}/unmuffle").json()
-
-    assert (body["status"], body["amount"], body["after"]) == ("not_needed", None, None)
-    assert unmuffle_amounts(tts) == [0.0] * len(CALIBRATION_TEXTS)
-
-
-def test_unmuffle_gives_up_at_the_largest_amount(tmp_path):
-    tts, client = band_client(tmp_path, fixed_at=None)
-    profile = made_voice(client)
-    tts.calls.clear()
-
-    body = client.post(f"/profiles/{profile['id']}/unmuffle").json()
-
-    assert (body["status"], body["amount"], body["after"]) == ("unfixable", None, None)
-    assert unmuffle_amounts(tts) == list(AMOUNTS)
-
-
-def test_unmuffle_refuses_model_without_direction(tmp_path):
-    tts, client = band_client(tmp_path, fixed_at=None)
-    profile = made_voice(client)
     tts.can_unmuffle = False
 
-    response = client.post(f"/profiles/{profile['id']}/unmuffle")
-
-    assert response.status_code == 409
-    assert response.json()["error"] == "unmuffle_unsupported"
     assert client.get("/profiles").json()["unmuffle_available"] is False
-    assert client.post("/profiles/p-missing/unmuffle").status_code == 404
 
 
 def test_mix_with_unmuffle_saves_fixed_voice_without_claiming_the_original_recipe(tmp_path):

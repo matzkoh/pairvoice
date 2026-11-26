@@ -44,15 +44,13 @@ from .profiles import (
 )
 from .prompt import SummaryPrompt
 from .styles import STYLES_FILENAME, StyleStore
-from .tts import ANCHOR_TEXT, AudioNotFound, SpeechResult, UnmuffleUnsupported, resolve_data_audio
-from .unmuffle import AMOUNTS as UNMUFFLE_AMOUNTS
-from .unmuffle import CALIBRATION_TEXTS, UnmuffleAmount, is_clear
+from .tts import ANCHOR_TEXT, AudioNotFound, SpeechResult, resolve_data_audio
+from .unmuffle import UnmuffleAmount
 from .wav import (
     WavFormatError,
     band_limited,
     concat_wavs,
     has_wav_header,
-    high_band_drop_db,
     mono_wav,
     read_mono,
     write_mono,
@@ -102,8 +100,6 @@ MASTER_CFG_MIN_T = 0.5
 # 参照音声を合成して作る声（最初の読み上げで caption から作る既定の声 auto も）。参照音声の
 # こもりが、そのまま読み上げのこもりを表す
 SYNTHESIZED_SOURCES = ("design", "auto", MIX_SOURCE)
-# こもりを直す量を探すときの乱数の種。量ごとに同じ種で読ませ、量の違いだけを比べる
-UNMUFFLE_SEED = 1
 # 伸ばすときにテイクの声で読ませる文。Irodori-TTS は同じ話者の短い発話を合わせて 30 秒ほどの
 # 参照音声を勧めるので、テイクにこの3つ（各 6〜7 秒）を足してつなぐ
 # - 読み上げるのはエージェントの作業の要約なので、落ち着いた説明調を軸にし、問いかけと
@@ -379,7 +375,7 @@ class ProfileItem(BaseModel):
         default=None,
         description="参照音声が 12kHz より上の欠けた、こもった音か。合成した参照音声を持つ声"
         "（`design`・`auto`・`mix`）だけ測り、ほかは null（録音の帯域は合成した声のこもりに移らない）。"
-        "`POST /profiles/{id}/unmuffle` で直せる",
+        "その声1つを重み1で `POST /profiles/mix` に渡し、`unmuffle` を付けると直した声を作れる",
     )
 
 
@@ -602,25 +598,6 @@ class ProfilesResponse(BaseModel):
     )
 
 
-class UnmuffleTake(BaseModel):
-    audio: str = Field(description="校正の1文目を読ませた wav（データの置き場所からの相対パス）")
-    worst_db: float | None = Field(
-        description="校正の文のうち、いちばんこもった文の落ち幅（8〜10kHz から 12.5〜16kHz、dB）"
-    )
-
-
-class UnmuffleResponse(BaseModel):
-    status: Literal["not_needed", "fixed", "unfixable"] = Field(
-        description="`not_needed` は直さなくてもこもっていない。`fixed` は `amount` で直る。"
-        "`unfixable` は声が変わりすぎない量の上限でも直らない"
-    )
-    amount: float | None = Field(
-        description="`POST /profiles/mix` の `unmuffle` に渡す量。`fixed` のときだけ"
-    )
-    before: UnmuffleTake = Field(description="直す前")
-    after: UnmuffleTake | None = Field(description="`amount` で直した後。`fixed` のときだけ")
-
-
 class CreateProfileBody(BaseModel):
     name: ProfileName = Field(description="声の名前")
     caption: Caption = Field(default="", description="話し方の指示")
@@ -697,8 +674,9 @@ class MixProfileBody(BaseModel):
     )
     unmuffle: UnmuffleAmount = Field(
         default=0.0,
-        description="混ぜた声に足すこもりの向きの量。こもった声を直す量は "
-        "`POST /profiles/{id}/unmuffle` が探す（その声1つを重み1で `voices` に渡す）",
+        description="こもった声を直す強さ（上の帯域を戻し、低音の膨らみを減らす）。こもった声1つを"
+        "重み1で `voices` に渡す。どれだけで澄んで聞こえるかは声による（studio は 1.5・2.5・3 から"
+        "前後を聴いて選ばせる）。強いほど声も変わる",
     )
 
     @model_validator(mode="after")
@@ -1071,64 +1049,6 @@ def data_router(
             if voices_only
             else [],
         )
-
-    @router.post(
-        "/profiles/{profile_id}/unmuffle",
-        response_model=UnmuffleResponse,
-        summary="こもった声を直す量を探す",
-        tags=["声"],
-        responses={
-            **_PROFILE_NOT_FOUND,
-            400: _error("`invalid_profile`（ランダムの声・混ぜられない声）"),
-            409: _error("`unmuffle_unsupported`（いまの合成モデルには、こもりの向きが無い）"),
-            503: _error("`model_load_failed` など（モデルを使えない）"),
-        },
-    )
-    async def find_unmuffle(profile_id: str):
-        """こもりが取れる、いちばん少ない量を探す（多く足すほど声も変わる）。声は作らない。
-
-        こもりの向きを少ない量から足して校正の文（3つ）を読ませ、いちばんこもった文が目標を
-        越えた量で止める。量を `POST /profiles/mix` の `unmuffle` に、この声を重み1で `voices`
-        に渡すと、直した声を別の声として保存する。合成は1件ずつ列に並べる（その合間に
-        読み上げが割り込める）ので、数十秒かかる。
-        """
-        profile = profiles.find(profile_id)
-        if profile is None:
-            raise ProfileNotFound(profile_id)
-        if not can_unmuffle():
-            raise UnmuffleUnsupported(tts_model())
-        mix: list[tuple[str | MixVoice, float]] = [(MixVoice(profile.id), 1.0)]
-
-        async def calibrate(amount: float) -> UnmuffleTake:
-            """amount だけ足して校正の文を読ませる。届かない文が出たら残りは読ませない。"""
-            first: str | None = None
-            worst: float | None = None
-            for text in CALIBRATION_TEXTS:
-                result = await synthesize(
-                    text,
-                    caption=profile.caption,
-                    sampler={"rng_seed": UNMUFFLE_SEED},
-                    mix=mix,
-                    unmuffle=amount,
-                )
-                first = first or result.relative_path
-                drop = await asyncio.to_thread(
-                    lambda path=result.path: high_band_drop_db(*read_mono(path))
-                )
-                if drop is not None:
-                    worst = drop if worst is None else min(worst, drop)
-                if not is_clear(worst):
-                    break
-            return UnmuffleTake(audio=first or "", worst_db=worst)
-
-        before = await calibrate(0.0)
-        if is_clear(before.worst_db):
-            return UnmuffleResponse(status="not_needed", amount=None, before=before, after=None)
-        for amount in UNMUFFLE_AMOUNTS[1:]:
-            after = await calibrate(amount)
-            if is_clear(after.worst_db):
-                return UnmuffleResponse(status="fixed", amount=amount, before=before, after=after)
-        return UnmuffleResponse(status="unfixable", amount=None, before=before, after=None)
 
     @router.post(
         "/profiles/upload",

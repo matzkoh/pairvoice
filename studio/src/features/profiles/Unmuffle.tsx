@@ -1,4 +1,4 @@
-import { useQueryClient } from '@tanstack/react-query'
+import { queryOptions, useQuery, useQueryClient } from '@tanstack/react-query'
 import { LoaderCircle } from 'lucide-react'
 import { useState, useTransition } from 'react'
 
@@ -6,10 +6,45 @@ import { PlayButton } from '@/components/PlayButton'
 import { Button } from '@/components/ui/button'
 import { Input } from '@/components/ui/input'
 import { apiSend, toErrorMessage } from '@/lib/api'
-import type { ProfileItem, UnmuffleResponse } from '@/lib/api-types'
-import { audioFileUrl } from '@/lib/speak'
+import type { ProfileItem } from '@/lib/api-types'
+import { audioFileUrl, speakOnce } from '@/lib/speak'
 
 import { createdStatus, invalidateProfiles, type ProfileStatus } from './queries'
+
+// どれだけ足せば澄んで聞こえるかは声によるので、前後を聴いて選んでもらう。標準は、こもった声で
+// 耳で選んだ強さ。強いほど声も変わる（上限はサーバーが 3 で止める）
+const STRENGTHS = [
+  { label: '弱め', amount: 1.5 },
+  { label: '標準', amount: 2.5 },
+  { label: '強め', amount: 3 },
+] as const
+// こもりやすい文で聴き比べる
+const PREVIEW_TEXT = '設定ファイルを読み直したので、次の読み上げから新しい声に切り替わります。'
+const PREVIEW_SEED = 1
+
+// 強さごとの試聴。前後で同じ文・同じ種にして、強さの違いだけを聴かせる
+function previewQuery(item: ProfileItem, amount: number, enabled: boolean) {
+  return queryOptions({
+    queryKey: ['unmuffle', item.id, amount] as const,
+    // 強さを切り替えた・閉じたら、作りかけの試聴は打ち切る（Runner に溜めない）
+    queryFn: async ({ signal }) =>
+      (
+        await speakOnce(
+          {
+            text: PREVIEW_TEXT,
+            caption: item.caption,
+            sampler: { rng_seed: PREVIEW_SEED },
+            mix: [{ voice: item.id, weight: 1 }],
+            unmuffle: amount,
+          },
+          signal,
+        )
+      ).relative_path,
+    staleTime: Infinity,
+    retry: false,
+    enabled,
+  })
+}
 
 type Props = {
   item: ProfileItem
@@ -20,33 +55,22 @@ type Props = {
   onCreated: (id: string) => void
 }
 
-// こもった声（12kHz より上が欠けた声）の知らせと、直した声を別の声として保存する操作。
+// こもった声（上の帯域が欠け、低音が膨らんだ声）の知らせと、直した声を別の声として保存する操作。
 // 元の声は書き換えない（直した声が気に入らなければ、元の声のまま使い続けられる）
 export function Unmuffle({ item, available, onPlay, onStatus, onCreated }: Props) {
   const queryClient = useQueryClient()
-  const [found, setFound] = useState<UnmuffleResponse | null>(null)
+  const [open, setOpen] = useState(false)
+  const [amount, setAmount] = useState<number>(STRENGTHS[1].amount)
   const [name, setName] = useState(`${item.name}（クリア）`)
-  const [busy, startWork] = useTransition()
-  const path = `/profiles/${encodeURIComponent(item.id)}`
+  const [saving, startSave] = useTransition()
+  // 前を作り終えてから後を作る（同時に頼むと Runner を塞ぎ、フックの読み上げが待たされる）
+  const before = useQuery(previewQuery(item, 0, open))
+  const after = useQuery(previewQuery(item, amount, open && before.isSuccess))
+  const failed = before.error ?? after.error
 
-  function find() {
-    startWork(async () => {
-      try {
-        setFound(await apiSend<UnmuffleResponse>(`${path}/unmuffle`, 'POST'))
-      } catch (err: unknown) {
-        onStatus({ message: `直す量を探せませんでした: ${toErrorMessage(err)}`, isError: true })
-      }
-    })
-  }
-
-  const fixed =
-    found?.status === 'fixed' && found.after !== null && found.amount !== null
-      ? { before: found.before, after: found.after, amount: found.amount }
-      : null
-
-  function save(amount: number) {
+  function save() {
     if (name.trim() === '') return
-    startWork(async () => {
+    startSave(async () => {
       try {
         const created = await apiSend<ProfileItem>('/profiles/mix', 'POST', {
           name: name.trim(),
@@ -68,38 +92,40 @@ export function Unmuffle({ item, available, onPlay, onStatus, onCreated }: Props
       <div>
         <p className="font-medium text-destructive">こもった音です</p>
         <p className="text-xs text-muted-foreground">
-          12kHz
-          より上が欠けています。こもりを取った声を別の声として保存できます（元の声はそのまま残ります）。
+          上の帯域が欠け、低音が膨らんでいます。こもりを取った声を別の声として保存できます（元の声はそのまま残ります）。
           {!available && 'いまの合成モデルでは直せません。'}
         </p>
       </div>
-      {busy ? (
-        <p role="status" className="flex items-center gap-2 text-xs text-muted-foreground">
-          <LoaderCircle className="size-3.5 animate-spin" />
-          {fixed ? '保存しています' : '直す量を探しています（数十秒）'}
-        </p>
-      ) : (
-        <Found found={found} available={available} onFind={find} />
+      {available && !open && (
+        <Button variant="outline" size="sm" onClick={() => setOpen(true)}>
+          こもりを取る
+        </Button>
       )}
-      {!busy && fixed && (
+      {open && (
         <div className="space-y-3 rounded-lg border p-3">
-          <div className="flex items-center gap-4">
-            <span className="flex items-center gap-2">
-              <PlayButton
-                aria-label="直す前を再生"
-                onClick={() => onPlay(audioFileUrl(fixed.before.audio))}
-              />
-              前
-            </span>
-            <span className="flex items-center gap-2">
-              <PlayButton
-                voice={item.id}
-                aria-label="直した後を再生"
-                onClick={() => onPlay(audioFileUrl(fixed.after.audio))}
-              />
-              後
-            </span>
+          <div role="radiogroup" aria-label="強さ" className="flex gap-1">
+            {STRENGTHS.map((strength) => (
+              <Button
+                key={strength.label}
+                role="radio"
+                aria-checked={amount === strength.amount}
+                variant={amount === strength.amount ? 'default' : 'outline'}
+                size="sm"
+                onClick={() => setAmount(strength.amount)}
+              >
+                {strength.label}
+              </Button>
+            ))}
           </div>
+          <div className="flex items-center gap-4">
+            <Take label="前" path={before.data} onPlay={onPlay} />
+            <Take label="後" path={after.data} voice={item.id} onPlay={onPlay} />
+          </div>
+          {failed && (
+            <p className="text-xs text-destructive">
+              試聴を作れませんでした: {toErrorMessage(failed)}
+            </p>
+          )}
           <div className="flex flex-wrap items-center gap-2">
             <Input
               aria-label="直した声の名前"
@@ -107,10 +133,11 @@ export function Unmuffle({ item, available, onPlay, onStatus, onCreated }: Props
               value={name}
               onChange={(e) => setName(e.target.value)}
             />
-            <Button variant="ghost" size="sm" onClick={() => setFound(null)}>
+            <Button variant="ghost" size="sm" disabled={saving} onClick={() => setOpen(false)}>
               やめる
             </Button>
-            <Button size="sm" disabled={name.trim() === ''} onClick={() => save(fixed.amount)}>
+            <Button size="sm" disabled={saving || name.trim() === ''} onClick={save}>
+              {saving && <LoaderCircle className="size-3.5 animate-spin" />}
               別の声として保存
             </Button>
           </div>
@@ -120,36 +147,34 @@ export function Unmuffle({ item, available, onPlay, onStatus, onCreated }: Props
   )
 }
 
-// 探す前のボタンと、直せなかった・直す必要がなかったときの知らせ
-function Found({
-  found,
-  available,
-  onFind,
+// 試聴の1本。作っている間は回る印を出す
+function Take({
+  label,
+  path,
+  voice,
+  onPlay,
 }: {
-  found: UnmuffleResponse | null
-  available: boolean
-  onFind: () => void
+  label: string
+  path: string | undefined
+  voice?: string
+  onPlay: (url: string) => void
 }) {
-  if (found === null) {
-    return available ? (
-      <Button variant="outline" size="sm" onClick={onFind}>
-        こもりを取る
-      </Button>
-    ) : null
-  }
-  if (found.status === 'not_needed') {
-    return (
-      <p className="text-xs text-muted-foreground">
-        読ませてみたところ、こもっていませんでした。直す必要はありません。
-      </p>
-    )
-  }
-  if (found.status === 'unfixable') {
-    return (
-      <p className="text-xs text-muted-foreground">
-        声が変わりすぎない量の上限でも、こもりが取れませんでした。別の作り方で作り直してください。
-      </p>
-    )
-  }
-  return null
+  return (
+    <span className="flex items-center gap-2">
+      {path === undefined ? (
+        <LoaderCircle
+          role="status"
+          aria-label={`${label}を作っています`}
+          className="size-4 animate-spin text-muted-foreground"
+        />
+      ) : (
+        <PlayButton
+          voice={voice}
+          aria-label={`${label}を再生`}
+          onClick={() => onPlay(audioFileUrl(path))}
+        />
+      )}
+      {label}
+    </span>
+  )
 }

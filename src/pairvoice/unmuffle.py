@@ -1,35 +1,28 @@
-"""こもった声を直す量の決め方。
+"""こもった声を直す強さ。
 
-caption だけで作った声や、それを混ぜた声は、12kHz より上が欠けたこもった音になることがある。
-こもりの向き（muffle/<モデル>.npy）を話者の表現に足すと、同じ人の声のまま上が戻る。足す量が
-多いほど声も変わる（独立した話者照合で、量 3 で同じ声を読み直したときの揺れの下限に達した）ので、
-少ない量から試し、校正の文のうちいちばんこもった文が目標を越えた最初の量で止める。
-量と効きは単調でない（多く足した方がこもる逆転がある）ので、二分探索でなく昇順に試す。
+caption だけで作った声や、それを混ぜた声は、10〜12kHz より上が欠け、低音が膨らんだ、こもった音に
+なることがある。上の帯域を戻す向き（high）を足し、低音の膨らみの向き（boom）を引くと、同じ人の
+声のまま澄む（向きは muffle/<モデル>.npz。scripts/muffle_direction.py が作る）。
+
+どれだけ足せば澄んで聞こえるかは、測った帯域では決められなかった（もともと高音の少ない声ほど
+届かないと出て、10kHz から切れた声は直ったと出た）。強さは利用者が前後を聴いて選ぶ。
 """
 
 from __future__ import annotations
 
 from typing import Annotated
 
+import numpy as np
 from pydantic import Field
 
-# 0 は「足さない」。上限 3.0 を越えると声が変わるので、そこまでで直らなければ直さない
-AMOUNTS = (0.0, 0.5, 1.0, 1.5, 2.0, 2.5, 3.0)
-# 校正の文のうち、いちばんこもった文の落ち幅（8〜10kHz から 12.5〜16kHz）の目標。こもりの
-# 判定（-40dB）より上に取るのは、校正していない文にも余裕を残すため
-TARGET_DB = -30.0
-# こもりやすい文を含める。参照音声を作る文（REFERENCE_TEXTS）とは別にする
-CALIBRATION_TEXTS = (
-    "設定ファイルを読み直したので、次の読み上げから新しい声に切り替わります。",
-    "ビルドが失敗しています。依存関係のバージョンが合っていないようです。確認してもいいですか？",
-    "設定の変更は三つです。タイムアウトを伸ばし、キャッシュを消し、ポートを変えました。",
-)
+# high を 1 足すごとに boom を引く量。耳で選んだ組み合わせ（high 2.5、boom 3.0）の比
+BOOM_RATIO = 1.2
+# 強さの上限。これより足すと声が変わり、読み崩れも出始める
+MAX_AMOUNT = 3.0
 
-# API が受ける量。上限を越えると声が変わるので受けない
-UnmuffleAmount = Annotated[float, Field(ge=0, le=AMOUNTS[-1])]
+UnmuffleAmount = Annotated[float, Field(ge=0, le=MAX_AMOUNT)]
 
 
-def is_clear(worst_db: float | None) -> bool:
-    """校正の文のうち、いちばんこもった文の落ち幅が目標に届いたか。声が無くて測れない（None）
-    ときは届いたとする（こもりの印も出ない）。"""
-    return worst_db is None or worst_db >= TARGET_DB
+def unmuffle_direction(high: np.ndarray, boom: np.ndarray) -> np.ndarray:
+    """強さ 1 あたりに話者の表現へ足す向き。"""
+    return (high - BOOM_RATIO * boom).astype(np.float32)

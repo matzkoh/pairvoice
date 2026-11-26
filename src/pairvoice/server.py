@@ -295,7 +295,7 @@ class SynthesizeRequest(SynthesisRequest):
     )
     unmuffle: UnmuffleAmount = Field(
         default=0.0,
-        description="`mix` に足すこもりの向きの量。こもった声を直す量は `POST /profiles/{id}/unmuffle` が探す",
+        description="こもった声を直す強さ（`mix` に足す、こもりの向きの量）。試聴して `POST /profiles/mix` の `unmuffle` に同じ値を渡すと、その声を保存する",
     )
 
     @model_validator(mode="after")
