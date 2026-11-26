@@ -128,9 +128,10 @@ type SearchProps = {
   onCreated: (id: string) => void
 }
 
-// caption だけで作る声は、seed しだいで上の帯域が切れた、こもった音になる（ほぼ4割）。
-// 混ぜた声にもそのまま移るので、サーバーが切れていると測った声は捨てて作り直す
-export const VOICE_ATTEMPTS = 5
+// caption だけで作る声は、seed しだいで上の帯域が切れた、こもった音になる。混ぜた声にも
+// そのまま移るので、サーバーが切れていると測った声は捨てて作り直す。切れる割合は読ませる文と
+// caption で 0〜9 割と大きく変わる（低い声で高い）ので、回数を多めに取り、尽きたら文を変えてもらう
+export const VOICE_ATTEMPTS = 10
 
 // 手持ちの声を1本作って測る。caption と seed は作り直すたびに引き直す
 async function makeVoice(
@@ -154,7 +155,9 @@ async function makeVoice(
     )
     return voiceOf(take.relative_path, vector)
   }
-  throw new Error(`こもった音でない声を ${VOICE_ATTEMPTS} 回作っても得られませんでした`)
+  throw new Error(
+    `${VOICE_ATTEMPTS} 回作ってもこもった音の声しかできませんでした。読ませる文を変えると作れることがあります`,
+  )
 }
 
 // 事前の質問で答えた軸はそろえ、答えていない軸をばらばらにした caption の声
