@@ -107,7 +107,7 @@ export type ProfileItem = {
   reads_from_reference: boolean
   // mix の声の作り方（もとの声の ID と、足して1の重み）。ほかの声は空
   mix: { id: string; weight: number }[]
-  // 参照音声が 12kHz より上の欠けた、こもった音か。合成した参照音声を持つ声（design・mix）だけ。ほかは null
+  // 参照音声が 12kHz より上の欠けた、こもった音か。合成した参照音声を持つ声（design・auto・mix）だけ。ほかは null
   muffled: boolean | null
 }
 export type ProfilesResponse = {

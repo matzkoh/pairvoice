@@ -147,7 +147,7 @@ function Found({
   if (found.status === 'unfixable') {
     return (
       <p className="text-xs text-muted-foreground">
-        声を変えずに足せる量の上限でも、こもりが取れませんでした。別の作り方で作り直してください。
+        声が変わりすぎない量の上限でも、こもりが取れませんでした。別の作り方で作り直してください。
       </p>
     )
   }

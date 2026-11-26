@@ -513,7 +513,7 @@ class MlxAudioBackend:
         for (_, weight), state in zip(mix, states, strict=True):
             mixed = mixed + (weight / total) * state[:, :length]
         if unmuffle:
-            # こもりの向きを全フレームに足す（12kHz より上が欠けた声に、声を保ったまま上を戻す）
+            # こもりの向きを全フレームに足す（12kHz より上が欠けた声に上を戻す。多く足すほど声も変わる）
             direction = self._muffle_direction()
             if direction is None:
                 raise UnmuffleUnsupported(str(self.model))

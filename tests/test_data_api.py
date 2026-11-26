@@ -1067,6 +1067,25 @@ def test_synthesized_voices_report_muffled_reference_and_recorded_ones_do_not(tm
     assert client.get("/profiles").json()["unmuffle_available"] is True
 
 
+def test_default_voice_made_from_caption_reports_muffled_reference(tmp_path):
+    from pairvoice.profiles import ProfileStore
+
+    _, client = band_client(tmp_path, fixed_at=None)
+    # 最初の読み上げで caption から合成して作る既定の声と同じ持ち方
+    ProfileStore(tmp_path / "profiles").create(
+        name="既定の声",
+        caption="",
+        source="auto",
+        write_reference=lambda path: path.write_bytes(
+            pcm_wav(voice(6, 12000, seconds=0.5) * np.hanning(24000), 48000)
+        ),
+    )
+
+    (listed,) = [p for p in client.get("/profiles").json()["items"] if p["name"] == "既定の声"]
+
+    assert listed["muffled"] is True
+
+
 def test_unmuffle_finds_the_smallest_amount_that_clears_every_calibration_text(tmp_path):
     tts, client = band_client(tmp_path, fixed_at=None)
     profile = made_voice(client)

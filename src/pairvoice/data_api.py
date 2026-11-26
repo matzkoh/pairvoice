@@ -99,8 +99,9 @@ TAKE_GAP_SECONDS = 0.3
 # 伸ばすときの合成の段数（読み上げの既定は 10）。参照音声は一度しか作らないので丁寧に作る
 MASTER_STEPS = 80
 MASTER_CFG_MIN_T = 0.5
-# 参照音声を合成して作る声。参照音声のこもりが、そのまま読み上げのこもりを表す
-SYNTHESIZED_SOURCES = ("design", MIX_SOURCE)
+# 参照音声を合成して作る声（最初の読み上げで caption から作る既定の声 auto も）。参照音声の
+# こもりが、そのまま読み上げのこもりを表す
+SYNTHESIZED_SOURCES = ("design", "auto", MIX_SOURCE)
 # こもりを直す量を探すときの乱数の種。量ごとに同じ種で読ませ、量の違いだけを比べる
 UNMUFFLE_SEED = 1
 # 伸ばすときにテイクの声で読ませる文。Irodori-TTS は同じ話者の短い発話を合わせて 30 秒ほどの
@@ -377,7 +378,7 @@ class ProfileItem(BaseModel):
     muffled: bool | None = Field(
         default=None,
         description="参照音声が 12kHz より上の欠けた、こもった音か。合成した参照音声を持つ声"
-        "（`design`・`mix`）だけ測り、ほかは null（録音の帯域は合成した声のこもりに移らない）。"
+        "（`design`・`auto`・`mix`）だけ測り、ほかは null（録音の帯域は合成した声のこもりに移らない）。"
         "`POST /profiles/{id}/unmuffle` で直せる",
     )
 
@@ -611,7 +612,7 @@ class UnmuffleTake(BaseModel):
 class UnmuffleResponse(BaseModel):
     status: Literal["not_needed", "fixed", "unfixable"] = Field(
         description="`not_needed` は直さなくてもこもっていない。`fixed` は `amount` で直る。"
-        "`unfixable` は声を変えずに足せる量の上限でも直らない"
+        "`unfixable` は声が変わりすぎない量の上限でも直らない"
     )
     amount: float | None = Field(
         description="`POST /profiles/mix` の `unmuffle` に渡す量。`fixed` のときだけ"
@@ -1084,7 +1085,7 @@ def data_router(
         },
     )
     async def find_unmuffle(profile_id: str):
-        """声を保ったままこもりが取れる、いちばん少ない量を探す。声は作らない。
+        """こもりが取れる、いちばん少ない量を探す（多く足すほど声も変わる）。声は作らない。
 
         こもりの向きを少ない量から足して校正の文（3つ）を読ませ、いちばんこもった文が目標を
         越えた量で止める。量を `POST /profiles/mix` の `unmuffle` に、この声を重み1で `voices`

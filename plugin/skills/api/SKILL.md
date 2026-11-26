@@ -20,7 +20,7 @@ curl -sf "$(pairvoice url)/openapi.json" | jq '.paths["/api/speak"], .components
 
 ## こもった声を直す
 
-声の一覧（`GET /profiles`）で `muffled` が true の声は、12kHz より上が欠けたこもった音で読む。`POST /profiles/{id}/unmuffle` で直す量を探し（数十秒）、`status` が `fixed` なら、その声1つを重み1で `voices` に、`amount` を `unmuffle` に渡して `POST /profiles/mix` で別の声として保存する。元の声は書き換えない。`unfixable` は声を変えずに直せる量の上限でも直らない。
+声の一覧（`GET /profiles`）で `muffled` が true の声は、12kHz より上が欠けたこもった音で読む。`POST /profiles/{id}/unmuffle` で直す量を探し（数十秒）、`status` が `fixed` なら、その声1つを重み1で `voices` に、`amount` を `unmuffle` に渡して `POST /profiles/mix` で別の声として保存する。元の声は書き換えない。直した声は同じ人の声のまま少し変わる。`unfixable` は声が変わりすぎない量の上限でも直らない。
 
 ```bash
 base="$(pairvoice url)/api"
