@@ -57,7 +57,7 @@ export function ProfilesPage() {
         header={
           <PageHeader
             title="プロファイル"
-            description="プロファイルは参照音声（声そのもの）と caption（話し方の指示）、要約の口調の組です。試聴しながら caption を直せます。切り替えは次の読み上げから効き、再起動は要りません。"
+            description="プロファイルは声（参照音声か、保存した声そのもの）と caption（話し方の指示）、要約の口調の組です。試聴しながら caption を直せます。切り替えは次の読み上げから効き、再起動は要りません。"
             status={status}
           />
         }
@@ -91,6 +91,7 @@ export function ProfilesPage() {
               item={selected}
               voices={profiles.items}
               isActive={selected.id === profiles.active}
+              model={health?.tts.model}
               onPlay={play}
               onStatus={setStatus}
               onDeleted={() => select(undefined)}

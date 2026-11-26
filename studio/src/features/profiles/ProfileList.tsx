@@ -11,6 +11,7 @@ import type { ProfileItem, ProfileSource } from '@/lib/api-types'
 import { isImeConfirm, useHotkeys } from '@/lib/hotkeys'
 
 import { nextSelection } from '../review/selection'
+import { HOLDING_ORDER, HOLDINGS, holdingOf, holdingText } from './holding'
 import { ORDER_LABELS } from './MemberPicker'
 
 export const SOURCE_LABELS: Record<ProfileSource, string> = {
@@ -23,7 +24,7 @@ export const SOURCE_LABELS: Record<ProfileSource, string> = {
   mix: '混ぜた声',
 }
 
-// 一覧の見出しの順。ランダムの声はほかの声を束ねるものなので先頭に置く
+// 見出し（持ち方）の中の並び。同じ作り方の声をまとめる
 const SOURCE_ORDER: readonly ProfileSource[] = [
   'random',
   'design',
@@ -43,10 +44,14 @@ type Props = {
   onCreate: () => void
 }
 
-// 行の2行目。ランダムの声は caption を持たないので、選び方とメンバーを出す
+// 行の2行目。見出しは持ち方なので、作り方をここに添える。ランダムの声は caption を
+// 持たないので、選び方とメンバーを出す
 function detail(item: ProfileItem, names: ReadonlyMap<string, string>): string {
-  if (item.source !== 'random') return item.caption
-  return `${ORDER_LABELS[item.order]}: ${item.members.map((id) => names.get(id) ?? id).join('・')}`
+  if (item.source === 'random') {
+    return `${ORDER_LABELS[item.order]}: ${item.members.map((id) => names.get(id) ?? id).join('・')}`
+  }
+  const source = SOURCE_LABELS[item.source]
+  return item.caption ? `${source} · ${item.caption}` : source
 }
 
 // 選んだ行が一覧の外にあれば見える所まで送る（使用中が下の方にあっても開いた時に見える）。
@@ -63,9 +68,10 @@ export function ProfileList({ items, active, selected, onSelect, onCreate }: Pro
   const q = trimmed.toLowerCase()
   // ランダムの声はメンバーの名前では引かない。メンバーで探したときに束ねた側が先頭に来て、Enter で開いてしまう
   const matches = items.filter((item) => `${item.name}\n${item.caption}`.toLowerCase().includes(q))
-  const groups = SOURCE_ORDER.map((source) => ({
-    source,
-    items: matches.filter((item) => item.source === source),
+  const sorted = SOURCE_ORDER.flatMap((source) => matches.filter((item) => item.source === source))
+  const groups = HOLDING_ORDER.map((holding) => ({
+    holding,
+    items: sorted.filter((item) => holdingOf(item) === holding),
   })).filter((group) => group.items.length > 0)
   // 見出しで並べ替えた後の順。j / k はこの順に動く
   const visible = groups.flatMap((group) => group.items)
@@ -126,9 +132,12 @@ export function ProfileList({ items, active, selected, onSelect, onCreate }: Pro
       </div>
       <ul className="-mx-1 min-h-0 flex-1 overflow-y-auto px-1 pb-2">
         {groups.map((group) => (
-          <li key={group.source}>
-            <h3 className="sticky top-0 z-10 flex items-baseline justify-between bg-background px-2 pt-3 pb-1 text-xs font-medium text-muted-foreground">
-              {SOURCE_LABELS[group.source]}
+          <li key={group.holding}>
+            <h3
+              className="sticky top-0 z-10 flex items-baseline justify-between bg-background px-2 pt-3 pb-1 text-xs font-medium text-muted-foreground"
+              title={holdingText(group.holding)}
+            >
+              {HOLDINGS[group.holding].label}
               <span>{group.items.length}</span>
             </h3>
             <ul className="space-y-px">

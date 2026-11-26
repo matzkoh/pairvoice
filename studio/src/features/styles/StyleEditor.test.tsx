@@ -44,6 +44,7 @@ const BASE: Props = {
         members: [],
         order: 'random',
         folded: false,
+        speaker_model: '',
         mix: [],
       },
       {
@@ -56,6 +57,7 @@ const BASE: Props = {
         members: [],
         order: 'random',
         folded: false,
+        speaker_model: '',
         mix: [],
       },
     ],

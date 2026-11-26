@@ -29,6 +29,7 @@ const VOICE: ProfileItem = {
   members: [],
   order: 'random',
   folded: false,
+  speaker_model: '',
   mix: [],
 }
 const VOICES = [VOICE, { ...VOICE, id: 'p-b', name: '二つ目' }]

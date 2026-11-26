@@ -338,6 +338,11 @@ class ProfileItem(BaseModel):
         description="素材を畳み込んだ声（`POST /profiles/fold`）。素材全体から要約した話者の表現で読み、"
         "参照音声（`GET /profiles/{id}/audio`）はその中心に近い 26 秒の素材で、鳴る声とは少し違う"
     )
+    speaker_model: str = Field(
+        description="話者の表現を保存して持つ声（畳み込んだ・混ぜた声）の、表現を作った合成モデル。"
+        "`GET /health` の `tts.model` と同じなら表現のまま聞いた声で読み、違えば参照音声から写して読む。"
+        "参照音声から写す声は空"
+    )
     mix: list[MixRecipePart] = Field(
         description="`mix` の声の作り方（もとの声と重み）。もとの声を消しても読める。"
         "合成した音声を混ぜた声とほかの声は空"

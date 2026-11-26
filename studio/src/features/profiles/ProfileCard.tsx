@@ -10,6 +10,7 @@ import { apiSend, apiUrl, toErrorMessage } from '@/lib/api'
 import type { ProfileItem, ProfileOrder } from '@/lib/api-types'
 import { isImeConfirm } from '@/lib/hotkeys'
 
+import { HOLDINGS, holdingOf, holdingText, readsFromReference } from './holding'
 import { eligibleMembers, MemberPicker, MIN_MEMBERS, OrderPicker } from './MemberPicker'
 import { SOURCE_LABELS } from './ProfileList'
 import { invalidateProfiles, type ProfileStatus } from './queries'
@@ -19,13 +20,15 @@ type Props = {
   // ランダムの声のメンバーにできる声
   voices: readonly ProfileItem[]
   isActive: boolean
+  // 今の合成モデル（/health の tts.model）。分からない間は undefined
+  model: string | undefined
   onPlay: (url: string) => void
   onStatus: (status: ProfileStatus) => void
   onDeleted: () => void
 }
 
 // 選んだプロファイルの中身（参照音声 + caption、ランダムの声はメンバー）と、名前・使用中・削除の操作
-export function ProfileCard({ item, voices, isActive, onPlay, onStatus, onDeleted }: Props) {
+export function ProfileCard({ item, voices, isActive, model, onPlay, onStatus, onDeleted }: Props) {
   const queryClient = useQueryClient()
   const [pending, startTransition] = useTransition()
   const [renaming, setRenaming] = useState(false)
@@ -146,6 +149,10 @@ export function ProfileCard({ item, voices, isActive, onPlay, onStatus, onDelete
         />
       ) : (
         <dl className="mt-5 grid grid-cols-[5rem_minmax(0,1fr)] items-center gap-x-4 gap-y-3">
+          <dt className="self-start text-xs leading-5 text-muted-foreground">持ち方</dt>
+          <dd>
+            <HoldingNote item={item} model={model} />
+          </dd>
           <dt className="text-xs text-muted-foreground">参照音声</dt>
           <dd className="flex items-start gap-3">
             <PlayButton
@@ -155,9 +162,8 @@ export function ProfileCard({ item, voices, isActive, onPlay, onStatus, onDelete
             />
             {item.folded && (
               <p className="max-w-[52em] text-xs text-muted-foreground">
-                この音は読み上げに使いません。素材を畳み込んだ声は、素材全体から要約した声で読みます。ここで鳴るのは素材の中心に近い
-                26
-                秒の見本で、つなぎ目で言葉が途切れます。声そのものは下の試聴で確かめてください（合成モデルを替えたときだけ、この音を参照音声にして読みます）。
+                素材の中心に近い 26
+                秒の見本で、つなぎ目で言葉が途切れます。声は素材全体から要約したものなので、下の試聴で確かめてください。
               </p>
             )}
           </dd>
@@ -214,6 +220,33 @@ function MembersEditor({ item, voices, pending, onSave }: MembersProps) {
       >
         保存
       </Button>
+    </div>
+  )
+}
+
+// 声の持ち方と、その良し悪し。表現を保存した声が今のモデルと合わないときは、写した声で
+// 読んでいると知らせる（黙って近い声に替わっている）
+function HoldingNote({ item, model }: { item: ProfileItem; model: string | undefined }) {
+  const holding = holdingOf(item)
+  if (readsFromReference(item, model)) {
+    return (
+      <div className="max-w-[52em] text-sm">
+        <p className="font-medium text-destructive">参照音声から写して読んでいます</p>
+        <p className="text-xs text-muted-foreground">
+          別の合成モデル（{item.speaker_model}
+          ）で保存した声なので、今のモデルでは参照音声から写した近い声で読みます。聞いた声のまま読みたいなら、今のモデルで作り直してください。
+        </p>
+      </div>
+    )
+  }
+  return (
+    <div className="max-w-[52em] text-sm">
+      <p className="font-medium">{HOLDINGS[holding].label}</p>
+      <p className="text-xs text-muted-foreground">
+        {holdingText(holding)}
+        {holding === 'speaker' &&
+          '下の参照音声は、合成モデルを替えたときの写し元で、ふだんの読み上げには使いません。'}
+      </p>
     </div>
   )
 }

@@ -34,6 +34,7 @@ const item: ProfileItem = {
   members: [],
   order: 'random',
   folded: false,
+  speaker_model: '',
   mix: [],
 }
 

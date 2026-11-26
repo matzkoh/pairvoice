@@ -19,6 +19,7 @@ const ITEMS: ProfileItem[] = [
     members: [],
     order: 'random',
     folded: false,
+    speaker_model: '',
     mix: [],
   },
   {
@@ -31,6 +32,7 @@ const ITEMS: ProfileItem[] = [
     members: [],
     order: 'random',
     folded: false,
+    speaker_model: '',
     mix: [],
   },
 ]
@@ -83,6 +85,7 @@ it('ランダムの声は選び方とメンバーの名前を並べる', () => {
           members: ['p-a', 'p-b'],
           order: 'shuffle',
           folded: false,
+          speaker_model: '',
           mix: [],
         },
       ]}
@@ -95,10 +98,27 @@ it('ランダムの声は選び方とメンバーの名前を並べる', () => {
   expect(screen.getByText('シャッフル: 使用中の声・別の声')).toBeTruthy()
 })
 
-it('作り方ごとに見出しを付けて並べ、絞り込むと名前か caption が合うものだけ残す', () => {
+it('持ち方ごとに見出しを付けて並べ、作り方は行に添える', () => {
+  render(
+    <ProfileList
+      items={[
+        ...ITEMS,
+        { ...ITEMS[1]!, id: 'p-m', name: '混ぜた', source: 'mix', speaker_model: 'm' },
+      ]}
+      active="p-a"
+      selected={null}
+      onSelect={vi.fn()}
+      onCreate={vi.fn()}
+    />,
+  )
+  const headings = screen.getAllByRole('heading').map((h) => h.textContent)
+  expect(headings).toEqual(['声をそのまま保存1', '参照音声から写す2'])
+  expect(screen.getByText('混ぜた声 · B の声。')).toBeTruthy()
+  expect(screen.getByText('自動で作成 · A の声。')).toBeTruthy()
+})
+
+it('絞り込むと名前か caption が合うものだけ残す', () => {
   const { onSelect } = renderList('p-a')
-  expect(screen.getByRole('heading', { name: /作った声/ })).toBeTruthy()
-  expect(screen.getByRole('heading', { name: /自動で作成/ })).toBeTruthy()
 
   const search = screen.getByRole('searchbox', { name: 'プロファイルを絞り込む' })
   fireEvent.change(search, { target: { value: 'b の' } })
@@ -115,7 +135,7 @@ it('作り方ごとに見出しを付けて並べ、絞り込むと名前か cap
 
 it('J / K で見出しの順に隣のプロファイルへ移る', () => {
   const { onSelect } = renderList('p-b')
-  // 作った声（p-b）→ 自動で作成（p-a）の順
+  // 同じ見出しの中は作り方の順（作った声 p-b → 自動で作成 p-a）
   fireEvent.keyDown(document.body, { key: 'j' })
   expect(onSelect).toHaveBeenCalledWith('p-a')
   fireEvent.keyDown(document.body, { key: 'k' })

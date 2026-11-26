@@ -28,6 +28,7 @@ const ITEM: ProfileItem = {
   members: [],
   order: 'random',
   folded: false,
+  speaker_model: '',
   mix: [],
 }
 
@@ -46,6 +47,7 @@ const RANDOM: ProfileItem = {
   members: ['p-a', 'p-b'],
   order: 'random',
   folded: false,
+  speaker_model: '',
   mix: [],
 }
 
@@ -59,6 +61,7 @@ function renderCard(isActive = false, item: ProfileItem = ITEM) {
         item={item}
         voices={VOICES}
         isActive={isActive}
+        model="tts/now"
         onPlay={onPlay}
         onStatus={onStatus}
         onDeleted={onDeleted}
@@ -112,16 +115,26 @@ it('参照音声を再生できる', () => {
   expect(onPlay).toHaveBeenCalledWith('/api/profiles/p-b/audio')
 })
 
-it('畳み込んだ声には、参照音声を読み上げに使わないと書く', () => {
-  renderCard(false, { ...ITEM, folded: true })
+it('表現を保存した声には、そのまま保存していることと、参照音声を読み上げに使わないと書く', () => {
+  renderCard(false, { ...ITEM, folded: true, speaker_model: 'tts/now' })
 
-  expect(screen.getByText(/この音は読み上げに使いません/)).toBeTruthy()
+  expect(screen.getByText('声をそのまま保存')).toBeTruthy()
+  expect(screen.getByText(/ふだんの読み上げには使いません/)).toBeTruthy()
 })
 
-it('ふつうの声には書かない', () => {
+it('参照音声から写す声には、モデルを替えても読めることと、わずかに違うことを書く', () => {
   renderCard()
 
-  expect(screen.queryByText(/この音は読み上げに使いません/)).toBeNull()
+  expect(screen.getByText('参照音声から写す')).toBeTruthy()
+  expect(screen.getByText(/わずかに違う/)).toBeTruthy()
+  expect(screen.queryByText(/ふだんの読み上げには使いません/)).toBeNull()
+})
+
+it('別の合成モデルで保存した声は、参照音声から写して読んでいると知らせる', () => {
+  renderCard(false, { ...ITEM, source: 'mix', speaker_model: 'tts/old' })
+
+  expect(screen.getByText('参照音声から写して読んでいます')).toBeTruthy()
+  expect(screen.getByText(/tts\/old/)).toBeTruthy()
 })
 
 it('名前をクリックすると変更でき、Enter で保存する', async () => {

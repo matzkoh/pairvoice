@@ -388,6 +388,7 @@ def test_patch_updates_name_and_snapshots_caption(client):
         "members": [],
         "order": "random",
         "folded": False,
+        "speaker_model": "",
         "mix": [],
     }
     (version,) = client.get(f"/profiles/{profile_id}/caption/history").json()["items"]
@@ -840,6 +841,7 @@ def test_mix_saves_mixed_tokens_and_reads_references_in_that_voice(tmp_path):
     assert response.status_code == 201
     created = response.json()
     assert (created["source"], created["caption"], created["folded"]) == ("mix", "低め", False)
+    assert created["speaker_model"] == "fake/tts"
     # 作り方は名前ではなく ID で、重みは足して1に直して残す
     assert created["mix"] == [{"id": a, "weight": 0.25}, {"id": b, "weight": 0.75}]
     mix = [(MixVoice(a), 0.3), (MixVoice(b), 0.9)]
