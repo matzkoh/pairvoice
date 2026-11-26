@@ -18,7 +18,7 @@ beforeEach(() => {
   vi.mocked(apiGet).mockImplementation(async (path: string) => {
     if (path === '/health') throw new UnreachableServerError('/health', new Error('down'))
     if (path === '/profiles') {
-      const profiles: ProfilesResponse = { items: [], active: null }
+      const profiles: ProfilesResponse = { items: [], active: null, unmuffle_available: true }
       return profiles
     }
     if (path.startsWith('/corpus')) {

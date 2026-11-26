@@ -667,6 +667,20 @@ def test_speaker_vector_returns_vector_without_mute():
     assert tts.calls == [{"speaker_vector": Path("/data/generations/a.wav")}]
 
 
+def test_synthesize_forwards_unmuffle_only_with_mix():
+    tts = FakeTTS()
+    _, client = build(tts=tts)
+    mix = [{"audio": "generations/a.wav", "weight": 1}]
+
+    ok = client.post("/synthesize", json={"text": "候補", "mix": mix, "unmuffle": 1.5})
+    alone = client.post("/synthesize", json={"text": "候補", "unmuffle": 1.5})
+
+    assert ok.status_code == 200
+    assert tts.calls[0]["unmuffle"] == 1.5
+    # こもりの向きは混ぜた表現に足すので、声（プロファイル）だけでは受けない
+    assert alone.status_code == 422
+
+
 @pytest.mark.parametrize("muffled", [True, False])
 def test_synthesize_reports_band_limited_only_for_design(muffled):
     tts = FakeTTS()

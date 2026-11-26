@@ -33,6 +33,7 @@ const BASE: Props = {
   styles: [WHISPER, { name: 'ゆっくり', caption: null, sampler: {} }],
   profiles: {
     active: 'p-a',
+    unmuffle_available: true,
     items: [
       {
         id: 'p-a',
@@ -47,6 +48,7 @@ const BASE: Props = {
         speaker_model: '',
         reads_from_reference: false,
         mix: [],
+        muffled: null,
       },
       {
         id: 'p-b',
@@ -61,6 +63,7 @@ const BASE: Props = {
         speaker_model: '',
         reads_from_reference: false,
         mix: [],
+        muffled: null,
       },
     ],
   },

@@ -94,8 +94,8 @@ class FakeTTS(FakeBackend):
     def band_limited(self, path):
         return self.muffled
 
-    def mix_tokens(self, mix):
-        self.calls.append({"mix_tokens": mix})
+    def mix_tokens(self, mix, unmuffle=0.0):
+        self.calls.append({"mix_tokens": mix, **({"unmuffle": unmuffle} if unmuffle else {})})
         return np.full((3, 2), 0.5, np.float32)
 
     def speaker_tokens(self, samples):
@@ -105,8 +105,19 @@ class FakeTTS(FakeBackend):
         level = float(np.abs(samples).mean())
         return np.array([[level, i] for i in range(count)], np.float32)
 
+    # こもりの向きを同梱しているか（data_api の can_unmuffle）
+    can_unmuffle = True
+
     def speak(
-        self, text, caption=None, sampler=None, design=False, profile_id=None, mix=None, style=None
+        self,
+        text,
+        caption=None,
+        sampler=None,
+        design=False,
+        profile_id=None,
+        mix=None,
+        style=None,
+        unmuffle=0.0,
     ):
         from pathlib import Path
 
@@ -122,6 +133,7 @@ class FakeTTS(FakeBackend):
                 # 2択で絞り込むときだけ載せる（ほかの試験の期待値を mix: None で埋めない）
                 **({"mix": mix} if mix is not None else {}),
                 **({"style": style} if style is not None else {}),
+                **({"unmuffle": unmuffle} if unmuffle else {}),
             }
         )
         return SpeechResult(
@@ -680,7 +692,15 @@ class ThreadRecordingTTS(FakeTTS):
         super().load()
 
     def speak(
-        self, text, caption=None, sampler=None, design=False, profile_id=None, mix=None, style=None
+        self,
+        text,
+        caption=None,
+        sampler=None,
+        design=False,
+        profile_id=None,
+        mix=None,
+        style=None,
+        unmuffle=0.0,
     ):
         self.threads["tts.speak"] = threading.get_ident()
         return super().speak(text, caption, sampler, design, profile_id, mix)

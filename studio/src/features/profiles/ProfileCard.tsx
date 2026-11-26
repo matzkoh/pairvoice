@@ -14,19 +14,32 @@ import { HOLDINGS, holdingOf, holdingText } from './holding'
 import { eligibleMembers, MemberPicker, MIN_MEMBERS, OrderPicker } from './MemberPicker'
 import { SOURCE_LABELS } from './ProfileList'
 import { invalidateProfiles, type ProfileStatus } from './queries'
+import { Unmuffle } from './Unmuffle'
 
 type Props = {
   item: ProfileItem
   // ランダムの声のメンバーにできる声
   voices: readonly ProfileItem[]
   isActive: boolean
+  // こもった声を直せるか（いまの合成モデルの、こもりの向きを同梱しているか）
+  unmuffleAvailable: boolean
   onPlay: (url: string) => void
   onStatus: (status: ProfileStatus) => void
   onDeleted: () => void
+  onCreated: (id: string) => void
 }
 
 // 選んだプロファイルの中身（参照音声 + caption、ランダムの声はメンバー）と、名前・使用中・削除の操作
-export function ProfileCard({ item, voices, isActive, onPlay, onStatus, onDeleted }: Props) {
+export function ProfileCard({
+  item,
+  voices,
+  isActive,
+  unmuffleAvailable,
+  onPlay,
+  onStatus,
+  onDeleted,
+  onCreated,
+}: Props) {
   const queryClient = useQueryClient()
   const [pending, startTransition] = useTransition()
   const [renaming, setRenaming] = useState(false)
@@ -151,6 +164,20 @@ export function ProfileCard({ item, voices, isActive, onPlay, onStatus, onDelete
           <dd>
             <HoldingNote item={item} />
           </dd>
+          {item.muffled && (
+            <>
+              <dt className="self-start text-xs leading-5 text-muted-foreground">音質</dt>
+              <dd>
+                <Unmuffle
+                  item={item}
+                  available={unmuffleAvailable}
+                  onPlay={onPlay}
+                  onStatus={onStatus}
+                  onCreated={onCreated}
+                />
+              </dd>
+            </>
+          )}
           <dt className="text-xs text-muted-foreground">参照音声</dt>
           <dd className="flex items-start gap-3">
             <PlayButton

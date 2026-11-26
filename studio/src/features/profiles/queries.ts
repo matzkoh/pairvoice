@@ -2,7 +2,7 @@ import { type QueryClient, queryOptions } from '@tanstack/react-query'
 
 import type { HistorySource } from '@/features/history/queries'
 import { apiGet } from '@/lib/api'
-import type { ProfilesResponse } from '@/lib/api-types'
+import type { ProfileItem, ProfilesResponse } from '@/lib/api-types'
 
 // 画面上部に1行で出す操作の結果。プロファイル画面の部品（中身・試聴・作成）が共有する
 export type ProfileStatus = { message: string; isError: boolean }
@@ -28,4 +28,15 @@ export async function invalidateProfiles(queryClient: QueryClient) {
     queryClient.invalidateQueries({ queryKey: ['profiles'] }),
     queryClient.invalidateQueries({ queryKey: ['health'] }),
   ])
+}
+
+// 作った声の知らせ。こもった声なら直し方を添える（保存は聞いた声のまま行い、差し替えない）
+export function createdStatus(created: ProfileItem, verb: string): ProfileStatus {
+  const done = `「${created.name}」を${verb}`
+  return {
+    message: created.muffled
+      ? `${done}。こもった音です。声の画面の「こもりを取る」で直せます`
+      : done,
+    isError: false,
+  }
 }

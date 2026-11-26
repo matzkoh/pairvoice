@@ -16,7 +16,7 @@ import { mixCandidates } from './MemberPicker'
 import { mixWeight } from './mixCurve'
 import { mixQueryOptions } from './mixSynth'
 import { randomSeed } from './PickProfile'
-import { invalidateProfiles, type ProfileStatus } from './queries'
+import { createdStatus, invalidateProfiles, type ProfileStatus } from './queries'
 import { useAnchoredText } from './useAnchoredText'
 
 type Props = {
@@ -130,7 +130,7 @@ export function MixProfile({
           rng_seed: seed,
         })
         await invalidateProfiles(queryClient)
-        onStatus({ message: `「${created.name}」を作りました`, isError: false })
+        onStatus(createdStatus(created, '作りました'))
         setName('')
         onCreated(created.id)
       } catch (err: unknown) {

@@ -91,9 +91,11 @@ export function ProfilesPage() {
               item={selected}
               voices={profiles.items}
               isActive={selected.id === profiles.active}
+              unmuffleAvailable={profiles.unmuffle_available}
               onPlay={play}
               onStatus={setStatus}
               onDeleted={() => select(undefined)}
+              onCreated={select}
             />
             {/* ランダムの声は caption と口調を持たず、選んだメンバーのものを使う */}
             {selected.source !== 'random' && (

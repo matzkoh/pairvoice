@@ -488,10 +488,14 @@ class Engine:
         wait_download: bool = True,
         mix: list[tuple[str | MixVoice, float]] | None = None,
         style: str | None = None,
+        unmuffle: float = 0.0,
         *,
         check_mute: bool = False,
     ):
-        """wav を作るだけ。鳴らさないのでミュートは見ない（speak が check_mute で頼むときを除く）。"""
+        """wav を作るだけ。鳴らさないのでミュートは見ない（speak が check_mute で頼むときを除く）。
+
+        unmuffle は mix に足すこもりの向きの量（こもった声を直す）。
+        """
 
         async def work():
             await self._tts.ensure_loaded(wait_download=wait_download)
@@ -505,6 +509,7 @@ class Engine:
                 profile_id,
                 resolved_mix,
                 style,
+                unmuffle,
             )
             self._tts.touch()
             return result
@@ -690,12 +695,19 @@ class Engine:
             for source, weight in mix
         ]
 
-    async def mix_tokens(self, mix: list[tuple[str | MixVoice, float]]) -> tuple[np.ndarray, str]:
+    async def mix_tokens(
+        self, mix: list[tuple[str | MixVoice, float]], unmuffle: float = 0.0
+    ) -> tuple[np.ndarray, str]:
         """混ぜた話者の表現と、それを作った合成モデルの名前。混ぜた声をプロファイルにするのに使う。"""
         tokens = await self._measure(
-            self._tts, self._tts_backend.mix_tokens, self._resolve_mix(mix)
+            self._tts, self._tts_backend.mix_tokens, self._resolve_mix(mix), unmuffle
         )
         return tokens, self.tts_model
+
+    @property
+    def can_unmuffle(self) -> bool:
+        """いまの合成モデルに、こもりの向きがあるか（こもった声を直せるか）。"""
+        return self._tts_backend.can_unmuffle
 
     async def save_audio(self, samples: np.ndarray, sample_rate: int) -> SpeechResult:
         """合成した wav と同じ所に置く（日が経つと消える）。モデルは使わない。"""

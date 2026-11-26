@@ -44,8 +44,19 @@ from .profiles import (
 )
 from .prompt import SummaryPrompt
 from .styles import STYLES_FILENAME, StyleStore
-from .tts import ANCHOR_TEXT, AudioNotFound, SpeechResult, resolve_data_audio
-from .wav import concat_wavs, has_wav_header, mono_wav, write_mono
+from .tts import ANCHOR_TEXT, AudioNotFound, SpeechResult, UnmuffleUnsupported, resolve_data_audio
+from .unmuffle import AMOUNTS as UNMUFFLE_AMOUNTS
+from .unmuffle import CALIBRATION_TEXTS, UnmuffleAmount, is_clear
+from .wav import (
+    WavFormatError,
+    band_limited,
+    concat_wavs,
+    has_wav_header,
+    high_band_drop_db,
+    mono_wav,
+    read_mono,
+    write_mono,
+)
 
 # 本文で wav を受けるとき（声の取り込みと聞き取り）の上限。48kHz モノラルで9分ほど
 UPLOAD_MAX_BYTES = 50 * 1024 * 1024
@@ -88,6 +99,10 @@ TAKE_GAP_SECONDS = 0.3
 # 伸ばすときの合成の段数（読み上げの既定は 10）。参照音声は一度しか作らないので丁寧に作る
 MASTER_STEPS = 80
 MASTER_CFG_MIN_T = 0.5
+# 参照音声を合成して作る声。参照音声のこもりが、そのまま読み上げのこもりを表す
+SYNTHESIZED_SOURCES = ("design", MIX_SOURCE)
+# こもりを直す量を探すときの乱数の種。量ごとに同じ種で読ませ、量の違いだけを比べる
+UNMUFFLE_SEED = 1
 # 伸ばすときにテイクの声で読ませる文。Irodori-TTS は同じ話者の短い発話を合わせて 30 秒ほどの
 # 参照音声を勧めるので、テイクにこの3つ（各 6〜7 秒）を足してつなぐ
 # - 読み上げるのはエージェントの作業の要約なので、落ち着いた説明調を軸にし、問いかけと
@@ -144,13 +159,16 @@ class Synthesize(Protocol):
         profile_id: str | None = None,
         *,
         mix: list[tuple[str | MixVoice, float]] | None = None,
+        unmuffle: float = 0.0,
     ) -> SpeechResult: ...
 
 
 class MixTokens(Protocol):
     """Engine.mix_tokens。混ぜた話者の表現と、それを作った合成モデルの名前。"""
 
-    async def __call__(self, mix: list[tuple[str | MixVoice, float]]) -> tuple[np.ndarray, str]: ...
+    async def __call__(
+        self, mix: list[tuple[str | MixVoice, float]], unmuffle: float = 0.0
+    ) -> tuple[np.ndarray, str]: ...
 
 
 _VERSION_ERRORS: dict[int | str, dict] = {
@@ -354,7 +372,13 @@ class ProfileItem(BaseModel):
     )
     mix: list[MixRecipePart] = Field(
         description="`mix` の声の作り方（もとの声と重み）。もとの声を消しても読める。"
-        "合成した音声を混ぜた声とほかの声は空"
+        "合成した音声を混ぜた声、こもりを直した声、ほかの声は空"
+    )
+    muffled: bool | None = Field(
+        default=None,
+        description="参照音声が 12kHz より上の欠けた、こもった音か。合成した参照音声を持つ声"
+        "（`design`・`mix`）だけ測り、ほかは null（録音の帯域は合成した声のこもりに移らない）。"
+        "`POST /profiles/{id}/unmuffle` で直せる",
     )
 
 
@@ -572,6 +596,28 @@ class VoiceEvalResponse(BaseModel):
 class ProfilesResponse(BaseModel):
     active: str | None = Field(description="使用中の声の ID")
     items: list[ProfileItem] = Field(description="新しく作った順")
+    unmuffle_available: bool = Field(
+        description="こもった声を直せるか（いまの合成モデルの、こもりの向きを同梱しているか）"
+    )
+
+
+class UnmuffleTake(BaseModel):
+    audio: str = Field(description="校正の1文目を読ませた wav（データの置き場所からの相対パス）")
+    worst_db: float | None = Field(
+        description="校正の文のうち、いちばんこもった文の落ち幅（8〜10kHz から 12.5〜16kHz、dB）"
+    )
+
+
+class UnmuffleResponse(BaseModel):
+    status: Literal["not_needed", "fixed", "unfixable"] = Field(
+        description="`not_needed` は直さなくてもこもっていない。`fixed` は `amount` で直る。"
+        "`unfixable` は声を変えずに足せる量の上限でも直らない"
+    )
+    amount: float | None = Field(
+        description="`POST /profiles/mix` の `unmuffle` に渡す量。`fixed` のときだけ"
+    )
+    before: UnmuffleTake = Field(description="直す前")
+    after: UnmuffleTake | None = Field(description="`amount` で直した後。`fixed` のときだけ")
 
 
 class CreateProfileBody(BaseModel):
@@ -648,6 +694,11 @@ class MixProfileBody(BaseModel):
         default=None,
         description="参照音声を読ませるときの乱数の種。省くと config.toml の値",
     )
+    unmuffle: UnmuffleAmount = Field(
+        default=0.0,
+        description="混ぜた声に足すこもりの向きの量。こもった声を直す量は "
+        "`POST /profiles/{id}/unmuffle` が探す（その声1つを重み1で `voices` に渡す）",
+    )
 
     @model_validator(mode="after")
     def _weights_sum_positive(self):
@@ -702,6 +753,7 @@ def data_router(
     fold_material: FoldMaterial,
     mix_tokens: MixTokens,
     tts_model: Callable[[], str],
+    can_unmuffle: Callable[[], bool] = lambda: False,
 ) -> APIRouter:
     router = APIRouter()
     curate_jobs = CurateJobs()
@@ -711,8 +763,26 @@ def data_router(
     summary_prompt = SummaryPrompt(data_root)
     profiles = summary_prompt.profiles
 
+    # こもりの判定は参照音声ごとに1回（一覧のたびに読み直さない）。書き換わったら測り直す
+    muffle_cache: dict[Path, tuple[int, bool]] = {}
+
+    def muffled(profile: Profile) -> bool | None:
+        """合成した参照音声を持つ声（caption から作った・混ぜた）だけ、こもっているかを測る。
+        録音から作った声の参照音声は測らない（24kHz の録音でも合成した声はこもらなかった）。"""
+        if profile.source not in SYNTHESIZED_SOURCES or profile.reference is None:
+            return None
+        path = profile.reference
+        try:
+            mtime = path.stat().st_mtime_ns
+            cached = muffle_cache.get(path)
+            if cached is None or cached[0] != mtime:
+                cached = muffle_cache[path] = (mtime, band_limited(*read_mono(path)))
+        except (OSError, WavFormatError):
+            return None
+        return cached[1]
+
     def describe(profile: Profile) -> dict[str, object]:
-        return profile.describe(tts_model())
+        return {**profile.describe(tts_model()), "muffled": muffled(profile)}
 
     prompt = summary_prompt.common
 
@@ -839,6 +909,7 @@ def data_router(
             {
                 "active": active.id if active is not None else None,
                 "items": [describe(p) for p in items],
+                "unmuffle_available": can_unmuffle(),
             }
         )
 
@@ -861,12 +932,16 @@ def data_router(
         return sampler
 
     async def speak_mix(
-        mix: list[tuple[str | MixVoice, float]], caption: str, sampler: dict
+        mix: list[tuple[str | MixVoice, float]],
+        caption: str,
+        sampler: dict,
+        unmuffle: float = 0.0,
     ) -> tuple[list[bytes], SpeakerTokens]:
         """混ぜた声で REFERENCE_TEXTS を読ませ、その声の話者の表現も返す。表現は声として
-        保存する（読ませた音をつないだ参照音声から写し直すより、もとの声に近い）。"""
-        tokens, model = await mix_tokens(mix)
-        takes = await read_references(mix, caption, sampler)
+        保存する（読ませた音をつないだ参照音声から写し直すより、もとの声に近い）。
+        unmuffle は表現と参照音声の両方に同じだけ足す（こもりの判定は参照音声で測るので）。"""
+        tokens, model = await mix_tokens(mix, unmuffle)
+        takes = await read_references(mix, caption, sampler, unmuffle)
         return takes, SpeakerTokens(lambda path: np.save(path, tokens), model)
 
     async def extend(
@@ -876,12 +951,17 @@ def data_router(
         return await speak_mix([(relative, 1.0) for relative in relatives], caption, sampler)
 
     async def read_references(
-        mix: list[tuple[str | MixVoice, float]], caption: str, sampler: dict
+        mix: list[tuple[str | MixVoice, float]],
+        caption: str,
+        sampler: dict,
+        unmuffle: float = 0.0,
     ) -> list[bytes]:
         made = []
         # 1文ずつ頼む（まとめると Runner を塞ぎ、フックの読み上げが待たされる）
         for text in REFERENCE_TEXTS:
-            result = await synthesize(text, caption=caption, sampler=sampler, mix=mix)
+            result = await synthesize(
+                text, caption=caption, sampler=sampler, mix=mix, unmuffle=unmuffle
+            )
             made.append(await asyncio.to_thread(result.path.read_bytes))
         return made
 
@@ -898,7 +978,8 @@ def data_router(
             write_reference=lambda path: path.write_bytes(joined),
             **extra,
         )
-        return ProfileItem.model_validate(describe(created))
+        # 合成した参照音声のこもりを測るので、イベントループの外で
+        return ProfileItem.model_validate(await asyncio.to_thread(describe, created))
 
     @router.post(
         "/profiles",
@@ -973,9 +1054,12 @@ def data_router(
                 # 名前は後から変わりうるので、作り方には ID を残す
                 source = MixVoice(found.id)
             mix.append((source, part.weight))
-        takes, speaker = await speak_mix(mix, body.caption, master_sampler(body.rng_seed))
+        takes, speaker = await speak_mix(
+            mix, body.caption, master_sampler(body.rng_seed), body.unmuffle
+        )
         total = sum(w for _, w in mix)
-        voices_only = all(isinstance(s, MixVoice) for s, _ in mix)
+        # こもりを直した声に「もとの声を重み1で」と残すと、もとと同じ声だと偽ることになる
+        voices_only = not body.unmuffle and all(isinstance(s, MixVoice) for s, _ in mix)
         return await save_design(
             body.name,
             body.caption,
@@ -986,6 +1070,64 @@ def data_router(
             if voices_only
             else [],
         )
+
+    @router.post(
+        "/profiles/{profile_id}/unmuffle",
+        response_model=UnmuffleResponse,
+        summary="こもった声を直す量を探す",
+        tags=["声"],
+        responses={
+            **_PROFILE_NOT_FOUND,
+            400: _error("`invalid_profile`（ランダムの声・混ぜられない声）"),
+            409: _error("`unmuffle_unsupported`（いまの合成モデルには、こもりの向きが無い）"),
+            503: _error("`model_load_failed` など（モデルを使えない）"),
+        },
+    )
+    async def find_unmuffle(profile_id: str):
+        """声を保ったままこもりが取れる、いちばん少ない量を探す。声は作らない。
+
+        こもりの向きを少ない量から足して校正の文（3つ）を読ませ、いちばんこもった文が目標を
+        越えた量で止める。量を `POST /profiles/mix` の `unmuffle` に、この声を重み1で `voices`
+        に渡すと、直した声を別の声として保存する。合成は1件ずつ列に並べる（その合間に
+        読み上げが割り込める）ので、数十秒かかる。
+        """
+        profile = profiles.find(profile_id)
+        if profile is None:
+            raise ProfileNotFound(profile_id)
+        if not can_unmuffle():
+            raise UnmuffleUnsupported(tts_model())
+        mix: list[tuple[str | MixVoice, float]] = [(MixVoice(profile.id), 1.0)]
+
+        async def calibrate(amount: float) -> UnmuffleTake:
+            """amount だけ足して校正の文を読ませる。届かない文が出たら残りは読ませない。"""
+            first: str | None = None
+            worst: float | None = None
+            for text in CALIBRATION_TEXTS:
+                result = await synthesize(
+                    text,
+                    caption=profile.caption,
+                    sampler={"rng_seed": UNMUFFLE_SEED},
+                    mix=mix,
+                    unmuffle=amount,
+                )
+                first = first or result.relative_path
+                drop = await asyncio.to_thread(
+                    lambda path=result.path: high_band_drop_db(*read_mono(path))
+                )
+                if drop is not None:
+                    worst = drop if worst is None else min(worst, drop)
+                if not is_clear(worst):
+                    break
+            return UnmuffleTake(audio=first or "", worst_db=worst)
+
+        before = await calibrate(0.0)
+        if is_clear(before.worst_db):
+            return UnmuffleResponse(status="not_needed", amount=None, before=before, after=None)
+        for amount in UNMUFFLE_AMOUNTS[1:]:
+            after = await calibrate(amount)
+            if is_clear(after.worst_db):
+                return UnmuffleResponse(status="fixed", amount=amount, before=before, after=after)
+        return UnmuffleResponse(status="unfixable", amount=None, before=before, after=None)
 
     @router.post(
         "/profiles/upload",

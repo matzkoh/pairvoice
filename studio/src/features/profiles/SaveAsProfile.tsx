@@ -8,7 +8,7 @@ import { toErrorMessage } from '@/lib/api'
 import type { ProfileItem } from '@/lib/api-types'
 import { isImeConfirm } from '@/lib/hotkeys'
 
-import { invalidateProfiles, type ProfileStatus } from './queries'
+import { createdStatus, invalidateProfiles, type ProfileStatus } from './queries'
 
 type Props = {
   // 名前欄の読み上げ名（「候補 #1」など）
@@ -45,7 +45,7 @@ export function SaveAsProfile({
         const created = await create(name.trim())
         await invalidateProfiles(queryClient)
         setSaved(true)
-        onStatus({ message: `「${created.name}」を保存しました`, isError: false })
+        onStatus(createdStatus(created, '保存しました'))
         onCreated(created.id)
       } catch (err: unknown) {
         onStatus({ message: `保存に失敗しました: ${toErrorMessage(err)}`, isError: true })

@@ -161,11 +161,10 @@ export function ProfileList({ items, active, selected, onSelect, onCreate }: Pro
                       <span className="min-w-0 flex-1">
                         <span className="flex items-center gap-2">
                           <span className="truncate font-voice">{item.name}</span>
-                          {item.id === active && (
-                            <span className="marked ml-auto flex-none text-[11px] font-medium">
-                              使用中
-                            </span>
-                          )}
+                          <span className="ml-auto flex flex-none items-center gap-1.5 text-[11px] font-medium">
+                            {item.muffled && <span className="text-destructive">こもり</span>}
+                            {item.id === active && <span className="marked">使用中</span>}
+                          </span>
                         </span>
                         {sub && (
                           <span className="block truncate text-xs text-muted-foreground">

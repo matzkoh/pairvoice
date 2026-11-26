@@ -89,17 +89,17 @@ _SPEECH_RANGE_DB = 30.0
 _BAND_DROP_DB = -40.0
 
 
-def band_limited(samples: np.ndarray, sample_rate: int) -> bool:
-    """声のある所で、8〜10kHz に比べて 12.5〜16kHz が大きく落ちているか（こもった音か）。
+def high_band_drop_db(samples: np.ndarray, sample_rate: int) -> float | None:
+    """声のある所で、8〜10kHz に比べて 12.5〜16kHz が何 dB 落ちているか。声が無ければ None。
 
-    16kHz まで録れないサンプルレートなら切れているとみなす。声が無ければ切れていないとする。
+    16kHz まで録れないサンプルレートなら -inf（上が無い）。
     """
     if sample_rate < 32000:
-        return True
+        return float("-inf")
     usable = len(samples) // _BAND_FRAME * _BAND_FRAME
     frames = np.asarray(samples[:usable], np.float64).reshape(-1, _BAND_FRAME)
     if not len(frames):
-        return False
+        return None
     level = 10 * np.log10((frames**2).mean(axis=1) + 1e-12)
     speech = frames[level > level.max() - _SPEECH_RANGE_DB]
     power = (np.abs(np.fft.rfft(speech * np.hanning(_BAND_FRAME), axis=1)) ** 2).mean(axis=0)
@@ -107,5 +107,11 @@ def band_limited(samples: np.ndarray, sample_rate: int) -> bool:
     below = power[(freqs >= 8000) & (freqs < 10000)].mean()
     above = power[(freqs >= 12500) & (freqs < 16000)].mean()
     if below <= 0:
-        return False
-    return bool(10 * np.log10(above / below + 1e-30) < _BAND_DROP_DB)
+        return None
+    return float(10 * np.log10(above / below + 1e-30))
+
+
+def band_limited(samples: np.ndarray, sample_rate: int) -> bool:
+    """上の帯域が切れた、こもった音か。声が無ければ切れていないとする。"""
+    drop = high_band_drop_db(samples, sample_rate)
+    return drop is not None and drop < _BAND_DROP_DB

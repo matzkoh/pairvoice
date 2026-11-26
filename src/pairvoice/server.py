@@ -34,6 +34,7 @@ from .prompt import SummaryPrompt
 from .stt import MlxSttBackend
 from .studio_web import mount_studio, open_studio
 from .tts import MlxAudioBackend
+from .unmuffle import UnmuffleAmount
 from .updates import UpdateChecker
 
 LOCAL_HOSTNAMES = frozenset({"127.0.0.1", "localhost", "[::1]"})
@@ -292,12 +293,18 @@ class SynthesizeRequest(SynthesisRequest):
         description="studio の「2択で絞り込む」と「混ぜる」用。いくつかの音声か声の話者の表現を重みで混ぜた声で読む。"
         "`voice` は使わない",
     )
+    unmuffle: UnmuffleAmount = Field(
+        default=0.0,
+        description="`mix` に足すこもりの向きの量。こもった声を直す量は `POST /profiles/{id}/unmuffle` が探す",
+    )
 
     @model_validator(mode="after")
-    def _mix_weights_sum_positive(self):
+    def _check_mix(self):
         # 重みは足して1に直して混ぜるので、和が 0 以下では声にならない
         if self.mix is not None and sum(part.weight for part in self.mix) <= 0:
             raise ValueError("mix weights must sum to a positive value")
+        if self.unmuffle and self.mix is None:
+            raise ValueError("unmuffle needs mix")
         return self
 
 
@@ -575,6 +582,7 @@ def create_app(engine: Engine) -> FastAPI:
                 else None
             ),
             style=request.style,
+            unmuffle=request.unmuffle,
         )
         response = speech_response(result)
         if request.design:
@@ -753,6 +761,7 @@ def create_app(engine: Engine) -> FastAPI:
             engine.fold_material,
             engine.mix_tokens,
             lambda: engine.tts_model,
+            lambda: engine.can_unmuffle,
         )
     )
     api.include_router(corpus_router(data_root))

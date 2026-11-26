@@ -107,8 +107,25 @@ export type ProfileItem = {
   reads_from_reference: boolean
   // mix の声の作り方（もとの声の ID と、足して1の重み）。ほかの声は空
   mix: { id: string; weight: number }[]
+  // 参照音声が 12kHz より上の欠けた、こもった音か。合成した参照音声を持つ声（design・mix）だけ。ほかは null
+  muffled: boolean | null
 }
-export type ProfilesResponse = { items: ProfileItem[]; active: string | null }
+export type ProfilesResponse = {
+  items: ProfileItem[]
+  active: string | null
+  // こもった声を直せるか（いまの合成モデルの、こもりの向きを同梱しているか）
+  unmuffle_available: boolean
+}
+
+// POST /profiles/{id}/unmuffle の応答。直す量を探した結果
+export type UnmuffleTake = { audio: string; worst_db: number | null }
+export type UnmuffleResponse = {
+  status: 'not_needed' | 'fixed' | 'unfixable'
+  // POST /profiles/mix の unmuffle に渡す量。fixed のときだけ
+  amount: number | null
+  before: UnmuffleTake
+  after: UnmuffleTake | null
+}
 
 // POST /profiles/fold・GET /profiles/fold/{job_id} の応答。後ろで走る畳み込みの仕事
 export type FoldStage =

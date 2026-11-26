@@ -18,6 +18,18 @@ curl -sf "$(pairvoice url)/openapi.json" | jq '.paths["/api/speak"], .components
 
 応答が無ければ `pairvoice status` で常駐サーバーの状態を見る。
 
+## こもった声を直す
+
+声の一覧（`GET /profiles`）で `muffled` が true の声は、12kHz より上が欠けたこもった音で読む。`POST /profiles/{id}/unmuffle` で直す量を探し（数十秒）、`status` が `fixed` なら、その声1つを重み1で `voices` に、`amount` を `unmuffle` に渡して `POST /profiles/mix` で別の声として保存する。元の声は書き換えない。`unfixable` は声を変えずに直せる量の上限でも直らない。
+
+```bash
+base="$(pairvoice url)/api"
+found=$(curl -sf -X POST "$base/profiles/$id/unmuffle")
+jq -n --arg id "$id" --argjson f "$found" \
+  '{name: "直した声", voices: [{voice: $id, weight: 1}], unmuffle: $f.amount}' |
+  curl -sf -X POST "$base/profiles/mix" -H 'content-type: application/json' -d @-
+```
+
 ## 素材から声を作る
 
 `POST /profiles/fold` で素材を畳み込む。素材全体の平均の声になり、区間を選ばないので候補を作って聴き比べる必要がない。素材は長いほど声がぶれない。受け付けたらすぐ返るので、`GET /profiles/fold/{job_id}` を間を空けて問い合わせる。

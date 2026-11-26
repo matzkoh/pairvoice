@@ -22,6 +22,7 @@ const ITEMS: ProfileItem[] = [
     speaker_model: '',
     reads_from_reference: false,
     mix: [],
+    muffled: null,
   },
   {
     id: 'p-b',
@@ -36,6 +37,7 @@ const ITEMS: ProfileItem[] = [
     speaker_model: '',
     reads_from_reference: false,
     mix: [],
+    muffled: null,
   },
 ]
 
@@ -90,6 +92,7 @@ it('ランダムの声は選び方とメンバーの名前を並べる', () => {
           speaker_model: '',
           reads_from_reference: false,
           mix: [],
+          muffled: null,
         },
       ]}
       active="p-r"

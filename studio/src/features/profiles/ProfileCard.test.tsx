@@ -31,6 +31,7 @@ const ITEM: ProfileItem = {
   speaker_model: '',
   reads_from_reference: false,
   mix: [],
+  muffled: null,
 }
 
 const VOICES: ProfileItem[] = [
@@ -51,25 +52,29 @@ const RANDOM: ProfileItem = {
   speaker_model: '',
   reads_from_reference: false,
   mix: [],
+  muffled: null,
 }
 
-function renderCard(isActive = false, item: ProfileItem = ITEM) {
+function renderCard(isActive = false, item: ProfileItem = ITEM, unmuffleAvailable = true) {
   const onPlay = vi.fn()
   const onStatus = vi.fn()
   const onDeleted = vi.fn()
+  const onCreated = vi.fn()
   render(
     <QueryClientProvider client={new QueryClient()}>
       <ProfileCard
         item={item}
         voices={VOICES}
         isActive={isActive}
+        unmuffleAvailable={unmuffleAvailable}
         onPlay={onPlay}
         onStatus={onStatus}
         onDeleted={onDeleted}
+        onCreated={onCreated}
       />
     </QueryClientProvider>,
   )
-  return { onPlay, onStatus, onDeleted }
+  return { onPlay, onStatus, onDeleted, onCreated }
 }
 
 it('参照音声と caption を中身として見せる', () => {
@@ -229,4 +234,77 @@ it('混ぜた声は、もとの声と割合を見せる（消した声も残す�
     ],
   })
   expect(screen.getByText('一つ目 25% / （削除した声） 75%')).toBeTruthy()
+})
+
+const MUFFLED: ProfileItem = { ...ITEM, source: 'mix', muffled: true }
+
+it('こもっていない声には、こもりの知らせも直す操作も出さない', () => {
+  renderCard(false, { ...ITEM, muffled: false })
+
+  expect(screen.queryByText('こもった音です')).toBeNull()
+  expect(screen.queryByRole('button', { name: 'こもりを取る' })).toBeNull()
+})
+
+it('こもった声は量を探して前後を聴かせ、元の声を残したまま別の声として保存する', async () => {
+  vi.mocked(apiSend).mockImplementation(async (path: string) => {
+    if (path.endsWith('/unmuffle')) {
+      return {
+        status: 'fixed',
+        amount: 2.5,
+        before: { audio: 'generations/before.wav', worst_db: -60 },
+        after: { audio: 'generations/after.wav', worst_db: -20 },
+      }
+    }
+    return { ...MUFFLED, id: 'p-new', name: '直した声', muffled: false }
+  })
+  const { onPlay, onStatus, onCreated } = renderCard(false, MUFFLED)
+
+  await act(async () => {
+    fireEvent.click(screen.getByRole('button', { name: 'こもりを取る' }))
+  })
+  fireEvent.click(screen.getByRole('button', { name: '直した後を再生' }))
+  expect(String(onPlay.mock.calls[0]![0])).toContain('after.wav')
+  fireEvent.change(screen.getByLabelText('直した声の名前'), { target: { value: '直した声' } })
+  await act(async () => {
+    fireEvent.click(screen.getByRole('button', { name: '別の声として保存' }))
+  })
+
+  expect(apiSend).toHaveBeenCalledWith(`/profiles/${MUFFLED.id}/unmuffle`, 'POST')
+  // 元の声1つを重み1で、探した量だけ直す。元の声は書き換えない
+  expect(apiSend).toHaveBeenCalledWith('/profiles/mix', 'POST', {
+    name: '直した声',
+    caption: MUFFLED.caption,
+    voices: [{ voice: MUFFLED.id, weight: 1 }],
+    unmuffle: 2.5,
+  })
+  expect(vi.mocked(apiSend).mock.calls.some(([, method]) => method === 'PATCH')).toBe(false)
+  expect(onCreated).toHaveBeenCalledWith('p-new')
+  expect(onStatus).toHaveBeenLastCalledWith({
+    message: '「直した声」を保存しました',
+    isError: false,
+  })
+})
+
+it('直せなかったときと、直す必要がなかったときは、そう伝えて保存させない', async () => {
+  vi.mocked(apiSend).mockResolvedValueOnce({
+    status: 'unfixable',
+    amount: null,
+    before: { audio: 'generations/before.wav', worst_db: -70 },
+    after: null,
+  })
+  renderCard(false, MUFFLED)
+
+  await act(async () => {
+    fireEvent.click(screen.getByRole('button', { name: 'こもりを取る' }))
+  })
+
+  expect(screen.getByText(/上限でも、こもりが取れませんでした/)).toBeTruthy()
+  expect(screen.queryByRole('button', { name: '別の声として保存' })).toBeNull()
+})
+
+it('いまの合成モデルで直せないときは、知らせだけ出してボタンを出さない', () => {
+  renderCard(false, MUFFLED, false)
+
+  expect(screen.getByText(/いまの合成モデルでは直せません/)).toBeTruthy()
+  expect(screen.queryByRole('button', { name: 'こもりを取る' })).toBeNull()
 })

@@ -6,15 +6,19 @@ import time
 import wave
 from pathlib import Path
 
+import numpy as np
 import pytest
 
-from pairvoice.data_api import MASTER_STEPS, REFERENCE_TEXTS, TAKE_GAP_SECONDS
+from pairvoice.data_api import MASTER_STEPS, REFERENCE_TEXTS, TAKE_GAP_SECONDS, UNMUFFLE_SEED
+from pairvoice.profiles import MixVoice
 from pairvoice.tts import ANCHOR_TEXT, SpeechResult, resolve_data_audio
-from pairvoice.wav import write_mono
+from pairvoice.unmuffle import AMOUNTS, CALIBRATION_TEXTS
+from pairvoice.wav import pcm_wav, write_mono
 from tests.fakes import FakeCurate
 from tests.test_curate import heads, needs_ffmpeg, synth
 from tests.test_engine import FakeSTT, FakeTTS
 from tests.test_server import build
+from tests.test_wav import voice
 
 
 def make_wav(samples: bytes, sample_rate: int = 24000) -> bytes:
@@ -391,6 +395,7 @@ def test_patch_updates_name_and_snapshots_caption(client):
         "reads_from_reference": False,
         "speaker_model": "",
         "mix": [],
+        "muffled": None,
     }
     (version,) = client.get(f"/profiles/{profile_id}/caption/history").json()["items"]
     assert version["name"].startswith("caption-")
@@ -598,9 +603,17 @@ class WritingTTS(FakeTTS):
         self.root = root
 
     def speak(
-        self, text, caption=None, sampler=None, design=False, profile_id=None, mix=None, style=None
+        self,
+        text,
+        caption=None,
+        sampler=None,
+        design=False,
+        profile_id=None,
+        mix=None,
+        style=None,
+        unmuffle=0.0,
     ):
-        super().speak(text, caption, sampler, design, profile_id, mix, style)
+        super().speak(text, caption, sampler, design, profile_id, mix, style, unmuffle)
         path = self.root / "generations" / f"{len(self.calls)}.wav"
         path.parent.mkdir(exist_ok=True)
         path.write_bytes(make_wav(b"\x01\x00" * 3))
@@ -984,3 +997,154 @@ def test_mix_reports_unknown_voice_before_synthesizing(tmp_path):
 
     assert response.status_code == 404
     assert tts.calls == []
+
+
+# ---- こもった声を直す ----
+
+
+class BandTTS(FakeTTS):
+    """unmuffle が fixed_at に届かない合成は、12kHz より上を切ったこもった音を書く。
+
+    fixed_at が None なら、どれだけ足してもこもったまま。
+    """
+
+    def __init__(self, root: Path, fixed_at: float | None):
+        super().__init__()
+        self.root = root
+        self.fixed_at = fixed_at
+
+    def speak(
+        self,
+        text,
+        caption=None,
+        sampler=None,
+        design=False,
+        profile_id=None,
+        mix=None,
+        style=None,
+        unmuffle=0.0,
+    ):
+        super().speak(text, caption, sampler, design, profile_id, mix, style, unmuffle)
+        muffled = self.fixed_at is None or unmuffle < self.fixed_at
+        relative = f"generations/band-{len(self.calls)}.wav"
+        path = self.root / relative
+        path.parent.mkdir(exist_ok=True)
+        samples = voice(6, 12000 if muffled else None, seconds=0.5)
+        # 端をなだらかにする（参照音声につないだ継ぎ目のクリックが上の帯域に漏れないように）
+        path.write_bytes(pcm_wav(samples * np.hanning(len(samples)), 48000))
+        return SpeechResult(path, relative, 0.5, None)
+
+
+def band_client(tmp_path, fixed_at):
+    tts = BandTTS(tmp_path, fixed_at)
+    _, client = build(tts=tts, data_root=tmp_path)
+    return tts, client
+
+
+def made_voice(client, name="こもった声"):
+    """合成した参照音声を持つ声（2択で保存した声と同じ、混ぜた声）を作る。"""
+    base = upload(client, f"{name}の素").json()["id"]
+    created = client.post(
+        "/profiles/mix", json={"name": name, "voices": [{"voice": base, "weight": 1}]}
+    )
+    return created.json()
+
+
+def unmuffle_amounts(tts):
+    return [call.get("unmuffle", 0.0) for call in tts.calls if "text" in call]
+
+
+def test_synthesized_voices_report_muffled_reference_and_recorded_ones_do_not(tmp_path):
+    _, client = band_client(tmp_path, fixed_at=None)
+    muffled = made_voice(client)
+
+    listed = {p["name"]: p for p in client.get("/profiles").json()["items"]}
+
+    assert muffled["muffled"] is True
+    assert listed["こもった声"]["muffled"] is True
+    # 録音から作った声の参照音声は測らない（帯域は合成した声のこもりに移らない）
+    assert listed["こもった声の素"]["muffled"] is None
+    assert client.get("/profiles").json()["unmuffle_available"] is True
+
+
+def test_unmuffle_finds_the_smallest_amount_that_clears_every_calibration_text(tmp_path):
+    tts, client = band_client(tmp_path, fixed_at=None)
+    profile = made_voice(client)
+    tts.fixed_at = 1.5
+    tts.calls.clear()
+
+    response = client.post(f"/profiles/{profile['id']}/unmuffle")
+
+    assert response.status_code == 200
+    body = response.json()
+    assert (body["status"], body["amount"]) == ("fixed", 1.5)
+    assert body["before"]["worst_db"] < -40 <= -30 <= body["after"]["worst_db"]
+    # 届かない量は1文目で打ち切り、届いた量だけ校正の文を全部読ませる
+    assert unmuffle_amounts(tts) == [0.0, 0.5, 1.0, 1.5, 1.5, 1.5]
+    reads = [call for call in tts.calls if "text" in call]
+    assert [call["text"] for call in reads[-3:]] == list(CALIBRATION_TEXTS)
+    assert all(call["mix"] == [(MixVoice(profile["id"]), 1.0)] for call in reads)
+    assert {call["sampler"]["rng_seed"] for call in reads} == {UNMUFFLE_SEED}
+    # 前後の試聴は、それぞれの量で読ませた校正の1文目
+    assert body["before"]["audio"] == "generations/band-1.wav"
+    assert body["after"]["audio"] == "generations/band-4.wav"
+
+
+def test_unmuffle_reports_voice_that_is_not_muffled(tmp_path):
+    tts, client = band_client(tmp_path, fixed_at=0.0)
+    profile = made_voice(client, "澄んだ声")
+    tts.calls.clear()
+
+    body = client.post(f"/profiles/{profile['id']}/unmuffle").json()
+
+    assert (body["status"], body["amount"], body["after"]) == ("not_needed", None, None)
+    assert unmuffle_amounts(tts) == [0.0] * len(CALIBRATION_TEXTS)
+
+
+def test_unmuffle_gives_up_at_the_largest_amount(tmp_path):
+    tts, client = band_client(tmp_path, fixed_at=None)
+    profile = made_voice(client)
+    tts.calls.clear()
+
+    body = client.post(f"/profiles/{profile['id']}/unmuffle").json()
+
+    assert (body["status"], body["amount"], body["after"]) == ("unfixable", None, None)
+    assert unmuffle_amounts(tts) == list(AMOUNTS)
+
+
+def test_unmuffle_refuses_model_without_direction(tmp_path):
+    tts, client = band_client(tmp_path, fixed_at=None)
+    profile = made_voice(client)
+    tts.can_unmuffle = False
+
+    response = client.post(f"/profiles/{profile['id']}/unmuffle")
+
+    assert response.status_code == 409
+    assert response.json()["error"] == "unmuffle_unsupported"
+    assert client.get("/profiles").json()["unmuffle_available"] is False
+    assert client.post("/profiles/p-missing/unmuffle").status_code == 404
+
+
+def test_mix_with_unmuffle_saves_fixed_voice_without_claiming_the_original_recipe(tmp_path):
+    tts, client = band_client(tmp_path, fixed_at=1.5)
+    profile = made_voice(client)
+    tts.calls.clear()
+
+    response = client.post(
+        "/profiles/mix",
+        json={
+            "name": "直した声",
+            "voices": [{"voice": profile["id"], "weight": 1}],
+            "unmuffle": 1.5,
+        },
+    )
+
+    assert response.status_code == 201
+    created = response.json()
+    # 表現にも参照音声にも同じだけ足すので、直した声にはこもりの印が出ない
+    assert tts.calls[0] == {"mix_tokens": [(MixVoice(profile["id"]), 1.0)], "unmuffle": 1.5}
+    assert set(unmuffle_amounts(tts)) == {1.5}
+    assert created["muffled"] is False
+    assert created["mix"] == []
+    too_much = {"name": "x", "voices": [{"voice": profile["id"], "weight": 1}], "unmuffle": 9}
+    assert client.post("/profiles/mix", json=too_much).status_code == 422

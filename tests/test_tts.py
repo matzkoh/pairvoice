@@ -20,6 +20,7 @@ from pairvoice.tts import (
     NON_FINAL_DURATION_SCALE,
     AudioNotFound,
     MlxAudioBackend,
+    UnmuffleUnsupported,
 )
 
 
@@ -669,7 +670,7 @@ def test_speak_with_mix_refuses_when_model_cannot_take_injection(
     # 差し込む口が無いモデルで黙ってふつうの声を鳴らすと、2択の A と B が同じ声になる
     model = FakeModel(FakeResult(np.zeros(480, dtype=np.float32)))
     backend = make_backend(no_ref_config, model, tmp_path, monkeypatch)
-    monkeypatch.setattr(backend, "_mixed_speaker_state", lambda mix: "state")
+    monkeypatch.setattr(backend, "_mixed_speaker_state", lambda mix, unmuffle=0.0: "state")
 
     with pytest.raises(RuntimeError):
         backend.speak("テスト", mix=[(tmp_path / "a.wav", 1.0)])
@@ -1018,6 +1019,37 @@ def test_mix_tokens_returns_the_mixed_state_as_saved_tokens(no_ref_config, tmp_p
 
     # 畳み込んだ声の speaker.npy と同じ (T, 768) の形
     np.testing.assert_allclose(tokens, np.full((3, 2), 2.0))
+
+
+def test_unmuffle_adds_the_muffle_direction_to_every_frame(no_ref_config, tmp_path, monkeypatch):
+    import mlx.core as mx
+
+    backend = make_backend(no_ref_config, MixModel(None), tmp_path, monkeypatch)
+    _mix_material(tmp_path, "a")
+    monkeypatch.setattr(backend, "_reference_state", lambda path: mx.zeros((1, 3, 2)))
+    direction = tmp_path / "muffle.npy"
+    np.save(direction, np.array([1.0, -2.0], np.float32))
+    monkeypatch.setattr("pairvoice.tts.muffle_direction_path", lambda model: direction)
+
+    tokens = backend.mix_tokens([(MixVoice("a"), 1.0)], unmuffle=1.5)
+
+    assert backend.can_unmuffle
+    np.testing.assert_allclose(tokens, np.tile([1.5, -3.0], (3, 1)))
+
+
+def test_unmuffle_refuses_model_without_direction(no_ref_config, tmp_path, monkeypatch):
+    import mlx.core as mx
+
+    backend = make_backend(no_ref_config, MixModel(None), tmp_path, monkeypatch)
+    _mix_material(tmp_path, "a")
+    monkeypatch.setattr(backend, "_reference_state", lambda path: mx.zeros((1, 3, 2)))
+    monkeypatch.setattr("pairvoice.tts.muffle_direction_path", lambda model: tmp_path / "無い.npy")
+
+    assert not backend.can_unmuffle
+    with pytest.raises(UnmuffleUnsupported):
+        backend.mix_tokens([(MixVoice("a"), 1.0)], unmuffle=1.0)
+    # 足さないなら向きは要らない
+    np.testing.assert_allclose(backend.mix_tokens([(MixVoice("a"), 1.0)]), np.zeros((3, 2)))
 
 
 def test_mix_refuses_random_and_missing_voices(no_ref_config, tmp_path, monkeypatch):

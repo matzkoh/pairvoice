@@ -106,6 +106,15 @@ class AudioNotFound(Exception):
     """指定された音声がデータの置き場所に無い（外を指している・消された）。"""
 
 
+class UnmuffleUnsupported(Exception):
+    """いまの合成モデルには、こもりの向き（muffle/<モデル>.npy）が無い。"""
+
+
+def muffle_direction_path(model: str) -> Path:
+    """合成モデルごとの、こもりの向き。scripts/muffle_direction.py が作る。"""
+    return Path(__file__).parent / "muffle" / f"{model.replace('/', '--')}.npy"
+
+
 def resolve_data_audio(data_dir: Path, relative: str) -> Path:
     """データの置き場所からの相対パスを、置き場所の中の wav に解決する。"""
     root = data_dir.resolve()
@@ -205,6 +214,8 @@ class MlxAudioBackend:
         self._injected_speaker = None
         self._speaker_injection_ready = False
         self._speaker_states: OrderedDict[tuple[Path, int], mx.array] = OrderedDict()
+        # こもりの向き。None はまだ読んでいない、False はいまのモデルの向きが無い
+        self._muffle: np.ndarray | bool | None = None
         # モデルを降ろしても声の音量は変わらないので、unload では消さない
         self._levels = _Levels()
 
@@ -433,10 +444,25 @@ class MlxAudioBackend:
         """wav の上の帯域が切れているか（こもった音か）。モデルは使わない。"""
         return band_limited(*read_mono(path))
 
-    def mix_tokens(self, mix: Sequence[tuple[Path | MixVoice, float]]) -> np.ndarray:
+    def mix_tokens(
+        self, mix: Sequence[tuple[Path | MixVoice, float]], unmuffle: float = 0.0
+    ) -> np.ndarray:
         """混ぜた話者の表現 (T, 768)。畳み込んだ声と同じ形で、プロファイルに保存できる。"""
         self._require_loaded()
-        return np.asarray(self._mixed_speaker_state(self._mix_parts(mix))[0], dtype=np.float32)
+        state = self._mixed_speaker_state(self._mix_parts(mix), unmuffle)
+        return np.asarray(state[0], dtype=np.float32)
+
+    @property
+    def can_unmuffle(self) -> bool:
+        """いまの合成モデルに、こもりの向きがあるか。"""
+        return self._muffle_direction() is not None
+
+    def _muffle_direction(self) -> np.ndarray | None:
+        # モデルは起動中に替わらない（替えるなら再起動する）ので、1回だけ読む
+        if self._muffle is None:
+            path = muffle_direction_path(str(self.model))
+            self._muffle = np.load(path).astype(np.float32) if path.is_file() else False
+        return self._muffle if isinstance(self._muffle, np.ndarray) else None
 
     def _mix_parts(
         self, mix: Sequence[tuple[Path | MixVoice, float]]
@@ -471,7 +497,9 @@ class MlxAudioBackend:
             raise ProfileRejected(f"{part.name} は混ぜられません")
         return state
 
-    def _mixed_speaker_state(self, mix: Sequence[tuple[Path | Profile, float]]) -> mx.array:
+    def _mixed_speaker_state(
+        self, mix: Sequence[tuple[Path | Profile, float]], unmuffle: float = 0.0
+    ) -> mx.array:
         # 声は読み上げと同じ表現で混ぜる（両端が読み上げの声と一致する）。
         # 表現は時間方向の列で長さがもとの声ごとに違うので、短い方にそろえてから重みで足す。
         # 重みは足して1に直す（倍率を変えると声ではなく話者の効き具合が変わる）。負の重みは
@@ -484,6 +512,12 @@ class MlxAudioBackend:
         mixed = mx.zeros_like(states[0][:, :length])
         for (_, weight), state in zip(mix, states, strict=True):
             mixed = mixed + (weight / total) * state[:, :length]
+        if unmuffle:
+            # こもりの向きを全フレームに足す（12kHz より上が欠けた声に、声を保ったまま上を戻す）
+            direction = self._muffle_direction()
+            if direction is None:
+                raise UnmuffleUnsupported(str(self.model))
+            mixed = mixed + unmuffle * mx.array(direction)[None, None]
         return mixed
 
     def speak(
@@ -495,6 +529,7 @@ class MlxAudioBackend:
         profile_id: str | None = None,
         mix: Sequence[tuple[Path | MixVoice, float]] | None = None,
         style: str | None = None,
+        unmuffle: float = 0.0,
     ) -> SpeechResult:
         """合成する。design=True はプロファイルを使わず caption だけで声を作る（候補づくり用）。
 
@@ -502,10 +537,10 @@ class MlxAudioBackend:
         style はスタイルの名前で、caption と sampler の既定をそのスタイルに替える。
         引数の caption と sampler はスタイルより優先する。
         mix は (参照音声か声, 重み) の組で、その声たちの話者の表現を重みで混ぜた声で鳴らす
-        （2択で絞り込む・混ぜる）。profile_id は使わない。
+        （2択で絞り込む・混ぜる）。profile_id は使わない。unmuffle は mix に足すこもりの向きの量。
         text は読み辞書で読みに開いてから読む。
         """
-        voice = self._voice(caption, sampler, design, profile_id, mix, style)
+        voice = self._voice(caption, sampler, design, profile_id, mix, style, unmuffle)
         return self._save(*self._generate(self._read(text), voice))
 
     def speak_streaming(
@@ -575,6 +610,7 @@ class MlxAudioBackend:
         profile_id: str | None = None,
         mix: Sequence[tuple[Path | MixVoice, float]] | None = None,
         style: str | None = None,
+        unmuffle: float = 0.0,
     ) -> _Voice:
         self._require_loaded()
         # 合成の前に引く。名前の打ち間違いで、生成を済ませてから断ることのないように
@@ -591,7 +627,7 @@ class MlxAudioBackend:
                 first if isinstance(first, Path) else first.reference,
                 (caption or "").strip(),
                 self.resolve_sampler(sampler),
-                self._mixed_speaker_state(parts),
+                self._mixed_speaker_state(parts, unmuffle),
             )
 
         # 参照音声と caption は同じ1回の読みから取る。間で studio が切り替えても混ざらない

@@ -19,7 +19,7 @@ from .narration import NoJapaneseSummary, NothingToSay
 from .profiles import ProfileInUse, ProfileNotFound, ProfileRejected, TakeRejected
 from .prompt import PromptMissing
 from .styles import StyleInvalid, StyleNotFound, StyleRejected
-from .tts import AudioNotFound
+from .tts import AudioNotFound, UnmuffleUnsupported
 from .wav import WavFormatError
 
 
@@ -51,6 +51,7 @@ _ERRORS: dict[type[Exception], tuple[int, str, bool]] = {
     ProfileInUse: (409, "profile_in_use", True),
     ProfileRejected: (400, "invalid_profile", True),
     AudioNotFound: (404, "audio_not_found", False),
+    UnmuffleUnsupported: (409, "unmuffle_unsupported", True),
     InvalidVersion: (400, "invalid_version", False),
     VersionNotFound: (404, "version_not_found", False),
     WavFormatError: (400, "invalid_take", True),

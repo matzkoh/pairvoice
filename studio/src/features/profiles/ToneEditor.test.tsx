@@ -37,6 +37,7 @@ const item: ProfileItem = {
   speaker_model: '',
   reads_from_reference: false,
   mix: [],
+  muffled: null,
 }
 
 async function renderTone(onStatus = vi.fn()) {

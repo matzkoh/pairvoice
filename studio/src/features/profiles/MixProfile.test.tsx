@@ -31,6 +31,7 @@ const VOICE: ProfileItem = {
   speaker_model: '',
   reads_from_reference: false,
   mix: [],
+  muffled: null,
 }
 const VOICES = [
   VOICE,

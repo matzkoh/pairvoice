@@ -54,6 +54,7 @@ const DONE = job({
     speaker_model: '',
     reads_from_reference: false,
     mix: [],
+    muffled: null,
   },
   report: { speech_seconds: 1422, pieces: 319, blocks: 55, pooled_tokens: 8863, tokens: 180 },
 })
