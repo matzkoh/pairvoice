@@ -51,7 +51,8 @@ _ID_PATTERN = re.compile(r"p-[0-9A-Za-z-]+")
 # random = ほかの声から毎回1つを選ぶ、mix = ほかの声の話者の表現を重みで混ぜた
 RANDOM_SOURCE = "random"
 MIX_SOURCE = "mix"
-SOURCES = ("design", "upload", "curate", "auto", "import", RANDOM_SOURCE, MIX_SOURCE)
+CURATE_SOURCE = "curate"
+SOURCES = ("design", "upload", CURATE_SOURCE, "auto", "import", RANDOM_SOURCE, MIX_SOURCE)
 # 1つだけでは選ぶ意味が無い
 MIN_MEMBERS = 2
 # ランダムの声の選び方。random = 毎回ばらばらに選ぶ、shuffle = 混ぜた順に一巡ずつ選ぶ
@@ -115,8 +116,8 @@ class Profile:
     def is_random(self) -> bool:
         return self.source == RANDOM_SOURCE
 
-    def describe(self) -> dict[str, object]:
-        """API が返す形。参照音声のパスは見せない。"""
+    def describe(self, model: str) -> dict[str, object]:
+        """API が返す形。参照音声のパスは見せない。model は今の合成モデル。"""
         return {
             "id": self.id,
             "name": self.name,
@@ -126,9 +127,11 @@ class Profile:
             "tone": self.tone,
             "members": list(self.members),
             "order": self.order,
-            # 混ぜた声も表現を持つが、素材から畳み込んだ声ではない（作り方が残らないこともある）
-            "folded": self.speaker is not None and self.source != MIX_SOURCE,
+            # 表現を持つ声はほかにもある（混ぜた声、伸ばした声）。畳み込んだのは素材から作った声だけ
+            "folded": self.speaker is not None and self.source == CURATE_SOURCE,
             "speaker_model": self.speaker_model if self.speaker is not None else "",
+            # 表現を持つのに今のモデルでは使えず、参照音声から写して読んでいる
+            "reads_from_reference": self.speaker is not None and self.tokens_for(model) is None,
             "mix": [{"id": voice, "weight": weight} for voice, weight in self.mix],
         }
 

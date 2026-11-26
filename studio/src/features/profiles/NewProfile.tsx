@@ -17,6 +17,7 @@ const GROUPS = [
   {
     holding: 'speaker',
     methods: [
+      { value: 'design', label: 'caption から声を作る', needs: '声の描写を文で書き、候補から選ぶ' },
       { value: 'pick', label: '2択で絞り込む', needs: '2つの声を聴き比べて、好みへ寄せていく' },
       { value: 'mix', label: '2つの声を混ぜる', needs: '手持ちの声2つの、間の声を選ぶ' },
       { value: 'curate', label: '素材から作る', needs: '長い音声か動画がある' },
@@ -24,10 +25,7 @@ const GROUPS = [
   },
   {
     holding: 'reference',
-    methods: [
-      { value: 'design', label: 'caption から声を作る', needs: '声の描写を文で書き、候補から選ぶ' },
-      { value: 'upload', label: 'wav を取り込む', needs: '数秒〜十数秒の wav がある' },
-    ],
+    methods: [{ value: 'upload', label: 'wav を取り込む', needs: '数秒〜十数秒の wav がある' }],
   },
   {
     holding: 'random',

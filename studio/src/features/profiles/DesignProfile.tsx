@@ -8,7 +8,7 @@ import type { SamplerOverrides } from '@/lib/api-types'
 import { audioFileUrl } from '@/lib/speak'
 
 import { Field } from './Field'
-import { createFromTakes, MASTER_STEPS, recordTakes, REFERENCE_TEXTS, synth } from './mixSynth'
+import { createFromTake } from './mixSynth'
 import type { ProfileStatus } from './queries'
 import { initialValues, MAX_CANDIDATES } from './samplerKnobs'
 import { SaveAsProfile } from './SaveAsProfile'
@@ -167,26 +167,8 @@ function CandidateRow({ take, onPlay, onStatus, onCreated }: RowProps) {
         <div className="ml-auto">
           <SaveAsProfile
             label={`候補 #${take.id}`}
-            // 選んだテイクを参照にして、同じ声で別の文も読ませる（テイクを複製した声なので、
-            // テイクそのものとはわずかに違う）
-            create={async (name, progress) =>
-              createFromTakes(
-                name,
-                await recordTakes(
-                  REFERENCE_TEXTS,
-                  (text) =>
-                    synth(
-                      text,
-                      take.input.caption,
-                      take.seed,
-                      [{ audio: relativePath, weight: 1 }],
-                      MASTER_STEPS,
-                    ),
-                  progress,
-                  [relativePath],
-                ),
-              )
-            }
+            // 選んだテイクの声の表現をそのまま残す（つないだ参照音声から写し直すより、テイクに近い）
+            create={(name) => createFromTake(name, relativePath, take.seed)}
             onStatus={onStatus}
             onCreated={onCreated}
           />

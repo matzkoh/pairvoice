@@ -4,24 +4,15 @@ import { apiSend } from '@/lib/api'
 import type { ProfileItem } from '@/lib/api-types'
 import { type MixSource, speakOnce } from '@/lib/speak'
 
-// 保存する声の合成の段数（読み上げの既定は 10）。増やすほど丁寧で遅い
-export const MASTER_STEPS = 80
-// 保存する声は CFG もモデルの既定どおり広く掛ける（読み上げの既定は速さのために狭めてある）
-const MASTER_CFG_MIN_T = 0.5
-
-// 混ぜた声を合成する。試聴は速さ優先で読み上げと同じ段数、保存する声は numSteps を増やす
+// 混ぜた声を試聴用に合成する（読み上げと同じ段数）
 export async function synth(
   text: string,
   caption: string,
   seed: number,
   mix: readonly MixSource[],
-  numSteps?: number,
 ) {
-  const sampler =
-    numSteps === undefined
-      ? { rng_seed: seed }
-      : { rng_seed: seed, num_steps: numSteps, cfg_min_t: MASTER_CFG_MIN_T }
-  return (await speakOnce({ text, caption, sampler, mix: [...mix] })).relative_path
+  return (await speakOnce({ text, caption, sampler: { rng_seed: seed }, mix: [...mix] }))
+    .relative_path
 }
 
 // 合成した音声は (文, caption, seed, 混ぜ具合) で決まる。戻ったときに取り直さない
@@ -40,43 +31,17 @@ export function mixQueryOptions(
   })
 }
 
-// 参照音声に足して読ませる文。Irodori-TTS は同じ話者の短い発話を合わせて 30 秒ほどの参照
-// 音声を勧めるので、試聴した文（7〜8 秒）にこの3つ（各 6〜7 秒）を足してつなぐ。
-// 常駐サーバーの POST /profiles の extend（src/pairvoice/data_api.py）と同じ文にしておく
-// - 読み上げるのはエージェントの作業の要約なので、落ち着いた説明調を軸にし、問いかけと
-//   軽い相づちで抑揚に幅を持たせる。参照音声の話し方は複製した声に移るので、強い感情は入れない
-// - 拗音（しゅ・ちょ・じゅ）、促音、撥音、長音、濁音・半濁音、カタカナ語と数を一通り含める
-export const REFERENCE_TEXTS = [
-  'ビルドとテストはすべて通りました。変更は三つのファイルにまとまっていて、再起動も済んでいます。',
-  'ひとつ確認させてください。この設定は、来週のアップデートまでに切り替えておけば間に合いますか？',
-  'ちょっと待ってくださいね。原因はわかったので、じゅうぶん直せそうです。順番に片づけましょう。',
-] as const
-
-// 参照音声のテイクを1文ずつ作る（まとめて頼むと Runner を塞ぎ、フックの読み上げが待たされる）。
-// made はすでにあるテイクで、作ったテイクをその後ろに足して返す。progress は作り終えた数と
-// 全体の数
-export async function recordTakes(
-  texts: readonly string[],
-  speak: (text: string) => Promise<string>,
-  progress: (done: number, total: number) => void,
-  made: readonly string[] = [],
-) {
-  const takes = [...made]
-  const total = made.length + texts.length
-  for (const text of texts) {
-    progress(takes.length, total)
-    takes.push(await speak(text))
-  }
-  progress(takes.length, total)
-  return takes
-}
-
-// 作った声の caption は空にする（声を作るための描写は、読み上げでは声を言い直すだけ。
-// 話し方を足したければ後で書ける）
-
-// テイクをつないだ参照音声で声を作る
-export function createFromTakes(name: string, takes: readonly string[]) {
-  return apiSend<ProfileItem>('/profiles', 'POST', { name, caption: '', takes })
+// 選んだテイクの声を残す。サーバーがその声で決まった文も読ませて参照音声にし、声の表現も保存する。
+// 作った声の caption は空にする（声を作るための描写は、読み上げでは声を言い直すだけ。話し方を
+// 足したければ後で書ける。createFromMix も同じ）
+export function createFromTake(name: string, take: string, seed: number) {
+  return apiSend<ProfileItem>('/profiles', 'POST', {
+    name,
+    caption: '',
+    takes: [take],
+    extend: true,
+    rng_seed: seed,
+  })
 }
 
 // 混ぜた話者の表現をそのまま声として残す（合成した音声から作り直すと、聞いた声からずれる）。

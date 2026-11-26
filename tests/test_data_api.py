@@ -388,6 +388,7 @@ def test_patch_updates_name_and_snapshots_caption(client):
         "members": [],
         "order": "random",
         "folded": False,
+        "reads_from_reference": False,
         "speaker_model": "",
         "mix": [],
     }
@@ -471,17 +472,23 @@ def test_create_with_extend_reads_reference_texts_in_take_voice(tmp_path):
     )
 
     assert response.status_code == 201
+    take = (tmp_path / "generations" / "take.wav").resolve()
+    # テイクの声の表現を保存する（つないだ参照音声から写し直すより、テイクの声に近い）
+    tokens, *reads = tts.calls
+    assert tokens == {"mix_tokens": [(take, 1.0)]}
+    assert response.json()["speaker_model"] == "fake/tts"
+    assert not response.json()["folded"]
     # 1文ずつ、テイクの声と同じ caption・種で、丁寧な段数で読む
-    assert [call["text"] for call in tts.calls] == list(REFERENCE_TEXTS)
+    assert [call["text"] for call in reads] == list(REFERENCE_TEXTS)
     assert {
         (call["caption"], call["sampler"]["rng_seed"], call["sampler"]["num_steps"])
-        for call in tts.calls
+        for call in reads
     } == {("低め", 7, MASTER_STEPS)}
-    take = (tmp_path / "generations" / "take.wav").resolve()
-    assert all(call["mix"] == [(take, 1.0)] for call in tts.calls)
+    assert all(call["mix"] == [(take, 1.0)] for call in reads)
     audio = client.get(f"/profiles/{response.json()['id']}/audio").content
     gap = bytes(round(TAKE_GAP_SECONDS * 24000) * 2)
-    made = [bytes([n, 0]) * 2 for n in (1, 2, 3)]
+    # 偽物は呼ばれた回数で中身を変える。1回目は表現を作る呼び出しなので、読んだ文は 2 から
+    made = [bytes([n, 0]) * 2 for n in (2, 3, 4)]
     assert audio[44:] == gap.join([b"\x09\x00" * 2, *made])
 
 
@@ -500,16 +507,6 @@ def test_create_with_extend_rejects_other_profiles_before_synthesizing(tmp_path)
     assert tts.calls == []
 
 
-def test_reference_texts_and_steps_match_studio():
-    # studio は進み具合を出すため、同じ文を自分で1本ずつ合成している。文がずれると、
-    # 同じ声から作っても API と studio で参照音声が変わる
-    source = (Path(__file__).parents[1] / "studio/src/features/profiles/mixSynth.ts").read_text(
-        encoding="utf-8"
-    )
-    assert all(f"'{text}'" in source for text in REFERENCE_TEXTS)
-    assert f"export const MASTER_STEPS = {MASTER_STEPS}\n" in source
-
-
 def test_design_makes_voice_from_caption_then_extends_it(tmp_path):
     tts = TakeWritingTTS(tmp_path)
     _, client = build(tts=tts, data_root=tmp_path)
@@ -521,18 +518,21 @@ def test_design_makes_voice_from_caption_then_extends_it(tmp_path):
 
     assert response.status_code == 201
     assert response.json()["caption"] == "低め"
-    first, *rest = tts.calls
-    # 最初の1本は caption だけで作り、残りはその声で決まった文を読む
+    first, tokens, *rest = tts.calls
+    # 最初の1本は caption だけで作り、その声の表現を残し、残りはその声で決まった文を読む
     assert (first["text"], first["design"], "mix" in first) == (ANCHOR_TEXT, True, False)
+    assert response.json()["speaker_model"] == "fake/tts"
     assert [call["text"] for call in rest] == list(REFERENCE_TEXTS)
     made = (tmp_path / "generations" / "made-1.wav").resolve()
     assert all(call["mix"] == [(made, 1.0)] and not call["design"] for call in rest)
+    assert tokens == {"mix_tokens": [(made, 1.0)]}
     assert {
-        (c["caption"], c["sampler"]["rng_seed"], c["sampler"]["num_steps"]) for c in tts.calls
+        (c["caption"], c["sampler"]["rng_seed"], c["sampler"]["num_steps"]) for c in [first, *rest]
     } == {("低め", 3, MASTER_STEPS)}
     audio = client.get(f"/profiles/{response.json()['id']}/audio").content
     gap = bytes(round(TAKE_GAP_SECONDS * 24000) * 2)
-    assert audio[44:] == gap.join(bytes([n, 0]) * 2 for n in (1, 2, 3, 4))
+    # 2回目の呼び出しは表現を作るもので、音を書かない
+    assert audio[44:] == gap.join(bytes([n, 0]) * 2 for n in (1, 3, 4, 5))
 
 
 def test_design_requires_caption(client):
@@ -913,6 +913,32 @@ def test_mix_takes_as_many_audio_parts_as_picking_uses(tmp_path):
     response = client.post("/profiles/mix", json={"name": "多い", "voices": parts})
 
     assert response.status_code == 201
+
+
+def test_voice_saved_for_another_model_reads_from_reference(tmp_path):
+    # 表現は作ったモデルの空間のものなので、モデルを替えると参照音声から写して読む
+    import numpy as np
+
+    from pairvoice.profiles import ProfileStore, SpeakerTokens
+
+    _, client = build(tts=TakeWritingTTS(tmp_path), data_root=tmp_path)
+    store = ProfileStore(tmp_path / "profiles")
+    for name, model in (("今の", "fake/tts"), ("前の", "old/tts")):
+        store.create(
+            name=name,
+            caption="",
+            source="mix",
+            write_reference=lambda path: path.write_bytes(make_wav(bytes(4))),
+            speaker=SpeakerTokens(lambda path: np.save(path, np.zeros((2, 2))), model),
+        )
+
+    items = {item["name"]: item for item in client.get("/profiles").json()["items"]}
+
+    assert (items["今の"]["reads_from_reference"], items["前の"]["reads_from_reference"]) == (
+        False,
+        True,
+    )
+    assert items["前の"]["speaker_model"] == "old/tts"
 
 
 def test_mix_rejects_part_with_both_or_neither_source(client):

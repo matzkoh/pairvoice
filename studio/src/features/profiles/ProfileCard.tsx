@@ -10,7 +10,7 @@ import { apiSend, apiUrl, toErrorMessage } from '@/lib/api'
 import type { ProfileItem, ProfileOrder } from '@/lib/api-types'
 import { isImeConfirm } from '@/lib/hotkeys'
 
-import { HOLDINGS, holdingOf, holdingText, readsFromReference } from './holding'
+import { HOLDINGS, holdingOf, holdingText } from './holding'
 import { eligibleMembers, MemberPicker, MIN_MEMBERS, OrderPicker } from './MemberPicker'
 import { SOURCE_LABELS } from './ProfileList'
 import { invalidateProfiles, type ProfileStatus } from './queries'
@@ -20,15 +20,13 @@ type Props = {
   // ランダムの声のメンバーにできる声
   voices: readonly ProfileItem[]
   isActive: boolean
-  // 今の合成モデル（/health の tts.model）。分からない間は undefined
-  model: string | undefined
   onPlay: (url: string) => void
   onStatus: (status: ProfileStatus) => void
   onDeleted: () => void
 }
 
 // 選んだプロファイルの中身（参照音声 + caption、ランダムの声はメンバー）と、名前・使用中・削除の操作
-export function ProfileCard({ item, voices, isActive, model, onPlay, onStatus, onDeleted }: Props) {
+export function ProfileCard({ item, voices, isActive, onPlay, onStatus, onDeleted }: Props) {
   const queryClient = useQueryClient()
   const [pending, startTransition] = useTransition()
   const [renaming, setRenaming] = useState(false)
@@ -151,7 +149,7 @@ export function ProfileCard({ item, voices, isActive, model, onPlay, onStatus, o
         <dl className="mt-5 grid grid-cols-[5rem_minmax(0,1fr)] items-center gap-x-4 gap-y-3">
           <dt className="self-start text-xs leading-5 text-muted-foreground">持ち方</dt>
           <dd>
-            <HoldingNote item={item} model={model} />
+            <HoldingNote item={item} />
           </dd>
           <dt className="text-xs text-muted-foreground">参照音声</dt>
           <dd className="flex items-start gap-3">
@@ -226,9 +224,9 @@ function MembersEditor({ item, voices, pending, onSave }: MembersProps) {
 
 // 声の持ち方と、その良し悪し。表現を保存した声が今のモデルと合わないときは、写した声で
 // 読んでいると知らせる（黙って近い声に替わっている）
-function HoldingNote({ item, model }: { item: ProfileItem; model: string | undefined }) {
+function HoldingNote({ item }: { item: ProfileItem }) {
   const holding = holdingOf(item)
-  if (readsFromReference(item, model)) {
+  if (item.reads_from_reference) {
     return (
       <div className="max-w-[52em] text-sm">
         <p className="font-medium text-destructive">参照音声から写して読んでいます</p>

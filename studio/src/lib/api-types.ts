@@ -101,9 +101,10 @@ export type ProfileItem = {
   order: ProfileOrder
   // 素材を畳み込んだ声。要約した話者の表現で読み、参照音声はその中心に近い 26 秒の素材
   folded: boolean
-  // 話者の表現を保存して持つ声の、表現を作った合成モデル（/health の tts.model と比べる）。
-  // 参照音声から写す声は空
+  // 話者の表現を保存して持つ声の、表現を作った合成モデル。参照音声から写す声は空
   speaker_model: string
+  // 表現を保存した声だが、今の合成モデルとは別のモデルのものなので、参照音声から写して読んでいる
+  reads_from_reference: boolean
   // mix の声の作り方（もとの声の ID と、足して1の重み）。ほかの声は空
   mix: { id: string; weight: number }[]
 }

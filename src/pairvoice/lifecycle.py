@@ -412,6 +412,11 @@ class Engine:
     def config(self) -> Config:
         return self._config
 
+    @property
+    def tts_model(self) -> str:
+        """今の合成モデルの名前。声の表現がこのモデルのものかを見分けるのに使う。"""
+        return str(self._tts_backend.model)
+
     @staticmethod
     def _raise_if_muted(state) -> None:
         if state.active:
@@ -686,7 +691,7 @@ class Engine:
         tokens = await self._measure(
             self._tts, self._tts_backend.mix_tokens, self._resolve_mix(mix)
         )
-        return tokens, str(self._tts_backend.model)
+        return tokens, self.tts_model
 
     async def save_audio(self, samples: np.ndarray, sample_rate: int) -> SpeechResult:
         """合成した wav と同じ所に置く（日が経つと消える）。モデルは使わない。"""

@@ -10,6 +10,7 @@ import asyncio
 import dataclasses
 import shutil
 import tempfile
+from collections.abc import Callable
 from pathlib import Path
 from typing import Annotated, Literal, Protocol
 
@@ -33,7 +34,14 @@ from .api_errors import error_doc as _error
 from .api_errors import fail as _fail
 from .curate import Analysis, InvalidAudio, InvalidSelection, Outcome
 from .curate_jobs import CurateJobs
-from .profiles import MIX_SOURCE, MixVoice, ProfileNotFound, SpeakerTokens, TakeRejected
+from .profiles import (
+    MIX_SOURCE,
+    MixVoice,
+    Profile,
+    ProfileNotFound,
+    SpeakerTokens,
+    TakeRejected,
+)
 from .prompt import SummaryPrompt
 from .styles import STYLES_FILENAME, StyleStore
 from .tts import ANCHOR_TEXT, AudioNotFound, SpeechResult, resolve_data_audio
@@ -77,13 +85,11 @@ def _save_upload(upload: UploadFile, path: Path) -> None:
 # テイクをつなぐときの数の上限と、間に挟む無音
 MAX_TAKES = 8
 TAKE_GAP_SECONDS = 0.3
-# 伸ばすときの合成の段数（読み上げの既定は 10）。参照音声は一度しか作らないので丁寧に作る。
-# studio の MASTER_STEPS・MASTER_CFG_MIN_T と同じ値にしておく
+# 伸ばすときの合成の段数（読み上げの既定は 10）。参照音声は一度しか作らないので丁寧に作る
 MASTER_STEPS = 80
 MASTER_CFG_MIN_T = 0.5
 # 伸ばすときにテイクの声で読ませる文。Irodori-TTS は同じ話者の短い発話を合わせて 30 秒ほどの
-# 参照音声を勧めるので、テイクにこの3つ（各 6〜7 秒）を足してつなぐ。studio の
-# REFERENCE_TEXTS（studio/src/features/profiles/mixSynth.ts）と同じ文にしておく
+# 参照音声を勧めるので、テイクにこの3つ（各 6〜7 秒）を足してつなぐ
 # - 読み上げるのはエージェントの作業の要約なので、落ち着いた説明調を軸にし、問いかけと
 #   軽い相づちで抑揚に幅を持たせる。参照音声の話し方は複製した声に移るので、強い感情は入れない
 # - 拗音（しゅ・ちょ・じゅ）、促音、撥音、長音、濁音・半濁音、カタカナ語と数を一通り含める
@@ -338,10 +344,13 @@ class ProfileItem(BaseModel):
         description="素材を畳み込んだ声（`POST /profiles/fold`）。素材全体から要約した話者の表現で読み、"
         "参照音声（`GET /profiles/{id}/audio`）はその中心に近い 26 秒の素材で、鳴る声とは少し違う"
     )
+    reads_from_reference: bool = Field(
+        description="話者の表現を保存した声だが、表現を作ったモデルと今の合成モデルが違うので、"
+        "参照音声から写した近い声で読んでいる"
+    )
     speaker_model: str = Field(
-        description="話者の表現を保存して持つ声（畳み込んだ・混ぜた声）の、表現を作った合成モデル。"
-        "`GET /health` の `tts.model` と同じなら表現のまま聞いた声で読み、違えば参照音声から写して読む。"
-        "参照音声から写す声は空"
+        description="話者の表現を保存して持つ声（畳み込んだ・混ぜた声、`extend` で伸ばした声）の、表現を作った合成モデル。"
+        "今のモデルと違えば参照音声から写して読む（`reads_from_reference`）。参照音声から写す声は空"
     )
     mix: list[MixRecipePart] = Field(
         description="`mix` の声の作り方（もとの声と重み）。もとの声を消しても読める。"
@@ -577,8 +586,8 @@ class CreateProfileBody(BaseModel):
     extend: bool = Field(
         default=False,
         description="テイクの声で決まった文（3つ、計 20 秒ほど）も読ませ、テイクの後ろにつなぐ。"
-        "短いテイク1本からでも安定した声になる。テイクが複数なら等分に混ぜた声で読む。"
-        "合成するので数十秒かかる",
+        "テイクが複数なら等分に混ぜた声で読む。その声の話者の表現も保存し、読み上げはそれで読む"
+        "（参照音声は合成モデルを替えたときの写し元になる）。合成するので数十秒かかる",
     )
     rng_seed: int | None = Field(
         default=None,
@@ -696,6 +705,7 @@ def data_router(
     save_audio: SaveAudio,
     fold_material: FoldMaterial,
     mix_tokens: MixTokens,
+    tts_model: Callable[[], str],
 ) -> APIRouter:
     router = APIRouter()
     curate_jobs = CurateJobs()
@@ -704,6 +714,10 @@ def data_router(
     styles = StyleStore(data_root / STYLES_FILENAME)
     summary_prompt = SummaryPrompt(data_root)
     profiles = summary_prompt.profiles
+
+    def describe(profile: Profile) -> dict[str, object]:
+        return profile.describe(tts_model())
+
     prompt = summary_prompt.common
 
     # ---- プロンプト ----
@@ -828,7 +842,7 @@ def data_router(
         return ProfilesResponse.model_validate(
             {
                 "active": active.id if active is not None else None,
-                "items": [p.describe() for p in items],
+                "items": [describe(p) for p in items],
             }
         )
 
@@ -850,9 +864,20 @@ def data_router(
             sampler["rng_seed"] = rng_seed
         return sampler
 
-    async def extend(relatives: list[str], caption: str, sampler: dict) -> list[bytes]:
-        """テイクを等分に混ぜた声で REFERENCE_TEXTS を読ませる。"""
-        return await read_references([(relative, 1.0) for relative in relatives], caption, sampler)
+    async def speak_mix(
+        mix: list[tuple[str | MixVoice, float]], caption: str, sampler: dict
+    ) -> tuple[list[bytes], SpeakerTokens]:
+        """混ぜた声で REFERENCE_TEXTS を読ませ、その声の話者の表現も返す。表現は声として
+        保存する（読ませた音をつないだ参照音声から写し直すより、もとの声に近い）。"""
+        tokens, model = await mix_tokens(mix)
+        takes = await read_references(mix, caption, sampler)
+        return takes, SpeakerTokens(lambda path: np.save(path, tokens), model)
+
+    async def extend(
+        relatives: list[str], caption: str, sampler: dict
+    ) -> tuple[list[bytes], SpeakerTokens]:
+        """テイクを等分に混ぜた声で読ませる。"""
+        return await speak_mix([(relative, 1.0) for relative in relatives], caption, sampler)
 
     async def read_references(
         mix: list[tuple[str | MixVoice, float]], caption: str, sampler: dict
@@ -877,7 +902,7 @@ def data_router(
             write_reference=lambda path: path.write_bytes(joined),
             **extra,
         )
-        return ProfileItem.model_validate(created.describe())
+        return ProfileItem.model_validate(describe(created))
 
     @router.post(
         "/profiles",
@@ -896,9 +921,10 @@ def data_router(
     ):
         """使用中の声がまだ無ければ、作った声を使用中にする。"""
         takes = await asyncio.to_thread(read_takes, body.takes)
-        if body.extend:
-            takes += await extend(body.takes, body.caption, master_sampler(body.rng_seed))
-        return await save_design(body.name, body.caption, takes)
+        if not body.extend:
+            return await save_design(body.name, body.caption, takes)
+        more, speaker = await extend(body.takes, body.caption, master_sampler(body.rng_seed))
+        return await save_design(body.name, body.caption, takes + more, speaker=speaker)
 
     @router.post(
         "/profiles/design",
@@ -917,9 +943,9 @@ def data_router(
         """
         sampler = master_sampler(body.rng_seed)
         first = await synthesize(body.text, caption=body.caption, sampler=sampler, design=True)
-        takes = [await asyncio.to_thread(first.path.read_bytes)]
-        takes += await extend([first.relative_path], body.caption, sampler)
-        return await save_design(body.name, body.caption, takes)
+        take = await asyncio.to_thread(first.path.read_bytes)
+        more, speaker = await extend([first.relative_path], body.caption, sampler)
+        return await save_design(body.name, body.caption, [take, *more], speaker=speaker)
 
     @router.post(
         "/profiles/mix",
@@ -951,8 +977,7 @@ def data_router(
                 # 名前は後から変わりうるので、作り方には ID を残す
                 source = MixVoice(found.id)
             mix.append((source, part.weight))
-        tokens, model = await mix_tokens(mix)
-        takes = await read_references(mix, body.caption, master_sampler(body.rng_seed))
+        takes, speaker = await speak_mix(mix, body.caption, master_sampler(body.rng_seed))
         total = sum(w for _, w in mix)
         voices_only = all(isinstance(s, MixVoice) for s, _ in mix)
         return await save_design(
@@ -960,7 +985,7 @@ def data_router(
             body.caption,
             takes,
             source=MIX_SOURCE,
-            speaker=SpeakerTokens(lambda path: np.save(path, tokens), model),
+            speaker=speaker,
             mix=[(s.key, w / total) for s, w in mix if isinstance(s, MixVoice)]
             if voices_only
             else [],
@@ -1000,7 +1025,7 @@ def data_router(
             source="upload",
             write_reference=lambda path: path.write_bytes(audio),
         )
-        return ProfileItem.model_validate(created.describe())
+        return ProfileItem.model_validate(describe(created))
 
     @router.post(
         "/profiles/curate",
@@ -1045,7 +1070,7 @@ def data_router(
             source="curate",
             write_reference=lambda path: write_mono(path, outcome.samples, outcome.sample_rate),
         )
-        return {"profile": created.describe(), "report": outcome.report}
+        return {"profile": describe(created), "report": outcome.report}
 
     @router.post(
         "/profiles/fold",
@@ -1097,7 +1122,7 @@ def data_router(
                 write_reference=lambda path: write_mono(path, folded.reference, curate.OUTPUT_RATE),
                 speaker=SpeakerTokens(lambda path: np.save(path, folded.tokens), folded.model),
             )
-            return created.describe(), folded.report
+            return describe(created), folded.report
 
         return dataclasses.asdict(fold_jobs.start(work, describe_error))
 
@@ -1377,7 +1402,7 @@ def data_router(
     def create_random_profile(body: RandomProfileBody):
         """使用中にしたり `voice` に渡したりすると、要約・合成のたびにメンバーから1つを選んで読む。"""
         created = profiles.create_random(name=body.name, members=body.members, order=body.order)
-        return ProfileItem.model_validate(created.describe())
+        return ProfileItem.model_validate(describe(created))
 
     @router.put(
         "/profiles/active",
@@ -1413,7 +1438,7 @@ def data_router(
             members=body.members,
             order=body.order,
         )
-        return ProfileItem.model_validate(updated.describe())
+        return ProfileItem.model_validate(describe(updated))
 
     @router.delete(
         "/profiles/{profile_id}",

@@ -8,14 +8,13 @@ import { toErrorMessage } from '@/lib/api'
 import type { ProfileItem } from '@/lib/api-types'
 import { isImeConfirm } from '@/lib/hotkeys'
 
-import { ProgressBar } from './ProgressBar'
 import { invalidateProfiles, type ProfileStatus } from './queries'
 
 type Props = {
   // 名前欄の読み上げ名（「候補 #1」など）
   label: string
-  // 名前を付けた声を作る。参照音声を1本ずつ作るなら、その進み具合を progress で知らせる
-  create: (name: string, progress: (done: number, total: number) => void) => Promise<ProfileItem>
+  // 名前を付けた声を作る（サーバーが参照音声を読ませるので 30 秒ほどかかる）
+  create: (name: string) => Promise<ProfileItem>
   // 名前の欄を開くボタンの文言。prominent なら塗りつぶしの主ボタンにする
   openLabel?: string
   prominent?: boolean
@@ -38,40 +37,28 @@ export function SaveAsProfile({
   const [name, setName] = useState('')
   const [saving, startSave] = useTransition()
   const [saved, setSaved] = useState(false)
-  // 参照音声を作っている間の進み具合（作り終えた本数と全体の本数）。ボタンのそばに出す
-  const [progress, setProgress] = useState<{ done: number; total: number } | null>(null)
 
   function save() {
     if (name.trim() === '') return
     startSave(async () => {
       try {
-        const created = await create(name.trim(), (done, total) => setProgress({ done, total }))
+        const created = await create(name.trim())
         await invalidateProfiles(queryClient)
         setSaved(true)
         onStatus({ message: `「${created.name}」を保存しました`, isError: false })
         onCreated(created.id)
       } catch (err: unknown) {
         onStatus({ message: `保存に失敗しました: ${toErrorMessage(err)}`, isError: true })
-      } finally {
-        setProgress(null)
       }
     })
   }
 
   if (saved) return <span className="text-xs text-muted-foreground">保存済み</span>
   if (saving) {
-    const making = progress !== null && progress.done < progress.total
     return (
       <div role="status" className="flex items-center gap-2 text-xs text-muted-foreground">
         <LoaderCircle className="size-3.5 animate-spin" />
-        <span className="tabular-nums">
-          {making ? `参照音声を作っています ${progress.done}/${progress.total}` : '保存しています…'}
-        </span>
-        {progress && (
-          <div className="flex w-24">
-            <ProgressBar value={progress.done / progress.total} />
-          </div>
-        )}
+        参照音声を作っています（30 秒ほど）…
       </div>
     )
   }

@@ -29,6 +29,7 @@ const ITEM: ProfileItem = {
   order: 'random',
   folded: false,
   speaker_model: '',
+  reads_from_reference: false,
   mix: [],
 }
 
@@ -48,6 +49,7 @@ const RANDOM: ProfileItem = {
   order: 'random',
   folded: false,
   speaker_model: '',
+  reads_from_reference: false,
   mix: [],
 }
 
@@ -61,7 +63,6 @@ function renderCard(isActive = false, item: ProfileItem = ITEM) {
         item={item}
         voices={VOICES}
         isActive={isActive}
-        model="tts/now"
         onPlay={onPlay}
         onStatus={onStatus}
         onDeleted={onDeleted}
@@ -131,7 +132,12 @@ it('参照音声から写す声には、モデルを替えても読めること�
 })
 
 it('別の合成モデルで保存した声は、参照音声から写して読んでいると知らせる', () => {
-  renderCard(false, { ...ITEM, source: 'mix', speaker_model: 'tts/old' })
+  renderCard(false, {
+    ...ITEM,
+    source: 'mix',
+    speaker_model: 'tts/old',
+    reads_from_reference: true,
+  })
 
   expect(screen.getByText('参照音声から写して読んでいます')).toBeTruthy()
   expect(screen.getByText(/tts\/old/)).toBeTruthy()

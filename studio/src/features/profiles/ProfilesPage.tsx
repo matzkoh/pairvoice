@@ -91,7 +91,6 @@ export function ProfilesPage() {
               item={selected}
               voices={profiles.items}
               isActive={selected.id === profiles.active}
-              model={health?.tts.model}
               onPlay={play}
               onStatus={setStatus}
               onDeleted={() => select(undefined)}

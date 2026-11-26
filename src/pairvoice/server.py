@@ -743,6 +743,7 @@ def create_app(engine: Engine) -> FastAPI:
             engine.save_audio,
             engine.fold_material,
             engine.mix_tokens,
+            lambda: engine.tts_model,
         )
     )
     api.include_router(corpus_router(data_root))

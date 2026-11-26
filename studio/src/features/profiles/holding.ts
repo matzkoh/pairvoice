@@ -9,12 +9,6 @@ export function holdingOf(item: ProfileItem): Holding {
   return item.speaker_model ? 'speaker' : 'reference'
 }
 
-// 表現を作ったモデルと今のモデルが違い、参照音声から写した近い声で読んでいる。
-// 今のモデルが分からない間は決めつけない
-export function readsFromReference(item: ProfileItem, model: string | undefined) {
-  return holdingOf(item) === 'speaker' && model !== undefined && item.speaker_model !== model
-}
-
 export const HOLDINGS: Record<Holding, { label: string; pro: string; con: string }> = {
   speaker: {
     label: '声をそのまま保存',
