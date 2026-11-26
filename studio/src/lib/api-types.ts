@@ -139,7 +139,12 @@ export type FoldJob = {
 }
 
 // /synthesize が wav を作れたときの応答。鳴らさないのでミュートでは断られない
-export type SpeakResponse = { relative_path: string; duration: number }
+export type SpeakResponse = {
+  relative_path: string
+  duration: number
+  // design の合成だけ。上の帯域が切れた、こもった音か
+  band_limited?: boolean | null
+}
 
 // レビューの判定。'none' は「取り消し」を送るときだけ使う値で、POST /api/reviews は
 // この3値を受け付ける。保存された状態としての判定（CorpusItem.verdict）は 'none' を

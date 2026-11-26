@@ -5,7 +5,7 @@ import { afterEach, beforeEach, expect, it, vi } from 'vitest'
 
 import { apiSend, isRecord } from '@/lib/api'
 
-import { FIRST_VOICES, PickProfile } from './PickProfile'
+import { FIRST_VOICES, PickProfile, VOICE_ATTEMPTS } from './PickProfile'
 
 vi.mock('@/lib/api', async (importOriginal) => {
   const actual = await importOriginal<typeof import('@/lib/api')>()
@@ -100,17 +100,27 @@ const main = (mix: readonly { audio: string; weight: number }[]) =>
 // プロファイルの画面の再生（いまの見立てを鳴らすのに使う）
 const onPlay = vi.fn()
 
-async function startPicking(known: Record<string, string> = {}) {
+// muffled は、サーバーが上の帯域が切れていると測る合成（design の合成の何本目か、1から）
+function mockServer(muffled: (n: number) => boolean = () => false) {
   let n = 0
   let anchor = 0
-  vi.mocked(apiSend).mockImplementation(async (path: string) => {
+  vi.mocked(apiSend).mockImplementation(async (path: string, _method, body) => {
     if (path === '/speaker-vector') {
       // 声ごとに向きの違う話者ベクトル
       const i = anchor++
       return { vector: Array.from({ length: 6 }, (_, j) => (i === j ? 1 : 0.2)) }
     }
-    return { relative_path: `generations/${++n}.wav`, duration: 3 }
+    const take = ++n
+    const design = isRecord(body) && body.design === true
+    return {
+      relative_path: `generations/${take}.wav`,
+      duration: 3,
+      ...(design && { band_limited: muffled(take) }),
+    }
   })
+}
+
+function beginPicking(known: Record<string, string> = {}) {
   render(
     <QueryClientProvider client={new QueryClient()}>
       <PickProfile
@@ -129,6 +139,11 @@ async function startPicking(known: Record<string, string> = {}) {
     fireEvent.click(screen.getByRole('button', { name: level }))
   }
   fireEvent.click(screen.getByRole('button', { name: '残りは聞き比べで決める' }))
+}
+
+async function startPicking(known: Record<string, string> = {}, muffled?: (n: number) => boolean) {
+  mockServer(muffled)
+  beginPicking(known)
   await waitFor(() => expect(mixCalls()).toHaveLength(2))
   await waitFor(() =>
     expect(screen.getByRole('button', { name: 'A が近い' })).toHaveProperty('disabled', false),
@@ -157,6 +172,36 @@ it('答えた軸の声と、残りをでたらめにした声を作り、A と B
   expect(main(a!.mix!).weight).toBeGreaterThan(0.7)
   expect(main(b!.mix!).weight).toBeGreaterThan(0.7)
   expect(main(a!.mix!).audio).not.toBe(main(b!.mix!).audio)
+})
+
+it('こもった音になった声は混ぜずに捨て、seed を変えて作り直す', async () => {
+  await startPicking({ 性別: '女性' }, (n) => n === 1 || n === 3)
+
+  // 1人目は答えた軸だけの caption のまま、seed だけ変えて作り直す
+  const [firstTry, retry] = designCalls()
+  expect(retry!.caption).toBe(firstTry!.caption)
+  expect(retry!.seed).not.toBe(firstTry!.seed)
+  // 混ぜるのは作り直した後の3人だけで、捨てた声は話者ベクトルも測らない
+  const kept = [wav(2), wav(4), wav(5)]
+  const measured = vi
+    .mocked(apiSend)
+    .mock.calls.filter(([path]) => path === '/speaker-vector')
+    .map(([, , body]) => (isRecord(body) ? body.audio : undefined))
+  // （A と B を聞いている間に、手持ちの声を1本増やし始める）
+  expect(measured.slice(0, FIRST_VOICES)).toEqual(kept)
+  for (const call of mixCalls()) {
+    expect(call.mix!.every((part) => kept.includes(part.audio))).toBe(true)
+  }
+})
+
+it('作り直してもこもった音にしかならなければ、作れなかったと伝える', async () => {
+  mockServer(() => true)
+  beginPicking()
+
+  await waitFor(() => expect(screen.getByText(/声の候補を作れませんでした/)).toBeTruthy())
+  expect(designCalls()).toHaveLength(VOICE_ATTEMPTS)
+  expect(mixCalls()).toHaveLength(0)
+  expect(screen.getByRole('button', { name: 'もう一度' })).toBeTruthy()
 })
 
 it('A に続けて B を鳴らし、鳴っている側のカードを示す', async () => {

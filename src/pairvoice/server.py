@@ -151,6 +151,11 @@ class SynthesisResponse(BaseModel):
     path: str = Field(description="合成した wav の絶対パス")
     relative_path: str = Field(description="データの置き場所からの相対パス")
     duration: float = Field(description="長さ（秒）")
+    band_limited: bool | None = Field(
+        default=None,
+        description="`design` の合成だけ測る。12.5〜16kHz がほぼ空の、こもった音か"
+        "（caption だけで作る声は seed しだいでそうなり、混ぜた声にもそのまま移る）",
+    )
 
 
 class SummaryRequest(BaseModel):
@@ -571,7 +576,11 @@ def create_app(engine: Engine) -> FastAPI:
             ),
             style=request.style,
         )
-        return speech_response(result)
+        response = speech_response(result)
+        if request.design:
+            # caption だけの声は混ぜる材料になるので、こもった音かを添える（読み上げでは測らない）
+            response["band_limited"] = await engine.band_limited(result.path)
+        return response
 
     @api.post(
         "/speaker-vector",

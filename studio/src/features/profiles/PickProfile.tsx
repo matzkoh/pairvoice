@@ -128,29 +128,39 @@ type SearchProps = {
   onCreated: (id: string) => void
 }
 
-// 手持ちの声を1本作って測る。事前の質問で答えた軸はそろえ、答えていない軸をばらばらに
-// した caption で作る（答えた範囲の中で、どの向きにも振れるように）
-async function makeVoice(text: string, known: Point, signal?: AbortSignal) {
-  const take = await speakOnce(
-    {
-      text,
-      caption: captionFor(randomPoint(known)),
-      sampler: { rng_seed: randomSeed() },
-      design: true,
-    },
-    signal,
-  )
-  return voiceOf(take.relative_path, await measure(take.relative_path, signal))
+// caption だけで作る声は、seed しだいで上の帯域が切れた、こもった音になる（ほぼ4割）。
+// 混ぜた声にもそのまま移るので、サーバーが切れていると測った声は捨てて作り直す
+export const VOICE_ATTEMPTS = 5
+
+// 手持ちの声を1本作って測る。caption と seed は作り直すたびに引き直す
+async function makeVoice(
+  text: string,
+  caption: () => string,
+  seed: (attempt: number) => number,
+  signal?: AbortSignal,
+) {
+  for (let attempt = 0; attempt < VOICE_ATTEMPTS; attempt++) {
+    const take = await speakOnce(
+      { text, caption: caption(), sampler: { rng_seed: seed(attempt) }, design: true },
+      signal,
+    )
+    // 捨てる声は測らない（話者ベクトルはモデルの列に並び、フックの読み上げを待たせる）
+    if (take.band_limited) continue
+    const { vector } = await apiSend<{ vector: number[] }>(
+      '/speaker-vector',
+      'POST',
+      { audio: take.relative_path },
+      { signal },
+    )
+    return voiceOf(take.relative_path, vector)
+  }
+  throw new Error(`こもった音でない声を ${VOICE_ATTEMPTS} 回作っても得られませんでした`)
 }
 
-async function measure(path: string, signal?: AbortSignal) {
-  const { vector } = await apiSend<{ vector: number[] }>(
-    '/speaker-vector',
-    'POST',
-    { audio: path },
-    { signal },
-  )
-  return vector
+// 事前の質問で答えた軸はそろえ、答えていない軸をばらばらにした caption の声
+// （答えた範囲の中で、どの向きにも振れるように）
+function makeRandomVoice(text: string, known: Point, signal?: AbortSignal) {
+  return makeVoice(text, () => captionFor(randomPoint(known)), randomSeed, signal)
 }
 
 function Search({ session, text, onReset, onPlay, onStatus, onCreated }: SearchProps) {
@@ -161,20 +171,16 @@ function Search({ session, text, onReset, onPlay, onStatus, onCreated }: SearchP
   const prepared = useQuery({
     queryKey: ['pick-first', text, session] as const,
     queryFn: async ({ signal }) => {
-      const take = await speakOnce(
-        {
-          text,
-          caption: captionFor(session.known),
-          sampler: { rng_seed: session.seed },
-          design: true,
-        },
+      const first = await makeVoice(
+        text,
+        () => captionFor(session.known),
+        (attempt) => (attempt === 0 ? session.seed : randomSeed()),
         signal,
       )
-      const first = voiceOf(take.relative_path, await measure(take.relative_path, signal))
       setProgress(1)
-      const second = await makeVoice(text, session.known, signal)
+      const second = await makeRandomVoice(text, session.known, signal)
       setProgress(2)
-      const third = await makeVoice(text, session.known, signal)
+      const third = await makeRandomVoice(text, session.known, signal)
       setProgress(3)
       return [first, second, third]
     },
@@ -290,7 +296,7 @@ function Climb({
       : null
   const grow = useEffectEvent(async (signal: AbortSignal) => {
     try {
-      const voice = await makeVoice(text, session.known, signal)
+      const voice = await makeRandomVoice(text, session.known, signal)
       setVoices((prev) => [...prev, voice])
     } catch (err: unknown) {
       if (!signal.aborted) setVoiceError(toErrorMessage(err))

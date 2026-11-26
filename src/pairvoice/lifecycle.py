@@ -677,6 +677,10 @@ class Engine:
         path = self._tts_backend.resolve_audio(audio)
         return await self._measure(self._tts, self._tts_backend.speaker_vector, path)
 
+    async def band_limited(self, path: Path) -> bool:
+        """合成した wav の上の帯域が切れているか。モデルを使わないので列に並ばない。"""
+        return await asyncio.to_thread(self._tts_backend.band_limited, path)
+
     def _resolve_mix(
         self, mix: list[tuple[str | MixVoice, float]]
     ) -> list[tuple[Path | MixVoice, float]]:

@@ -88,6 +88,12 @@ class FakeTTS(FakeBackend):
         self.calls.append({"speaker_vector": path})
         return [0.5, -0.5]
 
+    # 合成した音がこもっているか（band_limited が返す値）
+    muffled = False
+
+    def band_limited(self, path):
+        return self.muffled
+
     def mix_tokens(self, mix):
         self.calls.append({"mix_tokens": mix})
         return np.full((3, 2), 0.5, np.float32)

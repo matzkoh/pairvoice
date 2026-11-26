@@ -66,7 +66,7 @@ from .profiles import (
 )
 from .reading import DICT_FILENAME, apply_dict, load_dict
 from .styles import STYLES_FILENAME, StyleStore
-from .wav import concat_wavs, write_mono
+from .wav import band_limited, concat_wavs, read_mono, write_mono
 
 DEFAULT_SAMPLE_RATE = 48000
 CAPTION_FILENAME = "caption.txt"
@@ -428,6 +428,10 @@ class MlxAudioBackend:
         self._require_loaded()
         state = self._speaker_state(path)
         return np.asarray(mx.mean(state, axis=1), dtype=np.float32).reshape(-1).tolist()
+
+    def band_limited(self, path: Path) -> bool:
+        """wav の上の帯域が切れているか（こもった音か）。モデルは使わない。"""
+        return band_limited(*read_mono(path))
 
     def mix_tokens(self, mix: Sequence[tuple[Path | MixVoice, float]]) -> np.ndarray:
         """混ぜた話者の表現 (T, 768)。畳み込んだ声と同じ形で、プロファイルに保存できる。"""

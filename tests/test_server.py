@@ -667,6 +667,19 @@ def test_speaker_vector_returns_vector_without_mute():
     assert tts.calls == [{"speaker_vector": Path("/data/generations/a.wav")}]
 
 
+@pytest.mark.parametrize("muffled", [True, False])
+def test_synthesize_reports_band_limited_only_for_design(muffled):
+    tts = FakeTTS()
+    tts.muffled = muffled
+    _, client = build(tts=tts)
+
+    design = client.post("/synthesize", json={"text": "候補", "caption": "声。", "design": True})
+    plain = client.post("/synthesize", json={"text": "候補"})
+
+    assert design.json()["band_limited"] is muffled
+    assert plain.json()["band_limited"] is None
+
+
 def test_speak_resolves_voice_as_profile_and_forwards_style():
     tts = FakeTTS()
     _, client = build(tts=tts)
