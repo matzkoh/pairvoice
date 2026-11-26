@@ -28,27 +28,31 @@ from pairvoice.tts import MlxAudioBackend, muffle_direction_path
 from pairvoice.wav import band_limited, read_mono
 
 TEXT = "設定ファイルを読み直したので、次の読み上げから新しい声に切り替わります。"
-# 男女・高さ・声質・調子を一通り散らす。片方の性別に寄った向きにしない
+# 耳で選んだ向きを作った caption。男性の caption の組は差がほとんど出ず（女性の 1/7 ほど）、
+# 混ぜても向きは女性の組とほぼ同じになる（男性の声も、この向きで上の帯域が戻る）
 CAPTIONS = (
+    "女性の声。声は低め。",
     "女性の声。声の高さは普通、澄んだ声。明るい調子で話す。",
-    "女性の声。声は低め、丸く温かい声。落ち着いた調子で話す。",
     "女性の声。息まじりの柔らかい声。穏やかで優しい調子で話す。",
-    "女性の声。声は高め、はきはきした声。元気いっぱいの調子で話す。",
-    "男性の声。声の高さは普通、はきはきした声。淡々とした調子で話す。",
-    "男性の声。声は低め、丸く温かい声。落ち着いた調子で話す。",
-    "男性の声。声はとても低い、息まじりの柔らかい声。穏やかで優しい調子で話す。",
-    "男性の声。声は高め、張りのある力強い声。明るい調子で話す。",
+    "女性の声。落ち着いた調子で、ややゆっくり話す。",
+    "女性の声。丸く温かい声。淡々とした調子で話す。",
 )
-SEEDS = range(1, 7)
+SEEDS = range(1, 9)
 CUTOFF_HZ = 12000.0
 TAPER_HZ = 300.0
 
 
 def lowpass(samples: np.ndarray, sample_rate: int) -> np.ndarray:
-    """CUTOFF_HZ より上を消す。"""
+    """CUTOFF_HZ より上を消し、16bit の wav に書いたときと同じ値にそろえる。
+
+    こもった声の上の帯域は無音ではなく、16bit に丸めた細かな雑音になっている。完全な無音との差を
+    取ると別の向きになり（cos 0.83）、足しても耳では澄んで聞こえなかった。
+    """
     freqs = np.fft.rfftfreq(len(samples), 1 / sample_rate)
     gain = np.clip((CUTOFF_HZ - freqs) / TAPER_HZ, 0, 1)
-    return np.fft.irfft(np.fft.rfft(samples) * gain, len(samples))
+    cut = np.fft.irfft(np.fft.rfft(samples) * gain, len(samples))
+    # wav.pcm_wav で書いて read_mono で読み戻したのと同じ値
+    return np.trunc(np.clip(cut, -1, 1) * 32767) / 32768
 
 
 def main() -> int:
