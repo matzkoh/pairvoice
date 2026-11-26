@@ -17,7 +17,7 @@ import { type Take, useTakes } from './useTakes'
 
 type Props = {
   initialCaption: string
-  // 候補に読ませる文。選んだ候補の音声がそのまま参照音声になる。pairvoice が申告する
+  // 候補に読ませる文。選んだ候補の声をそのまま保存し、この音声は参照音声の頭にもなる。pairvoice が申告する
   // （既定の声を自動で作るときと同じ文。止まっている間は空）
   anchorText: string
   sampler?: SamplerOverrides
@@ -78,8 +78,8 @@ export function DesignProfile({
         />
       </Field>
       <Field
-        label="参照音声"
-        hint="caption から seed だけ変えた候補を作ります。選んだ候補の音声がそのまま参照音声になります。"
+        label="候補"
+        hint="caption から seed だけ変えた候補を作ります。選んだ候補の声をそのまま保存します。"
       >
         <div className="tray space-y-3">
           <div>
