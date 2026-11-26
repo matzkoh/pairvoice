@@ -898,6 +898,21 @@ def test_mix_keeps_tokens_of_synthesized_audio_without_recipe(tmp_path):
     assert np.load(tmp_path / "profiles" / created["id"] / "speaker.npy").shape == (3, 2)
 
 
+def test_mix_takes_as_many_audio_parts_as_picking_uses(tmp_path):
+    # 2択は手持ちの声を 24 まで増やし、見つけた声はその混ぜ合わせになる
+    tts = TakeWritingTTS(tmp_path)
+    _, client = build(tts=tts, data_root=tmp_path)
+    (tmp_path / "generations").mkdir()
+    parts = []
+    for n in range(24):
+        (tmp_path / "generations" / f"{n}.wav").write_bytes(make_wav(bytes(4)))
+        parts.append({"audio": f"generations/{n}.wav", "weight": 1 / 24})
+
+    response = client.post("/profiles/mix", json={"name": "多い", "voices": parts})
+
+    assert response.status_code == 201
+
+
 def test_mix_rejects_part_with_both_or_neither_source(client):
     for part in ({"weight": 1}, {"voice": "a", "audio": "generations/a.wav", "weight": 1}):
         response = client.post("/profiles/mix", json={"name": "x", "voices": [part]})

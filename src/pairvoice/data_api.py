@@ -631,8 +631,9 @@ class MixProfileBody(BaseModel):
         default="",
         description="話し方の指示。試聴した caption と同じにすると、聞いた声のままになる",
     )
-    # 2択で絞り込んだ声は、1つの音声に寄り切ることもある
-    voices: list[MixVoicePart] = Field(min_length=1, max_length=8, description="混ぜる声")
+    # 2択で絞り込んだ声は、1つの音声に寄り切ることも、手持ちの声（最大 24）の多くを混ぜる
+    # こともある。試聴（`/synthesize` の `mix`）と同じく数は絞らない
+    voices: list[MixVoicePart] = Field(min_length=1, description="混ぜる声")
     rng_seed: int | None = Field(
         default=None,
         description="参照音声を読ませるときの乱数の種。省くと config.toml の値",
