@@ -6,8 +6,14 @@ from pairvoice.wav import WavFormatError, band_limited, pcm_wav, read_mono
 RATE = 48000
 
 
-def voice(slope_db_per_octave: float, cutoff: float | None = None, seconds: float = 2.0):
-    """200Hz の倍音と弱い息の雑音。倍音は1オクターブごとに slope だけ弱め、cutoff より上は消す。"""
+def voice(
+    slope_db_per_octave: float,
+    cutoff: float | None = None,
+    seconds: float = 2.0,
+    rolloff_db_per_khz: float | None = None,
+):
+    """200Hz の倍音と弱い息の雑音。倍音は1オクターブごとに slope だけ弱め、cutoff より上は
+    消す（rolloff を渡すと、cutoff から 1kHz ごとにその分だけなだらかに弱める）。"""
     t = np.arange(int(RATE * seconds)) / RATE
     x = sum(
         10 ** (-slope_db_per_octave * np.log2(k) / 20) * np.sin(2 * np.pi * 200 * k * t)
@@ -16,7 +22,12 @@ def voice(slope_db_per_octave: float, cutoff: float | None = None, seconds: floa
     x = x + 0.001 * np.random.default_rng(0).standard_normal(len(t))
     if cutoff is not None:
         spectrum = np.fft.rfft(x)
-        spectrum[np.fft.rfftfreq(len(x), 1 / RATE) > cutoff] = 0
+        freqs = np.fft.rfftfreq(len(x), 1 / RATE)
+        if rolloff_db_per_khz is None:
+            spectrum[freqs > cutoff] = 0
+        else:
+            over = np.clip(freqs - cutoff, 0, None) / 1000
+            spectrum *= 10 ** (-rolloff_db_per_khz * over / 20)
         x = np.fft.irfft(spectrum, len(x))
     return 0.5 * x / np.abs(x).max()
 
@@ -33,6 +44,15 @@ def test_dark_voice_is_not_band_limited():
 @pytest.mark.parametrize("cutoff", [12000, 10000])
 def test_voice_cut_above_12khz_is_band_limited(cutoff):
     assert band_limited(voice(6, cutoff), RATE)
+
+
+def test_voice_rolling_off_above_11khz_is_band_limited():
+    # 11kHz からなだらかに落ち、14kHz で 60dB ほど下がる（すっぱり切れていなくてもこもる）
+    assert band_limited(voice(6, 11000, rolloff_db_per_khz=20), RATE)
+
+
+def test_voice_softly_dimmed_above_11khz_is_not_band_limited():
+    assert not band_limited(voice(6, 11000, rolloff_db_per_khz=3), RATE)
 
 
 def test_low_sample_rate_is_band_limited():

@@ -79,17 +79,18 @@ def read_mono(path: Path) -> tuple[np.ndarray, int]:
     return samples.reshape(-1, channels).mean(axis=1), rate
 
 
-# 帯域の切れの判定。caption だけで作る声は、seed しだいで 12kHz（24kHz 収録の上限）や
-# それより下で上が切れた、こもった音になる（読ませる文と caption で 0〜9 割）。切れた音は 12.5〜16kHz がほぼ空で
-# 200Hz〜1kHz より 80〜95dB 低く、切れていない音は暗い声でも 25〜55dB 低いだけなので、
-# 間の -65dB で分ける
+# 帯域の切れの判定。caption だけで作る声は、seed しだいで 11〜12kHz（24kHz 収録の上限）より
+# 上が切れた、こもった音になる（読ませる文と caption で 0〜9 割）。切れ方はすっぱり落ちるものと、
+# 11kHz あたりから 14kHz にかけてなだらかに落ちるものがある。どちらも 8〜10kHz から 12.5〜16kHz
+# への落ち幅で見分ける。切れていない声は暗い声でも -30dB ほどまでで、切れた声は -45〜-70dB なので、
+# 間の -40dB で分ける（声そのものの大きさや暗さに左右されない）
 _BAND_FRAME = 2048
 _SPEECH_RANGE_DB = 30.0
-_BAND_LIMIT_DB = -65.0
+_BAND_DROP_DB = -40.0
 
 
 def band_limited(samples: np.ndarray, sample_rate: int) -> bool:
-    """声のある所で 12.5〜16kHz がほぼ空か（上の帯域が切れた、こもった音か）。
+    """声のある所で、8〜10kHz に比べて 12.5〜16kHz が大きく落ちているか（こもった音か）。
 
     16kHz まで録れないサンプルレートなら切れているとみなす。声が無ければ切れていないとする。
     """
@@ -103,8 +104,8 @@ def band_limited(samples: np.ndarray, sample_rate: int) -> bool:
     speech = frames[level > level.max() - _SPEECH_RANGE_DB]
     power = (np.abs(np.fft.rfft(speech * np.hanning(_BAND_FRAME), axis=1)) ** 2).mean(axis=0)
     freqs = np.fft.rfftfreq(_BAND_FRAME, 1 / sample_rate)
-    voice = power[(freqs >= 200) & (freqs < 1000)].mean()
-    high = power[(freqs >= 12500) & (freqs < 16000)].mean()
-    if voice <= 0:
+    below = power[(freqs >= 8000) & (freqs < 10000)].mean()
+    above = power[(freqs >= 12500) & (freqs < 16000)].mean()
+    if below <= 0:
         return False
-    return bool(10 * np.log10(high / voice + 1e-30) < _BAND_LIMIT_DB)
+    return bool(10 * np.log10(above / below + 1e-30) < _BAND_DROP_DB)
